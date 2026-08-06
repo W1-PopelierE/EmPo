@@ -269,6 +269,67 @@ describe("upgradeCommand", () => {
     });
   });
 
+  // The header, the progress line and the two ticks all arrived with this feature, and any of them
+  // leaking onto stdout under --json would turn the document into something JSON.parse rejects.
+  test("--json stays one document on the path that actually installs", async () => {
+    const { binary } = installDir();
+    const { download } = downloader(BINARY, `${hex(BINARY)}  empo-linux-x64\n`);
+
+    const printed = await capture(() =>
+      upgradeCommand("0.1.1", {
+        json: true,
+        embedded: true,
+        platform: "linux",
+        arch: "x64",
+        execPath: binary,
+        fetchRelease: async () => release("v0.1.2"),
+        download,
+      }),
+    );
+
+    expect(JSON.parse(printed)).toEqual({
+      state: "upgraded",
+      current: "0.1.1",
+      latest: "0.1.2",
+      asset: "empo-linux-x64",
+      target: binary,
+    });
+  });
+
+  // A downloader written before progress existed takes one argument and ignores the second. Passing
+  // the callback anyway has to stay harmless, because every fake in this file is such a function.
+  test("reports download progress to a downloader that asks for it", async () => {
+    const { binary } = installDir();
+
+    const printed = await capture(() =>
+      upgradeCommand("0.1.1", {
+        embedded: true,
+        platform: "linux",
+        arch: "x64",
+        execPath: binary,
+        fetchRelease: async () => release("v0.1.2"),
+        download: async (url, onProgress) => {
+          if (url.endsWith(".sha256")) {
+            // No progress for the checksum file, which is why nothing is reported here.
+            expect(onProgress).toBeUndefined();
+            return new TextEncoder().encode(`${hex(BINARY)}  empo-linux-x64\n`);
+          }
+          expect(typeof onProgress).toBe("function");
+          onProgress?.(0, BINARY.byteLength);
+          onProgress?.(BINARY.byteLength, BINARY.byteLength);
+          // A server that sent no Content-Length still reports, with no denominator.
+          onProgress?.(BINARY.byteLength, null);
+          return BINARY;
+        },
+      }),
+    );
+
+    // Progress is drawn on stderr and only on a terminal, so the captured stdout of this run holds
+    // the result and nothing else. That is the whole point of putting it there.
+    expect(printed).toContain("Upgraded empo 0.1.1 -> 0.1.2");
+    expect(printed).not.toContain("%");
+  });
+
   test("installs the verified asset over the running binary", async () => {
     const { dir, binary } = installDir();
     const { download, urls } = downloader(BINARY, `${hex(BINARY)}  empo-linux-x64\n`);
