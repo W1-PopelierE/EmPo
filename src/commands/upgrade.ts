@@ -51,7 +51,7 @@ export interface UpgradeOptions {
   download?: AssetDownloader;
 }
 
-const RELEASES_URL = "https://api.github.com/repos/W1-PopelierE/empo/releases/latest";
+const RELEASES_URL = "https://api.github.com/repos/W1-PopelierE/EmPo/releases/latest";
 
 /**
  * What to do about a release, decided from data alone. Returned rather than thrown so a spec can
@@ -366,7 +366,7 @@ function requireStandaloneBuild(): never {
   throw configError("empo upgrade only replaces the standalone binary", [
     "This build reads its packs and discipline off disk, so it is a checkout rather than a release.",
     "From a checkout: git pull && npm install && npm run install:local.",
-    "To install the released binary instead: curl -fsSL https://raw.githubusercontent.com/W1-PopelierE/empo/main/install.sh | sh",
+    "To install the released binary instead: curl -fsSL https://raw.githubusercontent.com/W1-PopelierE/EmPo/main/install.sh | sh",
   ]);
 }
 

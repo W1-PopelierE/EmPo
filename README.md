@@ -60,7 +60,7 @@ meant to be hand-edited. Everything else in `.empo/` is yours.
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/W1-PopelierE/empo/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/W1-PopelierE/EmPo/main/install.sh | sh
 ```
 
 That is the intended channel. It installs a standalone binary carrying its own Node into

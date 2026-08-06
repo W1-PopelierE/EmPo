@@ -17,7 +17,7 @@
   "adapters": {
     "forge": {
       "kind": "github",
-      "repo": "empo",
+      "repo": "EmPo",
       "workspace": "W1-PopelierE"
     }
   },

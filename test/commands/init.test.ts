@@ -732,16 +732,16 @@ describe("the forge and the tracker", () => {
 
   test("seeds the gh-CLI forge for github, rather than the round trip", () => {
     const repo = target();
-    withOrigin(repo, "https://github.com/W1-PopelierE/empo.git");
+    withOrigin(repo, "https://github.com/W1-PopelierE/EmPo.git");
 
     const printed = capture(() => {
       initCommand(repo);
     });
 
     expect(adaptersOf(repo)).toEqual({
-      forge: { kind: "github", workspace: "W1-PopelierE", repo: "empo" },
+      forge: { kind: "github", workspace: "W1-PopelierE", repo: "EmPo" },
     });
-    expect(printed).toContain("github, W1-PopelierE/empo, from the origin remote");
+    expect(printed).toContain("github, W1-PopelierE/EmPo, from the origin remote");
     expect(printed).toContain("through the gh CLI");
   });
 

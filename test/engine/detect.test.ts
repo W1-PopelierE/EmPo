@@ -351,8 +351,8 @@ const REMOTES: [string, DetectedForge | null][] = [
     { kind: "mcp", host: "bitbucket", workspace: "acme-platform", repo: "acme-platform" },
   ],
   [
-    "https://github.com/W1-PopelierE/empo.git",
-    { kind: "github", workspace: "W1-PopelierE", repo: "empo" },
+    "https://github.com/W1-PopelierE/EmPo.git",
+    { kind: "github", workspace: "W1-PopelierE", repo: "EmPo" },
   ],
 
   // The same two with the other syntax, and with the `.git` suffix git leaves optional.
@@ -365,12 +365,12 @@ const REMOTES: [string, DetectedForge | null][] = [
     { kind: "mcp", host: "bitbucket", workspace: "acme", repo: "acme-platform" },
   ],
   [
-    "git@github.com:W1-PopelierE/empo.git",
-    { kind: "github", workspace: "W1-PopelierE", repo: "empo" },
+    "git@github.com:W1-PopelierE/EmPo.git",
+    { kind: "github", workspace: "W1-PopelierE", repo: "EmPo" },
   ],
   [
-    "https://github.com/W1-PopelierE/empo",
-    { kind: "github", workspace: "W1-PopelierE", repo: "empo" },
+    "https://github.com/W1-PopelierE/EmPo",
+    { kind: "github", workspace: "W1-PopelierE", repo: "EmPo" },
   ],
 
   // The third form Atlassian documents, an ssh url with no port, and the ssh url with the port a
@@ -408,8 +408,8 @@ const REMOTES: [string, DetectedForge | null][] = [
   // A hostname is case-insensitive and the forge that comes out of it must not depend on the case
   // somebody typed.
   [
-    "https://GitHub.com/W1-PopelierE/empo.git",
-    { kind: "github", workspace: "W1-PopelierE", repo: "empo" },
+    "https://GitHub.com/W1-PopelierE/EmPo.git",
+    { kind: "github", workspace: "W1-PopelierE", repo: "EmPo" },
   ],
 
   // No host at all. A clone of a clone has no pull request host, and a windows path is not a
@@ -527,10 +527,10 @@ describe("the four ways a remote parser is quietly wrong", () => {
       workspace: "Acme",
       repo: "Acme-Platform",
     });
-    expect(forgeFromRemote("git@GITHUB.com:W1-PopelierE/empo.git")).toEqual({
+    expect(forgeFromRemote("git@GITHUB.com:W1-PopelierE/EmPo.git")).toEqual({
       kind: "github",
       workspace: "W1-PopelierE",
-      repo: "empo",
+      repo: "EmPo",
     });
   });
 });
