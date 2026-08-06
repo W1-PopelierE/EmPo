@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "flows": {
+    "agent-hooks": {
+      "label": "Fire verify and check while an agent works: empo hook",
+      "paths": [
+        "src/commands/hook.ts",
+        "src/schema/host-payload.schema.ts"
+      ]
+    },
+    "health": {
+      "label": "Repository health: empo doctor",
+      "paths": [
+        "src/commands/doctor.ts",
+        "src/engine/health.ts"
+      ]
+    },
+    "impact-query": {
+      "label": "Blast radius and blind flows: empo query",
+      "paths": [
+        "src/commands/query.ts",
+        "src/engine/coverage.ts",
+        "src/engine/flows.ts",
+        "src/engine/hazards.ts",
+        "src/engine/kinds.ts",
+        "src/schema/flows.schema.ts"
+      ]
+    },
+    "indexing": {
+      "label": "Build the graph: empo index",
+      "paths": [
+        "src/commands/index.ts",
+        "src/engine/build.ts",
+        "src/engine/scanner.ts",
+        "src/engine/extractor.ts",
+        "src/engine/mask.ts",
+        "src/engine/graph.ts",
+        "src/engine/bridger.ts",
+        "src/engine/pack-loader.ts",
+        "src/schema/pack.schema.ts"
+      ]
+    },
+    "onboarding": {
+      "label": "Onboard a repository: empo init and empo update",
+      "paths": [
+        "src/commands/init.ts",
+        "src/commands/update.ts",
+        "src/engine/aliases.ts",
+        "src/engine/detect.ts",
+        "src/engine/kinds.ts",
+        "src/engine/scaffold.ts",
+        "src/engine/proposal.ts",
+        "src/host",
+        "src/schema/config.schema.ts",
+        "src/schema/proposal.schema.ts"
+      ]
+    },
+    "pack-authoring": {
+      "label": "Author and test a language pack: empo pack test",
+      "paths": [
+        "src/commands/pack.ts"
+      ]
+    },
+    "review": {
+      "label": "Agent-assisted review with the verification gate: empo review",
+      "paths": [
+        "src/commands/review.ts",
+        "src/adapters",
+        "src/discipline",
+        "src/engine/diff.ts",
+        "src/engine/citations.ts",
+        "src/schema/findings.schema.ts"
+      ]
+    },
+    "self-update": {
+      "label": "Replace the running binary with the latest release: empo upgrade",
+      "paths": [
+        "src/commands/upgrade.ts"
+      ]
+    },
+    "spine-guard": {
+      "label": "Spine drift and the commit gate: empo verify and empo check",
+      "paths": [
+        "src/commands/verify.ts",
+        "src/commands/check.ts",
+        "src/engine/spines.ts",
+        "src/engine/guard.ts",
+        "src/engine/resolver.ts",
+        "src/schema/spine.schema.ts"
+      ]
+    }
+  }
+}

@@ -1,0 +1,789 @@
+{
+  "nodes": [
+    {
+      "id": "Acme\\Http\\Controllers\\CatalogController",
+      "file": "app/Http/Controllers/CatalogController.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "CatalogController",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Http\\Controllers\\CheckoutController",
+      "file": "app/Http/Controllers/CheckoutController.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "CheckoutController",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Http\\Controllers\\LegacyController",
+      "file": "app/Http/Controllers/LegacyController.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "LegacyController",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Http\\Controllers\\OrderController",
+      "file": "app/Http/Controllers/OrderController.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "OrderController",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Http\\Controllers\\ReceiptController",
+      "file": "app/Http/Controllers/ReceiptController.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "ReceiptController",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Http\\Controllers\\RefundController",
+      "file": "app/Http/Controllers/RefundController.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "RefundController",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Http\\Controllers\\SubscriptionController",
+      "file": "app/Http/Controllers/SubscriptionController.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "SubscriptionController",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Jobs\\ChargeCard",
+      "file": "app/Jobs/ChargeCard.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "job",
+      "name": "ChargeCard",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Jobs\\EmailReceipt",
+      "file": "app/Jobs/EmailReceipt.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "job",
+      "name": "EmailReceipt",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Jobs\\PostLedgerEntry",
+      "file": "app/Jobs/PostLedgerEntry.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "job",
+      "name": "PostLedgerEntry",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Jobs\\RebuildSearchIndex",
+      "file": "app/Jobs/RebuildSearchIndex.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "job",
+      "name": "RebuildSearchIndex",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Libraries\\Ledger\\LedgerCloser",
+      "file": "app/Libraries/Ledger/LedgerCloser.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "LedgerCloser",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Libraries\\Ledger\\LedgerPoster",
+      "file": "app/Libraries/Ledger/LedgerPoster.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "LedgerPoster",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Libraries\\Ledger\\LedgerReverser",
+      "file": "app/Libraries/Ledger/LedgerReverser.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "LedgerReverser",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Libraries\\Price\\PriceCalculator",
+      "file": "app/Libraries/Price/PriceCalculator.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "PriceCalculator",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Livewire\\OrderPanel",
+      "file": "app/Livewire/OrderPanel.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "livewire",
+      "name": "OrderPanel",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Livewire\\OrderStatus",
+      "file": "app/Livewire/OrderStatus.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "livewire",
+      "name": "OrderStatus",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Models\\Order",
+      "file": "app/Models/Order.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "model",
+      "name": "Order",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Observers\\OrderObserver",
+      "file": "app/Observers/OrderObserver.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "OrderObserver",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Providers\\AppServiceProvider",
+      "file": "app/Providers/AppServiceProvider.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "AppServiceProvider",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Tests\\Feature\\LivenessTest",
+      "file": "tests/Feature/LivenessTest.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "LivenessTest",
+      "produces": [],
+      "consumes": [],
+      "isTest": true,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Tests\\Feature\\OrderTest",
+      "file": "tests/Feature/OrderTest.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "OrderTest",
+      "produces": [],
+      "consumes": [
+        {
+          "symbol": "http-route",
+          "key": "POST api/v1/orders",
+          "line": 19
+        }
+      ],
+      "isTest": true,
+      "assertsValue": true
+    },
+    {
+      "id": "Acme\\Tests\\Feature\\ShipmentStatusTest",
+      "file": "tests/Feature/ShipmentStatusTest.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "ShipmentStatusTest",
+      "produces": [],
+      "consumes": [
+        {
+          "symbol": "http-route",
+          "key": "GET api/v1/shipments",
+          "line": 14
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET api/v1/shipments/999",
+          "line": 19
+        }
+      ],
+      "isTest": true,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\View\\Components\\Fields\\TextInput",
+      "file": "app/View/Components/Fields/TextInput.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "TextInput",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\View\\Components\\Forms\\TextInput",
+      "file": "app/View/Components/Forms/TextInput.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "TextInput",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\View\\Components\\Layout\\AppShell",
+      "file": "app/View/Components/Layout/AppShell.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "AppShell",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\View\\Components\\LegacyBadge",
+      "file": "app/View/Components/LegacyBadge.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "LegacyBadge",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\View\\Components\\PriceBadge",
+      "file": "app/View/Components/PriceBadge.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "PriceBadge",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "resources/views/orders/show.blade.php",
+      "file": "resources/views/orders/show.blade.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "view",
+      "name": "show.blade",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "routes/api.php",
+      "file": "routes/api.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "route-file",
+      "name": "api",
+      "produces": [
+        {
+          "symbol": "http-route",
+          "key": "GET api/v1/orders/{order}",
+          "line": 7
+        },
+        {
+          "symbol": "http-route",
+          "key": "POST api/v1/orders",
+          "line": 6
+        }
+      ],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "tests/Feature/RefundTest.php",
+      "file": "tests/Feature/RefundTest.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "RefundTest",
+      "produces": [],
+      "consumes": [],
+      "isTest": true,
+      "assertsValue": true
+    }
+  ],
+  "edges": [
+    {
+      "from": "Acme\\Http\\Controllers\\CatalogController",
+      "to": "Acme\\Jobs\\RebuildSearchIndex",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/CatalogController.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\CheckoutController",
+      "to": "Acme\\Jobs\\ChargeCard",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/CheckoutController.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\CheckoutController",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/CheckoutController.php",
+        "line": 6
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\LegacyController",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/LegacyController.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\OrderController",
+      "to": "Acme\\Libraries\\Price\\PriceCalculator",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/OrderController.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\OrderController",
+      "to": "Acme\\Models\\Order",
+      "kind": "fqcn",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/OrderController.php",
+        "line": 15
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\OrderController",
+      "to": "Acme\\Observers\\OrderObserver",
+      "kind": "string",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/OrderController.php",
+        "line": 10
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\ReceiptController",
+      "to": "Acme\\Jobs\\EmailReceipt",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/ReceiptController.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\ReceiptController",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/ReceiptController.php",
+        "line": 6
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\RefundController",
+      "to": "Acme\\Jobs\\ChargeCard",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/RefundController.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\RefundController",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/RefundController.php",
+        "line": 6
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\SubscriptionController",
+      "to": "Acme\\Jobs\\ChargeCard",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/SubscriptionController.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\SubscriptionController",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/SubscriptionController.php",
+        "line": 6
+      }
+    },
+    {
+      "from": "Acme\\Jobs\\ChargeCard",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Jobs/ChargeCard.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Jobs\\EmailReceipt",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Jobs/EmailReceipt.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Jobs\\PostLedgerEntry",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Jobs/PostLedgerEntry.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Libraries\\Ledger\\LedgerCloser",
+      "to": "Acme\\Jobs\\RebuildSearchIndex",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Libraries/Ledger/LedgerCloser.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Libraries\\Ledger\\LedgerCloser",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Libraries/Ledger/LedgerCloser.php",
+        "line": 6
+      }
+    },
+    {
+      "from": "Acme\\Libraries\\Ledger\\LedgerPoster",
+      "to": "Acme\\Jobs\\PostLedgerEntry",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Libraries/Ledger/LedgerPoster.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Libraries\\Ledger\\LedgerPoster",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Libraries/Ledger/LedgerPoster.php",
+        "line": 6
+      }
+    },
+    {
+      "from": "Acme\\Libraries\\Ledger\\LedgerReverser",
+      "to": "Acme\\Jobs\\RebuildSearchIndex",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Libraries/Ledger/LedgerReverser.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Libraries\\Price\\PriceCalculator",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Libraries/Price/PriceCalculator.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Livewire\\OrderStatus",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Livewire/OrderStatus.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Models\\Order",
+      "to": "Acme\\Observers\\OrderObserver",
+      "kind": "hook",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Providers/AppServiceProvider.php",
+        "line": 12
+      }
+    },
+    {
+      "from": "Acme\\Observers\\OrderObserver",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Observers/OrderObserver.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Providers\\AppServiceProvider",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Providers/AppServiceProvider.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Providers\\AppServiceProvider",
+      "to": "Acme\\Observers\\OrderObserver",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Providers/AppServiceProvider.php",
+        "line": 6
+      }
+    },
+    {
+      "from": "Acme\\Tests\\Feature\\OrderTest",
+      "to": "Acme\\Libraries\\Price\\PriceCalculator",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "tests/Feature/OrderTest.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Tests\\Feature\\OrderTest",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "tests/Feature/OrderTest.php",
+        "line": 6
+      }
+    },
+    {
+      "from": "Acme\\View\\Components\\PriceBadge",
+      "to": "Acme\\Libraries\\Price\\PriceCalculator",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/View/Components/PriceBadge.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "resources/views/orders/show.blade.php",
+      "to": "Acme\\Livewire\\OrderPanel",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "resources/views/orders/show.blade.php",
+        "line": 19
+      }
+    },
+    {
+      "from": "resources/views/orders/show.blade.php",
+      "to": "Acme\\Livewire\\OrderStatus",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "resources/views/orders/show.blade.php",
+        "line": 17
+      }
+    },
+    {
+      "from": "resources/views/orders/show.blade.php",
+      "to": "Acme\\View\\Components\\Layout\\AppShell",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "resources/views/orders/show.blade.php",
+        "line": 6
+      }
+    },
+    {
+      "from": "resources/views/orders/show.blade.php",
+      "to": "Acme\\View\\Components\\PriceBadge",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "resources/views/orders/show.blade.php",
+        "line": 11
+      }
+    },
+    {
+      "from": "routes/api.php",
+      "to": "Acme\\Http\\Controllers\\OrderController",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "routes/api.php",
+        "line": 3
+      }
+    },
+    {
+      "from": "tests/Feature/RefundTest.php",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "tests/Feature/RefundTest.php",
+        "line": 3
+      }
+    }
+  ],
+  "hazards": [
+    {
+      "file": "app/Http/Controllers/CheckoutController.php",
+      "line": 18,
+      "job": "ChargeCard",
+      "target": "Acme\\Jobs\\ChargeCard",
+      "transactionLine": 15
+    },
+    {
+      "file": "app/Http/Controllers/SubscriptionController.php",
+      "line": 17,
+      "job": "ChargeCard",
+      "target": "Acme\\Jobs\\ChargeCard",
+      "transactionLine": 16
+    },
+    {
+      "file": "app/Libraries/Ledger/LedgerPoster.php",
+      "line": 17,
+      "job": "PostLedgerEntry",
+      "target": "Acme\\Jobs\\PostLedgerEntry",
+      "transactionLine": 15
+    }
+  ]
+}

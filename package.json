@@ -1,0 +1,43 @@
+{
+  "name": "empo",
+  "version": "0.1.0",
+  "description": "Language-agnostic impact and review toolkit that keeps an AI agent honest about a codebase",
+  "type": "module",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "files": [
+    "dist",
+    "src/packs/*/pack.json",
+    "src/discipline"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:binary": "node scripts/build-binary.mjs",
+    "install:local": "npm run build:binary && install -m 755 dist-binary/empo \"$HOME/.local/bin/empo\" && empo --version",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "biome check .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "execa": "^10.0.0",
+    "picomatch": "^4.0.5",
+    "tinyglobby": "^0.2.17",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.5",
+    "@types/node": "^22.0.0",
+    "@types/picomatch": "^4.0.3",
+    "esbuild": "^0.28.1",
+    "postject": "^1.0.0-alpha.6",
+    "tsup": "^8.5.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "roots": [
+    {
+      "path": ".",
+      "lang": "typescript"
+    }
+  ],
+  "packs": {
+    "typescript": {
+      "version": "^1"
+    }
+  },
+  "bridges": [],
+  "flows": ".empo/flows.json",
+  "spines": ".empo/spines",
+  "adapters": {
+    "forge": {
+      "kind": "github",
+      "repo": "empo",
+      "workspace": "W1-PopelierE"
+    }
+  },
+  "ignore": [
+    "**/node_modules/**",
+    "**/vendor/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/coverage/**",
+    "fixtures/**",
+    "src/packs/*/fixtures/**"
+  ],
+  "commit": []
+}

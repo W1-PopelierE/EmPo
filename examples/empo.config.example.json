@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "_note": "Fictional acme-platform example. Every path, root, and adapter value here is invented. It documents the schema; it is not derived from any real repository.",
+  "roots": [
+    { "path": "apps/api",        "lang": "php",        "framework": "laravel" },
+    { "path": "apps/mobile",     "lang": "typescript", "framework": "react-native" },
+    { "path": "packages/shared", "lang": "typescript" }
+  ],
+  "packs": {
+    "php":        { "version": "^1", "options": { "namespaceRoot": "Acme" } },
+    "typescript": { "version": "^1" }
+  },
+  "bridges": [
+    {
+      "kind": "http-route",
+      "produces": "apps/api",
+      "consumes": ["apps/mobile"],
+      "normalize": { "stripPrefix": ["/api", "/v1"], "collapseParams": true }
+    }
+  ],
+  "flows": ".empo/flows.json",
+  "spines": ".empo/spines",
+  "adapters": {
+    "forge":   { "kind": "github", "repo": "platform", "workspace": "acme" },
+    "tracker": { "kind": "mcp", "host": "jira", "keyPattern": "[A-Z]{2,}-\\d+", "project": "PLAT" }
+  },
+  "ignore": [
+    "**/vendor/**",
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/*.stories.tsx"
+  ],
+  "commit": ["generated"]
+}

@@ -1,0 +1,3 @@
+# Machine-owned output. empo index rebuilds it in seconds, it changes on every meaningful
+# commit, and its built_against sha says when it is stale, so committing it buys noise.
+generated/
