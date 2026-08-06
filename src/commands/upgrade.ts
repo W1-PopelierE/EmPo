@@ -3,6 +3,7 @@ import { accessSync, chmodSync, constants, renameSync, rmSync, writeFileSync } f
 import { dirname, join } from "node:path";
 import { isEmbeddedBuild } from "../embedded";
 import { configError, environmentError } from "../errors";
+import { humanBytes, ProgressLine, styleFor, tick } from "../term";
 
 /**
  * `empo upgrade`: replace the running standalone binary with the latest GitHub Release asset
@@ -36,8 +37,19 @@ export interface Release {
 /** The seam that reaches GitHub. Replaced wholesale in tests; see `fetchLatestRelease`. */
 export type ReleaseFetcher = () => Promise<Release>;
 
-/** The seam that fetches asset bytes. The checksum file comes through it too, decoded as UTF-8. */
-export type AssetDownloader = (url: string) => Promise<Uint8Array>;
+/**
+ * Called as asset bytes arrive. `total` is null when the server sent no Content-Length, which is a
+ * count without a denominator rather than a reason to stop reporting.
+ */
+export type DownloadProgress = (received: number, total: number | null) => void;
+
+/**
+ * The seam that fetches asset bytes. The checksum file comes through it too, decoded as UTF-8.
+ *
+ * `onProgress` is optional so every existing fake — a function of one argument returning bytes —
+ * remains a valid downloader. A test that does not care about progress never mentions it.
+ */
+export type AssetDownloader = (url: string, onProgress?: DownloadProgress) => Promise<Uint8Array>;
 
 export interface UpgradeOptions {
   check?: boolean;
@@ -202,9 +214,43 @@ export const fetchLatestRelease: ReleaseFetcher = async () => {
   return { tag: payload.tag_name, assets };
 };
 
-export const downloadAsset: AssetDownloader = async (url) => {
+/**
+ * Read the body a chunk at a time rather than through `arrayBuffer()`, so there is something to
+ * report while a hundred-megabyte asset is in flight. The bytes are still buffered whole before
+ * anything is written to disk — nothing unverified may reach the filesystem, and the checksum needs
+ * the complete file — so this streams for the progress and not for the memory.
+ *
+ * Without a caller interested in progress it falls back to `arrayBuffer()`, which is the same result
+ * with less machinery, and is the path the checksum file takes.
+ */
+export const downloadAsset: AssetDownloader = async (url, onProgress) => {
   const response = await get(url, { Accept: "application/octet-stream" });
-  return new Uint8Array(await response.arrayBuffer());
+  if (onProgress === undefined || response.body === null) {
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  // GitHub redirects asset URLs to object storage; fetch follows the redirect, and the response
+  // that lands here is the one carrying the real length. A missing or unparseable header is a null
+  // total, not a zero.
+  const declared = Number(response.headers.get("content-length"));
+  const total = Number.isFinite(declared) && declared > 0 ? declared : null;
+
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  onProgress(0, total);
+  for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+    chunks.push(chunk);
+    received += chunk.byteLength;
+    onProgress(received, total);
+  }
+
+  const bytes = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
 };
 
 /**
@@ -238,6 +284,7 @@ export async function upgradeCommand(
 ): Promise<void> {
   const json = options.json === true;
   const check = options.check === true;
+  const style = styleFor();
   const platform = options.platform ?? process.platform;
   const arch = options.arch ?? process.arch;
   const execPath = options.execPath ?? process.execPath;
@@ -263,7 +310,10 @@ export async function upgradeCommand(
     });
     if (!json) {
       console.log("");
-      console.log(`empo ${decision.current} is the latest release. Nothing to do.`);
+      console.log(
+        `${tick()}empo ${style.bold(decision.current)} is the latest release. Nothing to do.`,
+      );
+      console.log("");
     }
     return;
   }
@@ -287,13 +337,33 @@ export async function upgradeCommand(
     });
     if (!json) {
       console.log("");
-      console.log(`empo ${decision.current} is installed; ${decision.latest} is available.`);
-      console.log("Run empo upgrade to install it.");
+      console.log(
+        `empo ${style.dim(decision.current)} is installed; ${style.cyan(decision.latest)} is available.`,
+      );
+      console.log(`Run ${style.bold("empo upgrade")} to install it.`);
+      console.log("");
     }
     return;
   }
 
-  install(execPath, await fetched(download, decision));
+  // The header goes out before the download starts, so the version being fetched and the file being
+  // replaced are on screen for the whole minute the transfer takes rather than after it.
+  if (!json) {
+    console.log("");
+    console.log(
+      `${style.bold("EmPo")} ${style.dim(decision.current)} → ${style.cyan(decision.latest)}`,
+    );
+    console.log(style.dim(`${decision.asset.name} → ${execPath}`));
+    console.log("");
+  }
+
+  const progress = json ? null : new ProgressLine();
+  const bytes = await fetched(download, decision, progress);
+  progress?.clear();
+  if (!json) console.log(`${tick()}Downloaded ${style.dim(humanBytes(bytes.byteLength))}`);
+  if (!json) console.log(`${tick()}Checksum verified`);
+
+  install(execPath, bytes);
 
   report(json, {
     state: "upgraded",
@@ -303,8 +373,10 @@ export async function upgradeCommand(
     target: execPath,
   });
   if (!json) {
+    // The old sentence, kept verbatim under the ticks: it is the one line somebody scrolls back for,
+    // and test/commands/upgrade.test.ts asserts on it.
+    console.log(`${tick()}Upgraded empo ${decision.current} -> ${decision.latest} at ${execPath}`);
     console.log("");
-    console.log(`Upgraded empo ${decision.current} -> ${decision.latest} at ${execPath}`);
   }
 }
 
@@ -312,8 +384,12 @@ export async function upgradeCommand(
 async function fetched(
   download: AssetDownloader,
   decision: Extract<UpgradeDecision, { state: "available" }>,
+  progress: ProgressLine | null,
 ): Promise<Uint8Array> {
-  const bytes = await download(decision.asset.url);
+  const bytes = await download(decision.asset.url, (received, total) => {
+    progress?.update(decision.asset.name, received, total);
+  });
+  // No progress for the checksum file: it is eighty-odd bytes, and a bar for it would flash once.
   const line = Buffer.from(await download(decision.sum.url)).toString("utf8");
   const checked = verifyChecksum(bytes, line, decision.asset.name);
   if (checked.ok) return bytes;
