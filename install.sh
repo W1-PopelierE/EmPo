@@ -48,12 +48,39 @@ set -eu
 REPO="W1-PopelierE/EmPo"
 API="https://api.github.com/repos/${REPO}/releases/latest"
 
+# Colour only when someone is actually watching. Piped into a file, into a CI log, or with NO_COLOR
+# set, every variable below collapses to the empty string and the output is the same plain text it
+# was before. `--print-target` and the `fail` messages are parsed by test/install-script.test.ts,
+# which runs the script with its output piped, so that path is always uncoloured by construction.
+if [ -t 1 ]; then tty=1; else tty=0; fi
+
+if [ "$tty" = 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ]; then
+  BOLD=$(printf '\033[1m')
+  DIM=$(printf '\033[2m')
+  GREEN=$(printf '\033[32m')
+  RED=$(printf '\033[31m')
+  CYAN=$(printf '\033[36m')
+  RESET=$(printf '\033[0m')
+else
+  BOLD='' DIM='' GREEN='' RED='' CYAN='' RESET=''
+fi
+
 log() {
   printf '%s\n' "$*"
 }
 
+# A step that is in progress, left open with no newline so its result lands on the same line. The
+# trailing spaces cover the tail of a longer line when `step_done` rewrites it from column zero.
+step() {
+  printf '  %s·%s %s' "$DIM" "$RESET" "$1"
+}
+
+step_done() {
+  printf '\r  %s✓%s %s\033[K\n' "$GREEN" "$RESET" "$1"
+}
+
 fail() {
-  printf 'empo install: %s\n' "$*" >&2
+  printf '\n  %s✗%s empo install: %s\n' "$RED" "$RESET" "$*" >&2
   exit 1
 }
 
@@ -129,6 +156,45 @@ download() {
     curl) curl -fsSL "$1" -o "$2" ;;
     wget) wget -q -O "$2" "$1" ;;
   esac
+}
+
+# The binary is north of 100 MB, so downloading it silently reads as a hang: the script printed one
+# line and then said nothing at all for a minute, which is indistinguishable from being stuck. This
+# hands the terminal to the downloader's own progress meter, which repaints a single line on stderr.
+# Only the asset gets it — the checksum file and the releases API response are a few dozen bytes, and
+# a bar for them would be noise. Off the terminal it degrades to the quiet download, so a CI log gets
+# one line rather than a thousand carriage returns.
+download_visible() {
+  if [ "$tty" = 0 ]; then
+    download "$1" "$2"
+    return
+  fi
+
+  case "$downloader" in
+    curl) curl -fSL --progress-bar "$1" -o "$2" ;;
+    # --show-progress is GNU wget 1.16 and newer. Asking first, because an unknown option is a hard
+    # error there and would turn a cosmetic feature into a failed install.
+    wget)
+      if wget --help 2>&1 | grep -q -- '--show-progress'; then
+        wget -q --show-progress -O "$2" "$1"
+      else
+        wget -q -O "$2" "$1"
+      fi
+      ;;
+  esac
+}
+
+# Bytes as the size a human would say out loud. Integer arithmetic only: `sh` has no floats, and one
+# decimal place is enough to tell 108.2 MB from 12.4 MB.
+human_size() {
+  bytes=$1
+  if [ "$bytes" -ge 1048576 ]; then
+    printf '%s.%s MB\n' "$((bytes / 1048576))" "$(((bytes % 1048576) * 10 / 1048576))"
+  elif [ "$bytes" -ge 1024 ]; then
+    printf '%s KB\n' "$((bytes / 1024))"
+  else
+    printf '%s B\n' "$bytes"
+  fi
 }
 
 sha256_of() {
@@ -209,7 +275,14 @@ main() {
   [ -w "$install_dir" ] || fail "$install_dir is not writable.
 Set EMPO_INSTALL_DIR to somewhere you own. This script will not escalate privileges."
 
+  # Asking GitHub what the latest release is takes a round trip, and until now that round trip
+  # happened before anything at all had been printed. Say what is being waited on, then erase the
+  # line once the answer is in — the tag it produced is about to be printed in the header anyway.
+  log ""
+  step "Resolving latest release"
   tag=$(resolve_tag)
+  printf '\r\033[K'
+
   base="https://github.com/${REPO}/releases/download/${tag}"
 
   # One temp directory, removed on every exit including a failed one, so a half-downloaded binary
@@ -217,10 +290,20 @@ Set EMPO_INSTALL_DIR to somewhere you own. This script will not escalate privile
   tmp=$(mktemp -d) || fail "could not create a temporary directory."
   trap 'rm -rf "$tmp"' EXIT INT TERM
 
-  log "Installing empo $tag ($asset) into $install_dir"
+  target="$install_dir/empo"
 
-  download "$base/$asset" "$tmp/$asset" ||
+  printf '  %sEmPo%s %s%s%s\n' "$BOLD" "$RESET" "$CYAN" "$tag" "$RESET"
+  printf '  %s%s → %s%s\n' "$DIM" "$asset" "$target" "$RESET"
+  log ""
+
+  download_visible "$base/$asset" "$tmp/$asset" ||
     fail "could not download $base/$asset. Does release $tag publish that asset?"
+  # The bar curl just drew is the record of the download, so this line replaces it rather than
+  # stacking a second line saying the same thing.
+  printf '\r%s✓%s Downloaded %s%s%s\033[K\n' \
+    "  $GREEN" "$RESET" "$DIM" "$(human_size "$(wc -c <"$tmp/$asset" | tr -d ' ')")" "$RESET"
+
+  step "Verifying checksum"
   download "$base/$asset.sha256" "$tmp/$asset.sha256" ||
     fail "could not download $base/$asset.sha256, so the binary cannot be verified. Nothing installed."
 
@@ -237,33 +320,43 @@ Set EMPO_INSTALL_DIR to somewhere you own. This script will not escalate privile
 Nothing has been installed. Do not run the downloaded file."
   fi
 
-  target="$install_dir/empo"
+  # The full hash stays in the failure message above, where somebody comparing it by eye needs every
+  # character. On success the first and last eight are enough to recognise it in a release note.
+  step_done "Verified ${DIM}sha256 $(printf '%s' "$actual" | cut -c1-8)…$(printf '%s' "$actual" | rev | cut -c1-8 | rev)$RESET"
+
+  step "Installing"
   # Into place in one move, over any binary already there. A rename over a running executable is
   # fine on macOS and Linux: the running process keeps the inode it started from.
   mv -f "$tmp/$asset" "$target" || fail "could not write $target."
   chmod 755 "$target"
-
-  log "Verified sha256 $actual"
-  log "Installed $target"
-
-  case ":$PATH:" in
-    *":$install_dir:"*) ;;
-    *)
-      profile=$(profile_for_shell)
-      log ""
-      log "$install_dir is NOT on your PATH, so \`empo\` will not be found yet."
-      log "Add this line to $profile:"
-      log ""
-      log "  export PATH=\"$install_dir:\$PATH\""
-      log ""
-      log "Then open a new terminal, or run: export PATH=\"$install_dir:\$PATH\""
-      log ""
-      ;;
-  esac
+  step_done "Installed $DIM$target$RESET"
 
   # Running it is the only proof that the right binary landed on the right machine. A wrong
-  # architecture downloads and verifies perfectly and then refuses to execute.
-  "$target" --version || fail "$target was installed but does not run on this machine."
+  # architecture downloads and verifies perfectly and then refuses to execute. The version it reports
+  # is captured rather than left to print itself, so the bare `0.1.3` no longer trails the output
+  # with nothing to say what it is.
+  step "Checking it runs"
+  version=$("$target" --version 2>/dev/null) ||
+    fail "$target was installed but does not run on this machine."
+  step_done "Ready ${DIM}empo $version$RESET"
+
+  log ""
+
+  # The PATH warning comes after the four ticks rather than in the middle of them, so the thing that
+  # needs doing is the last thing on screen instead of something scrolled past by the success lines.
+  case ":$PATH:" in
+    *":$install_dir:"*)
+      printf '  Run %sempo --help%s to get started.\n\n' "$BOLD" "$RESET"
+      ;;
+    *)
+      profile=$(profile_for_shell)
+      printf '  %s!%s %s is not on your PATH, so %sempo%s will not be found yet.\n' \
+        "$BOLD" "$RESET" "$install_dir" "$BOLD" "$RESET"
+      printf '    Add this line to %s%s%s:\n\n' "$BOLD" "$profile" "$RESET"
+      printf '      %sexport PATH="%s:$PATH"%s\n\n' "$CYAN" "$install_dir" "$RESET"
+      printf '    Then open a new terminal, or run that line here.\n\n'
+      ;;
+  esac
 }
 
 main "$@"
