@@ -68,8 +68,8 @@ That is the intended channel. It installs a standalone binary carrying its own N
 against the sha256 the release publishes. It never asks for `sudo`. Upgrade with `empo upgrade`, or
 look first with `empo upgrade --check`.
 
-**No tagged release has been cut yet**, so there is nothing for the installer to download today.
-Binaries land with the first tagged release. Until then, build from source:
+Every release carries four binaries, `empo-darwin-arm64`, `empo-darwin-x64`, `empo-linux-x64` and
+`empo-linux-arm64`, each with its `.sha256` beside it. To build from source instead:
 
 ```sh
 npm install && npm run build:binary   # produces dist-binary/empo

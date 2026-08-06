@@ -136,14 +136,13 @@ Claude Code ships `install.ps1` and a WinGet package; EmPo ships neither. This i
 Windows user hits, it is written here rather than left to be discovered, and closing it is a
 PowerShell installer plus an upgrade path that swaps the binary from outside the running process.
 
-### Not live yet
+### What a release carries
 
-The repository is public. **No release has been cut, so no release assets exist**, which means the
-curl command has nothing to download and `empo upgrade` has nothing to resolve. The installer and
-the upgrade path are built and correct; what is missing is a tag for them to find. Until a release
-carries the four platform assets, the only way to get EmPo is a checkout and `npm run build:binary`,
-and the install command above should be read as what the first release turns on rather than as an
-instruction.
+A release is cut by CI on every push to main, and the `binaries` job attaches the four platform
+assets to it: `empo-darwin-arm64`, `empo-darwin-x64`, `empo-linux-x64` and `empo-linux-arm64`, each
+with its `.sha256` beside it. That is what the curl command resolves and what `empo upgrade` checks
+against. A checkout plus `npm run build:binary` remains the route for a platform with no published
+asset, and it is the only route on anything that is not macOS or Linux.
 
 ## The standalone binary
 
@@ -268,10 +267,10 @@ path no interpreter owns, and it is paid deliberately.
 
 ## The interim shim, and how to remove it
 
-**The binary is built and no release carries it yet, so this section is still live and its teardown is
-reachable the day one does.** A shim was the correct interim answer while there was no artifact to
-point at; there is one now, and the moment a machine has an installed `empo` the shim is not interim
-any more, it is a stale checkout shadowing an installed tool.
+**Releases now carry the binary, so this section is a teardown rather than a plan.** A shim was the
+correct interim answer while there was no artifact to point at; there is one now, and the moment a
+machine has an installed `empo` the shim is not interim any more, it is a stale checkout shadowing an
+installed tool.
 
 Until the binary reaches a target, one below the floor is wired by pointing PATH at a shim that picks
 a Node meeting EmPo's floor instead of the one the target pins. The shape:
