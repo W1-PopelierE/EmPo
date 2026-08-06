@@ -209,7 +209,7 @@ describe("the adapters section", () => {
   });
 
   test("writes a github forge with no host, because the kind already names it", () => {
-    const forge = { kind: "github" as const, workspace: "W1-PopelierE", repo: "empo" };
+    const forge = { kind: "github" as const, workspace: "W1-PopelierE", repo: "EmPo" };
 
     expect(buildConfig({ roots: ROOTS, forge }).adapters).toEqual({ forge });
   });

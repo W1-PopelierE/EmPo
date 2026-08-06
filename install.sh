@@ -2,7 +2,7 @@
 #
 # Install EmPo as a standalone binary.
 #
-#   curl -fsSL https://raw.githubusercontent.com/W1-PopelierE/empo/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/W1-PopelierE/EmPo/main/install.sh | sh
 #
 # Environment:
 #
@@ -45,7 +45,7 @@
 
 set -eu
 
-REPO="W1-PopelierE/empo"
+REPO="W1-PopelierE/EmPo"
 API="https://api.github.com/repos/${REPO}/releases/latest"
 
 log() {
@@ -64,7 +64,7 @@ usage() {
   cat <<'USAGE'
 Install EmPo as a standalone binary.
 
-  curl -fsSL https://raw.githubusercontent.com/W1-PopelierE/empo/main/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/W1-PopelierE/EmPo/main/install.sh | sh
 
 Environment:
 

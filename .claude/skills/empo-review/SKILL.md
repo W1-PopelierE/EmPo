@@ -51,7 +51,7 @@ Roots, each indexed by one language pack:
 
 - `.` (typescript)
 
-Forge: `github` (`W1-PopelierE/empo`). `empo review` reads the pull request, its comments and its
+Forge: `github` (`W1-PopelierE/EmPo`). `empo review` reads the pull request, its comments and its
 CI result from there, and posts only when asked to.
 
 Tracker: none configured, so `empo review` skips ticket-fit grading and says so. Do not

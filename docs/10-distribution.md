@@ -47,7 +47,7 @@ empo/
 ## The channel: one install script, and nothing else
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/W1-PopelierE/empo/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/W1-PopelierE/EmPo/main/install.sh | sh
 empo init
 ```
 
@@ -205,7 +205,7 @@ three and CI runs all of them.
 ## The install script
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/W1-PopelierE/empo/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/W1-PopelierE/EmPo/main/install.sh | sh
 ```
 
 `install.sh` detects the platform and the architecture, resolves the latest GitHub Release, downloads

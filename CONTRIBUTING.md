@@ -8,7 +8,7 @@ engine fix, a documentation correction, or an adapter for a host EmPo cannot yet
 ## Getting set up
 
 ```bash
-git clone https://github.com/W1-PopelierE/empo.git
+git clone https://github.com/W1-PopelierE/EmPo.git
 cd empo
 npm install
 npm test
