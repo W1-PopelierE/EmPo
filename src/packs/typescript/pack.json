@@ -1,6 +1,6 @@
 {
   "name": "typescript",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "match": {
     "extensions": [".ts", ".tsx", ".vue", ".js", ".jsx", ".mjs", ".cjs"],
     "manifest": ["package.json", "tsconfig.json"]
@@ -30,7 +30,8 @@
       {
         "kind": "component",
         "pathGlob": "**/*.{tsx,jsx}",
-        "contentPattern": "</[A-Za-z][A-Za-z0-9._-]*\\s*>|<[A-Za-z][A-Za-z0-9._-]*(?:\\s[^<]*?)?/>"
+        "contentPattern": "</[A-Za-z][A-Za-z0-9._-]*\\s*>|<[A-Za-z][A-Za-z0-9._-]*(?:\\s[^<]*?)?/>",
+        "maskStrings": true
       },
       {
         "kind": "module"
