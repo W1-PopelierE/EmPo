@@ -21,7 +21,7 @@ describe("typescript pack", () => {
 
   test("loads with its declared identity", () => {
     expect(pack.name).toBe("typescript");
-    expect(pack.version).toBe("1.6.0");
+    expect(pack.version).toBe("1.7.0");
   });
 
   test("reproduces the expected nodes", () => {
@@ -268,14 +268,30 @@ describe("typescript pack", () => {
     // The glob alone would have been one line shorter and would have called every .tsx a component,
     // including the hooks module and the types module every React tree has. OldOrderScreen.tsx is
     // the .tsx here that holds no tag, and Badge.tsx is the control: its only tag is a lowercase
-    // element, which is a rendered component all the same. What the content half does not do is
-    // tell a tag from a tag inside a string: `maskStrings` is an edge-rule field and a kind rule
-    // has none, so this one reads string contents as written even now that the tag rules do not.
-    // That limit is a known gap rather than a claim made here, and it is not only cosmetic, because
-    // `uniqueId` in engine/resolver.ts filters on the kind this defect gets wrong.
+    // element, which is a rendered component all the same. What the content half used not to do is
+    // tell a tag from a tag inside a string, which was a gap this test named rather than pinned:
+    // `maskStrings` was an edge-rule field and a kind rule had none. It is now a kind-rule field
+    // too and CardTemplates.tsx below is the pin.
     expect(node("src/legacy/OldOrderScreen.tsx")?.kind).toBe("module");
     expect(node("src/react/types/OrderRow.ts")?.kind).toBe("module");
     expect(node("src/react/cards/Badge.tsx")?.kind).toBe("component");
+  });
+
+  test("kinds a .tsx whose only tags sit in strings a module, not a component", () => {
+    // The kind half of what `maskStrings` closes, and the half CardDocs.tsx cannot pin: CardDocs
+    // renders a real `<OrderCard />`, so it is a component whichever view its kind rule reads.
+    // CardTemplates.tsx renders nothing and holds tag-shaped text only inside string literals, and
+    // it sits under react/cards/ where no pathGlob rule reaches, so the `**/*.{tsx,jsx}` rule's
+    // `contentPattern` is the only thing that answers for it. Drop `maskStrings` from that rule and
+    // this goes red with "component", which is what it did before the fix.
+    //
+    // CardDocs is asserted here beside it because a rule that stopped matching altogether would buy
+    // the module answer too, and would be a worse defect: `uniqueId` in engine/resolver.ts filters
+    // candidates on kind, so a component miskinded module stops being reachable as a tag target.
+    expect(node("src/react/cards/CardTemplates.tsx")?.kind).toBe("module");
+    expect(node("src/react/cards/CardDocs.tsx")?.kind).toBe("component");
+    // The tag rules read the same blanked view, so the quoted markup produces no edge either.
+    expect(from("src/react/cards/CardTemplates.tsx")).toEqual([]);
   });
 
   test("lets a role directory still win over the React rule", () => {

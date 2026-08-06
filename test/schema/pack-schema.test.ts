@@ -334,6 +334,116 @@ describe("packSchema", () => {
     expect(Object.hasOwn(result.data?.edges.template?.[0] ?? {}, "maskStrings")).toBe(false);
   });
 
+  test("keeps a kind rule's maskStrings, rather than stripping it at load", () => {
+    // The exact class of bug this repo has been bitten by before: zod drops an undeclared key and
+    // `loadPack` returns the parsed data, so a field missing from the schema never reaches the
+    // engine while every hand-built unit test goes on passing. A stripped `maskStrings` here labels
+    // a .tsx holding only `"<Button />"` in a string a component, off its own prose.
+    const node = {
+      id: { strategy: "fqcn" },
+      kindRules: [{ kind: "component", contentPattern: "<[A-Z]", maskStrings: true }],
+    };
+
+    const result = packSchema.safeParse(
+      pack({ comments: { line: ["//"], stringQuotes: ["'", '"', "`"] }, node }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.data?.node.kindRules[0]?.maskStrings).toBe(true);
+  });
+
+  test("rejects maskStrings on a kind rule when no comment syntax declares stringQuotes", () => {
+    // Same reasoning as the edge-rule case: without quotes the masker finds no literal, so the flag
+    // is inert and the rule goes on matching inside every string with nothing said either way.
+    const node = {
+      id: { strategy: "fqcn" },
+      kindRules: [{ kind: "component", contentPattern: "<[A-Z]", maskStrings: true }],
+    };
+
+    const { success, issues } = parse(pack({ comments: { line: ["//"] }, node }));
+
+    expect(success).toBe(false);
+    expect(issues).toContain(
+      "node.kindRules.0.maskStrings: maskStrings needs a comment syntax declaring stringQuotes, or there is no literal to mask",
+    );
+  });
+
+  test("rejects maskStrings on a kind rule that declares no contentPattern", () => {
+    // `maskStrings` is read by `contentPattern` and by nothing else: a `pathGlob` matches a path,
+    // which holds no string literals. Declared beside no pattern it is a request nobody answers.
+    const node = {
+      id: { strategy: "fqcn" },
+      kindRules: [{ kind: "component", pathGlob: "**/*.tsx", maskStrings: true }],
+    };
+
+    const { success, issues } = parse(
+      pack({ comments: { line: ["//"], stringQuotes: ["'", '"', "`"] }, node }),
+    );
+
+    expect(success).toBe(false);
+    expect(issues).toContain(
+      "node.kindRules.0.maskStrings: maskStrings is read only by contentPattern, and this rule declares none",
+    );
+  });
+
+  test("accepts maskStrings on a kind rule with a contentPattern and quotes declared", () => {
+    // Both halves satisfied: there is a pattern to read the view, and there are quotes for the
+    // masker to find a literal with.
+    const node = {
+      id: { strategy: "fqcn" },
+      kindRules: [
+        { kind: "component", pathGlob: "**/*.tsx", contentPattern: "<[A-Z]", maskStrings: true },
+        { kind: "module" },
+      ],
+    };
+
+    const { success, issues } = parse(
+      pack({ comments: { line: ["//"], stringQuotes: ["'", '"', "`"] }, node }),
+    );
+
+    expect(issues).toBe("");
+    expect(success).toBe(true);
+  });
+
+  test("accepts, as a known limit, quotes in comments that no commentsByExtension entry repeats", () => {
+    // This case pins a hole, not a guarantee, and it is here so the hole is visible rather than
+    // discovered from an edge nobody can explain. The stringQuotes check is pack-wide: it passes as
+    // soon as `comments` OR any one `commentsByExtension` entry names a quote. But the masker asks
+    // `commentSyntaxFor`, which picks the syntax by the FILE'S OWN extension. So the pack below —
+    // quotes on `comments`, a `.tsx` entry that omits them — loads clean while `maskStrings` is
+    // inert for every .tsx, which is exactly the file the flag was written for, and nothing anywhere
+    // says so: a .tsx holding only `export const tip = "render a <Tips /> here";` still comes back
+    // `component`. The check is a floor that catches the pack declaring no quotes anywhere, and it is
+    // documented as a floor in docs/04-language-packs.md ("The first of those two checks is pack-wide
+    // and the masker is per-extension") and docs/14-implementation-notes.md, because closing it means
+    // resolving a rule's `pathGlob` against `match.extensions` — a larger change than the one that
+    // put `maskStrings` on kind rules.
+    const node = {
+      id: { strategy: "fqcn" },
+      kindRules: [{ kind: "component", contentPattern: "<[A-Z]", maskStrings: true }],
+    };
+
+    const { success, issues } = parse(
+      pack({
+        comments: { line: ["//"], stringQuotes: ["'", '"', "`"] },
+        commentsByExtension: { ".tsx": { line: ["//"], block: [["/*", "*/"]] } },
+        node,
+      }),
+    );
+
+    // Asserted with a message rather than bare, because the day this stops being true is a good day:
+    // whoever makes the check per-extension aware should read this as "the limit closed, rewrite this
+    // test as a rejection" and not as a regression they caused.
+    expect(
+      success,
+      "packSchema now rejects quotes-in-comments-only when an extension entry omits them, so the " +
+        "documented per-extension limit is closed: replace this test with the rejection it became, " +
+        "and update docs/04-language-packs.md and docs/14-implementation-notes.md, which both still " +
+        "describe the check as a floor.",
+    ).toBe(true);
+    expect(issues).toBe("");
+  });
+
   test("rejects targetKinds on a strategy that does not resolve by name", () => {
     // A `module-path` rule resolves a specifier against the filesystem and never asks the index of
     // names, so a `targetKinds` beside it is a filter nothing applies: the rule goes on resolving

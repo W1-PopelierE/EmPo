@@ -92,6 +92,8 @@ interface CompiledKindRule {
   kind: string;
   matchesPath?: (path: string) => boolean;
   contentRegex?: RegExp;
+  /** True where `contentRegex` reads the view with string contents blanked. See src/engine/mask.ts. */
+  maskStrings: boolean;
 }
 
 export interface CompiledPack {
@@ -131,6 +133,7 @@ export function compilePack(pack: Pack): CompiledPack {
       kind: rule.kind,
       matchesPath: rule.pathGlob ? picomatch(rule.pathGlob) : undefined,
       contentRegex: optionalRegex(rule.contentPattern),
+      maskStrings: rule.maskStrings === true,
     })),
     edgeRules,
     produces: pack.produces.map(compileSymbolRule),
@@ -174,9 +177,7 @@ export function extractFile(compiled: CompiledPack, scanned: ScannedFile): Extra
   //
   // Blanking preserves length and newlines exactly as comment masking does, so the two views share
   // one `lineStarts` and a capture from either cites the same line a reader will find in the file.
-  const codeOnly = compiled.edgeRules.some((rule) => rule.maskStrings)
-    ? maskComments(scanned.source, syntax, true)
-    : source;
+  const codeOnly = wantsCodeOnly(compiled) ? maskComments(scanned.source, syntax, true) : source;
 
   const starts = lineStarts(source);
   const isTest = compiled.testPaths.some((matches) => matches(scanned.relPath));
@@ -187,7 +188,7 @@ export function extractFile(compiled: CompiledPack, scanned: ScannedFile): Extra
     lang: scanned.lang,
     id: identity.id,
     name: identity.name,
-    kind: kindOf(compiled, source, scanned.relPath),
+    kind: kindOf(compiled, source, codeOnly, scanned.relPath),
     isTest,
     assertsValue: isTest && assertsValue(compiled.pack, source),
     produces: extractSymbols(compiled.produces, source, scanned.relPath, starts),
@@ -264,13 +265,31 @@ function identify(
   return null;
 }
 
-function kindOf(compiled: CompiledPack, source: string, relPath: string): string {
+/**
+ * First rule whose path glob and content pattern both pass. `codeOnly` is the view with string
+ * contents blanked, read by a rule that declared `maskStrings` and by no other, so a `.tsx` holding
+ * `"<div />"` and nothing rendered is not labelled a component off its own prose. Both views are the
+ * same length, so which one a rule read never reaches a citation.
+ */
+function kindOf(compiled: CompiledPack, source: string, codeOnly: string, relPath: string): string {
   for (const rule of compiled.kindRules) {
     if (rule.matchesPath && !rule.matchesPath(relPath)) continue;
-    if (rule.contentRegex && !rule.contentRegex.test(source)) continue;
+    if (rule.contentRegex && !rule.contentRegex.test(rule.maskStrings ? codeOnly : source))
+      continue;
     return rule.kind;
   }
   return "unknown";
+}
+
+/**
+ * Whether this pack needs the second, string-blanked view built at all. Most packs have no rule that
+ * asks, and they must not pay a second pass over every file for a view nothing reads.
+ */
+function wantsCodeOnly(compiled: CompiledPack): boolean {
+  return (
+    compiled.edgeRules.some((rule) => rule.maskStrings) ||
+    compiled.kindRules.some((rule) => rule.maskStrings)
+  );
 }
 
 /**

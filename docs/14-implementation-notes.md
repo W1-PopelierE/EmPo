@@ -929,17 +929,49 @@ downstream is unchanged, and `maskStrings?: boolean` on an edge rule (`schema/ty
 `extractRuleSchema`) is how a rule asks; absent is the previous behaviour. It is per rule and not per
 family deliberately: php's `template` family holds both `<x-cart>`, which is markup, and
 `@livewire('cart')`, whose whole answer lives inside the quotes, so a family-wide switch would break
-the second. Only the typescript pack's two `template` rules declare it and the php pack is untouched.
+the second. At that point only the typescript pack's two `template` rules declared it, and the php
+pack is untouched by this change and by the one below.
 `engine/extractor.ts` builds the second code-only view once per file and only when some rule asked
-for it, and each rule reads the view it declared. The price is one new false negative: a tag written
-between two apostrophes on the same line of JSX or Vue prose. Separate lines stay safe, because `'`
-is not in `multilineQuotes`. Regenerating the typescript fixture snapshot produced only additions, so
-no edge that was ever real was lost. What this does not touch is the label: `maskStrings` is an
-edge-rule field, `kindRules.contentPattern` reads the comment-masked source and no other view, and
-so a `.tsx` whose only tag-shaped text sits inside a string is still kinded `component`. That label
-is not cosmetic, which is the part worth writing down: `uniqueId` in `engine/resolver.ts` gates
-every `short-name` resolution on the target's kind, so `targetKinds` — the clause that exists to
-refuse a tag landing on a same-named non-component — reads the one field this defect corrupts.
+for it, and each rule reads the view it declared. The price is a new false negative in two shapes: a
+tag between two apostrophes on the same line of JSX or Vue prose, which stops at the line end because
+`'` is not in `multilineQuotes`, and a tag between two literal backticks, which does not stop there
+because `` ` `` is. The second is the wider one and was understated when this was first written.
+Regenerating the typescript fixture snapshot produced only additions, so
+no edge that was ever real was lost.
+
+**The label was the other half of it and it shipped as a defect for one release** (typescript pack
+1.7.0 closes it). `maskStrings` was an edge-rule field only, `kindRules.contentPattern` read the
+comment-masked source and no other view, and so a `.tsx` whose only tag-shaped text sat inside a
+string was kinded `component` though it rendered nothing. That is not cosmetic, which is the part
+worth writing down: `uniqueId` in `engine/resolver.ts` gates every `short-name` resolution on the
+target's kind, so `targetKinds`, the clause that exists to refuse a tag landing on a same-named
+non-component, reads the one field the defect corrupted. The over-promoted file became an eligible
+tag target and the refusal stopped working with nothing said.
+
+The fix is the same field on the other rule kind. `maskStrings?: boolean` is now on `PackKindRule`
+in `schema/types.ts` as well as on an extract rule, and `kindOf` in `engine/extractor.ts` takes both
+views and picks per rule rather than taking one. A `wantsCodeOnly` helper decides whether the second
+view is built at all, and it asks the edge rules **or** the kind rules, so a pack whose only asker is
+a kind rule still gets the view and a pack with no asker anywhere still pays nothing. Per rule and
+not per family for the reason the edge side already had: a pattern describing code asks, a pattern
+keying off a string the framework itself reads must not.
+
+Two refusals at load, both in `pack.schema.ts`. `maskStrings` on a kind rule declaring no
+`contentPattern` is rejected, because that rule reads no source and the flag would sit there inert
+while reading as a guarantee that the kind cannot come from a string. And the existing "needs a
+comment syntax declaring `stringQuotes`" check now walks `node.kindRules` after `edges`, so both rule
+kinds get the same answer from the same masker. That second check is a floor rather than a
+guarantee, and the limit is worth knowing before trusting it: it passes if any one syntax names a
+quote, while `commentSyntaxFor` picks the syntax per extension, so a pack declaring quotes in
+`comments` and omitting them from `commentsByExtension[".tsx"]` loads clean with the flag inert for
+every `.tsx`. Closing that means resolving a rule's `pathGlob` against `match.extensions` to learn
+which syntaxes it can meet, which is a larger change than this one.
+
+The price is the price the edge side accepted, moved onto the label, and in the same two shapes: a
+`contentPattern` whose only match sits inside an apparent literal is blanked with it, and where that
+literal is opened by a backtick it runs across lines rather than stopping at one. That file falls
+through to `module`. Under-reporting a kind costs a refused
+tag, which is a missing edge; over-reporting it costs a waved-through tag, which is an invented one.
 
 **A name-resolving strategy is only as safe as the namespace it resolves into.** `short-name` was
 built for Blade, where a `<x-price-badge>` names something in this repository by construction, and it

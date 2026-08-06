@@ -220,6 +220,15 @@ export interface PackKindRule {
   pathGlob?: string;
   contentPattern?: string;
   /**
+   * Blank the contents of every string literal before `contentPattern` runs, so tag-shaped text
+   * written inside quotes cannot label the file. The same field an edge rule declares, for the same
+   * reason and with the same default: absent reads the source as written. A kind rule asks for it
+   * only where its pattern describes code and never prose about code; a rule keying off a string the
+   * framework itself reads must not. Inert without `contentPattern`, and rejected at load in that
+   * case. See src/schema/pack.schema.ts.
+   */
+  maskStrings?: boolean;
+  /**
    * Set when the framework resolves this kind by name or convention (a view, a migration, a
    * policy). Such a node's fan-in is zero whether it is used or not, which is what keeps
    * `empo query --orphans` from calling it dead code. See src/schema/pack.schema.ts.

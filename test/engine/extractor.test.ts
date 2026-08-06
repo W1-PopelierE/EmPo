@@ -122,6 +122,144 @@ describe("kind rules", () => {
     expect(queued.kind).toBe("job");
     expect(plain.kind).toBe("class");
   });
+
+  // A kind rule reads the same two views an edge rule does. The masker finds a literal only through
+  // `stringQuotes` (src/engine/mask.ts), so a pack exercising `maskStrings` has to declare them;
+  // basePack declares no comment syntax at all. Local to this file on purpose: there is no shared
+  // test helper in this repo, and the edge-rule block below keeps its own copy of this shape.
+  const quotedSyntax: NonNullable<Pack["comments"]> = {
+    line: ["//"],
+    block: [["/*", "*/"]],
+    stringQuotes: ['"', "'", "`"],
+    stringEscape: "\\",
+    multilineQuotes: ["`"],
+  };
+
+  /** A pack whose component rule reads the view the caller asks for, over a condition-less default. */
+  function componentPack(maskStrings: boolean): Pack {
+    return withNode(
+      { ...fallbackPack, match: { extensions: [".tsx"] }, comments: quotedSyntax },
+      {
+        ...fallbackPack.node,
+        kindRules: [
+          {
+            kind: "component",
+            contentPattern: "<[A-Z][A-Za-z0-9_]*",
+            ...(maskStrings ? { maskStrings } : {}),
+          },
+          { kind: "module" },
+        ],
+      },
+    );
+  }
+
+  // Prose about a component, in a file that renders nothing. The tag shape lives entirely inside a
+  // string literal, so a rule reading code only must fall through to the condition-less rule.
+  const tagInString = 'const tip = "<Button />";\nexport const helper = 1;\n';
+
+  test("does not match tag-shaped text inside a string literal for a maskStrings kind rule", () => {
+    const extracted = extract(componentPack(true), file("src/helper.tsx", tagInString));
+
+    expect(extracted.kind).toBe("module");
+  });
+
+  test("still matches the same text for a maskStrings kind rule when it is written as code", () => {
+    // The other half, and what keeps the pin from passing for the wrong reason: a view that blanked
+    // everything, or a rule that stopped reading its contentPattern at all, would answer "module"
+    // here too.
+    const asCode = "export const Panel = () => <Button />;\n";
+
+    const extracted = extract(componentPack(true), file("src/Panel.tsx", asCode));
+
+    expect(extracted.kind).toBe("component");
+  });
+
+  test("still reads inside a string literal for a kind rule that does not declare the flag", () => {
+    // The regression guard for every pack that shipped before this field existed. The default has
+    // always been "read the source as written", and a php `kindRules` entry keying off a string is
+    // an ordinary thing to write, so a red here is the shipped packs losing their kinds.
+    const extracted = extract(componentPack(false), file("src/helper.tsx", tagInString));
+
+    expect(extracted.kind).toBe("component");
+  });
+
+  // The two tests below pin the ACCEPTED COST of `maskStrings`, and they are the only pins in this
+  // block that assert something nobody wants. The masker is a lexer over quote characters, not a
+  // parser, so any tag sitting between two of a language's quote characters is blanked whether or
+  // not the author meant a string there. The file really does render a component, and the rule
+  // really does answer "module": a known and accepted FALSE NEGATIVE, not desired behaviour.
+  //
+  // It is accepted because the two errors are not equal. Under-reporting loses an edge and a kind
+  // that a reader can still find by opening the file; fabricating one puts a component in the graph
+  // off a sentence of prose, and an invented answer that looks generated is the single failure this
+  // tool exists to prevent (CONTRIBUTING.md, on machine-owned output). So the masker stays coarse
+  // and the cost is recorded here rather than rediscovered later.
+  //
+  // If someone ever narrows the masker so these files report "component", these tests go red and
+  // say so at the point of change, which is the whole reason they exist. Read a red here as a
+  // question about the new masker, not as a defect in these fixtures.
+  test("misses a real component when a literal backtick pair spans the lines that hold it", () => {
+    // The WIDE shape, and the worse of the two. A backtick is in `multilineQuotes`, so the masker
+    // treats the first one as opening a literal that stays open until the next one, across however
+    // many lines lie between: every tag on every one of those lines is blanked. Here the prose
+    // quotes the backtick key twice, three lines apart, and swallows the only real tag between
+    // them. The `<>` fragment matches no tag pattern, so nothing else in the file is evidence and
+    // the condition-less rule takes it.
+    const backtickProse =
+      "export function Help() {\n" +
+      "  return (\n" +
+      "    <>\n" +
+      "      Press ` to open the console.\n" +
+      "      <Console />\n" +
+      "      Press ` again to close it.\n" +
+      "    </>\n" +
+      "  );\n" +
+      "}\n";
+
+    const extracted = extract(componentPack(true), file("src/Help.tsx", backtickProse));
+
+    expect(extracted.kind).toBe("module");
+  });
+
+  test("keeps a real component when apostrophes sit on separate lines around it", () => {
+    // The contrast that bounds the cost above. An apostrophe is in `stringQuotes` but NOT in
+    // `multilineQuotes`, so an unclosed one dies at the end of its own line and cannot reach a tag
+    // on a later line. Same prose shape, same two quote characters, same distance apart, and the
+    // component survives. So the apostrophe case is narrow (a tag between two apostrophes on ONE
+    // line) while the backtick case is wide, and only the wide one costs a whole file.
+    const apostropheProse =
+      "export function Help() {\n" +
+      "  return (\n" +
+      "    <>\n" +
+      "      Here's the console.\n" +
+      "      <Console />\n" +
+      "      Don't close it.\n" +
+      "    </>\n" +
+      "  );\n" +
+      "}\n";
+
+    const extracted = extract(componentPack(true), file("src/Help.tsx", apostropheProse));
+
+    expect(extracted.kind).toBe("component");
+  });
+
+  test("builds the code-only view when a kind rule asks for it and no edge rule does", () => {
+    // `wantsCodeOnly` gates the second pass over the file, and it used to consult edgeRules alone.
+    // Under that version `codeOnly` is the comment-masked source, the rule below reads the literal
+    // it declined to read, and this file is labelled a component off its own prose. The edge rule
+    // is present and deliberately silent on `maskStrings`, so nothing but the kind rule can be what
+    // asks for the second view.
+    const kindAsksAlone: Pack = {
+      ...componentPack(true),
+      edges: {
+        import: [{ pattern: "^import .* from ['\"]([^'\"]+)['\"]", resolve: "module-path" }],
+      },
+    };
+
+    const extracted = extract(kindAsksAlone, file("src/helper.tsx", tagInString));
+
+    expect(extracted.kind).toBe("module");
+  });
 });
 
 describe("captures", () => {

@@ -321,39 +321,61 @@ export const packSchema = z
       }),
       kindRules: z
         .array(
-          z.object({
-            kind: z.string().min(1),
-            pathGlob: z.string().optional(),
-            contentPattern: regex.optional(),
-            /**
-             * Marks a kind the framework reaches by name or by convention rather than through an edge
-             * any rule in this pack can see: a Laravel view rendered by `view('orders.index')`, a
-             * migration the runner discovers, a policy found by its class name. Those nodes have a
-             * fan-in of zero forever, so `empo query --orphans` must not offer them as dead code.
-             *
-             * An enum and not a boolean, because the useful fact is *who* resolves the node, and the
-             * next value to want (a DI container, a plugin registry) is a sibling rather than a
-             * second flag. A reader of `true` would have to guess which of those was meant.
-             */
-            resolvedBy: z.enum(["framework"]).optional(),
-            /**
-             * Marks a kind somebody outside the code arrives at: a route file a request hits, a
-             * console command an operator runs, a Livewire component a page mounts. `empo init`'s map
-             * brief keeps these and ranks them first, so the strongest flow signal a repository has
-             * cannot be pushed past the cap by a directory of migrations.
-             *
-             * A second axis rather than a reading of `resolvedBy`, because the two ask different
-             * questions of one set of zero-fan-in nodes. `--orphans` asks "is this dead?", where a
-             * framework-resolved kind means there is no evidence either way, so hide it. The brief
-             * asks "does a journey start here?", where a route file is emphatically yes. Both marks
-             * on one rule is the normal case for a route file, not a contradiction.
-             *
-             * An enum and not a boolean for the same reason as `resolvedBy`: the useful fact is *who*
-             * arrives, so a scheduler or a webhook sender is a sibling value rather than a second
-             * flag.
-             */
-            arrivedBy: z.enum(["user"]).optional(),
-          }),
+          z
+            .object({
+              kind: z.string().min(1),
+              pathGlob: z.string().optional(),
+              contentPattern: regex.optional(),
+              /**
+               * The same request an edge rule makes, made by a kind rule: blank string contents before
+               * `contentPattern` runs. A kind is not an edge, so getting it wrong puts no coupling in
+               * the graph — but it is read like one. `targetKinds` exists so a tag lands on a component
+               * and never on a same-named type module, and `uniqueId` (src/engine/resolver.ts) checks it
+               * against exactly this label. A file over-promoted to `component` off tag-shaped text in a
+               * string becomes an eligible target, and the refusal stops working silently. So the label
+               * gets the same defence the edge got, declared per rule for the same reason: a pattern
+               * describing code asks, a pattern describing a string a framework reads must not.
+               *
+               * It pays the same price too — a pattern between two apostrophes on one line of prose is
+               * blanked with them — and buys the same thing, an under-report instead of a fabrication.
+               */
+              maskStrings: z.boolean().optional(),
+              /**
+               * Marks a kind the framework reaches by name or by convention rather than through an edge
+               * any rule in this pack can see: a Laravel view rendered by `view('orders.index')`, a
+               * migration the runner discovers, a policy found by its class name. Those nodes have a
+               * fan-in of zero forever, so `empo query --orphans` must not offer them as dead code.
+               *
+               * An enum and not a boolean, because the useful fact is *who* resolves the node, and the
+               * next value to want (a DI container, a plugin registry) is a sibling rather than a
+               * second flag. A reader of `true` would have to guess which of those was meant.
+               */
+              resolvedBy: z.enum(["framework"]).optional(),
+              /**
+               * Marks a kind somebody outside the code arrives at: a route file a request hits, a
+               * console command an operator runs, a Livewire component a page mounts. `empo init`'s map
+               * brief keeps these and ranks them first, so the strongest flow signal a repository has
+               * cannot be pushed past the cap by a directory of migrations.
+               *
+               * A second axis rather than a reading of `resolvedBy`, because the two ask different
+               * questions of one set of zero-fan-in nodes. `--orphans` asks "is this dead?", where a
+               * framework-resolved kind means there is no evidence either way, so hide it. The brief
+               * asks "does a journey start here?", where a route file is emphatically yes. Both marks
+               * on one rule is the normal case for a route file, not a contradiction.
+               *
+               * An enum and not a boolean for the same reason as `resolvedBy`: the useful fact is *who*
+               * arrives, so a scheduler or a webhook sender is a sibling value rather than a second
+               * flag.
+               */
+              arrivedBy: z.enum(["user"]).optional(),
+            })
+            // A kind rule with no `contentPattern` reads no source at all, so the flag would change
+            // nothing while reading as a guarantee that the label cannot come from a string. Same
+            // remedy as `targetKinds` on a strategy that never reads it: answer at load.
+            .refine((rule) => rule.maskStrings !== true || rule.contentPattern !== undefined, {
+              message: "maskStrings is read only by contentPattern, and this rule declares none",
+              path: ["maskStrings"],
+            }),
         )
         .min(1),
     }),
@@ -431,15 +453,23 @@ export const packSchema = z
     );
     if (declaresQuotes) return;
 
+    const message =
+      "maskStrings needs a comment syntax declaring stringQuotes, or there is no literal to mask";
+
     for (const [family, rules] of Object.entries(pack.edges)) {
       for (const [position, rule] of (rules ?? []).entries()) {
         if (rule.maskStrings !== true) continue;
-        ctx.addIssue({
-          code: "custom",
-          path: ["edges", family, position, "maskStrings"],
-          message:
-            "maskStrings needs a comment syntax declaring stringQuotes, or there is no literal to mask",
-        });
+        ctx.addIssue({ code: "custom", path: ["edges", family, position, "maskStrings"], message });
       }
+    }
+
+    // A kind rule asks the same question of the same masker, so it gets the same answer.
+    for (const [position, rule] of pack.node.kindRules.entries()) {
+      if (rule.maskStrings !== true) continue;
+      ctx.addIssue({
+        code: "custom",
+        path: ["node", "kindRules", position, "maskStrings"],
+        message,
+      });
     }
   });

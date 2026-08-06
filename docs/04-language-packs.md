@@ -45,8 +45,11 @@ exactly the honesty this tradeoff requires.
       "indexNames": ["index"]                // module-path only: a basename that stands for its dir
     },
     "kindRules": [
-      // resolvedBy: the framework reaches this kind by name, so it has no fan-in, ever
-      // arrivedBy:  somebody outside the code arrives here, so a journey starts at it
+      // resolvedBy:  the framework reaches this kind by name, so it has no fan-in, ever
+      // arrivedBy:   somebody outside the code arrives here, so a journey starts at it
+      // maskStrings: read the file with string contents blanked before contentPattern runs, for a
+      //              pattern that describes code; php declares it nowhere, the typescript pack's
+      //              React rule does. Rejected at load on a rule carrying no contentPattern
       { "kind": "route-file",  "pathGlob": "**/routes/*.php",
         "resolvedBy": "framework", "arrivedBy": "user" },  // both, and that is not a conflict
       { "kind": "view",        "pathGlob": "**/resources/views/**", "resolvedBy": "framework" },
@@ -231,31 +234,66 @@ An entry declaring a `pathGlob` and a `contentPattern` matches only where both h
 is a marker on its own. The glob is `**/*.{tsx,jsx}`, because the extension is where JSX is legal;
 the pattern requires a real tag, closing or self-closing, because a `.tsx` that renders nothing is
 not a component. Each half is load-bearing in a different direction. The glob alone promotes every
-hooks module and every type module written in `.tsx` beside the components; the pattern alone would
-classify a file from a `</div>` written inside a quoted string, because a kind rule reads the source
-with comments blanked and string contents as written (section 3). That second direction is also why **a React component written in
-a plain `.js` file is deliberately left `module`**: the extension is the honest boundary, and
-widening the glob to `.js` would buy the kind at the price of classifying half the language off the
-contents of its strings. The rule sits after `**/screens/**`, `**/components/**` and `**/api/**` and
+hooks module and every type module written in `.tsx` beside the components; the pattern alone runs
+over all seven extensions the pack claims, and a `.ts`, `.js`, `.mjs` or `.cjs` file naming a tag is
+reached by no earlier rule. `.vue` is not part of that argument: the pack's own `**/*.vue` rule sits
+ahead of this one, so a `.vue` file never reaches this pattern whether it is scoped or not.
+**A React component written in a plain `.js` file is deliberately left `module`**,
+and that is now a decision about the extension boundary rather than a defence against strings: the
+rule declares `"maskStrings": true` (section 4), so the string defence would travel with the glob if
+anybody widened it, and what is left to argue is only whether `.js` is where JSX lives. The pack says
+it is not. The rule sits after `**/screens/**`, `**/components/**` and `**/api/**` and
 before the catch-all `module`, so a role directory still wins, which is the ordering the pack's
 `**/*.vue` rule already relies on. The corpus pins the refusal and not only the match:
 `src/legacy/OldOrderScreen.tsx` holds no tag and stays `module`.
 
-**What the glob narrows it is not what it eliminates, and that was measured.** A `.tsx` whose only
-tag-shaped text sits inside a string literal is kinded `component` though it renders nothing, because
-the pattern deliberately allows a lowercase tag (a React component rendering only html is a
-component) and a kind rule reads string contents as written. The glob keeps that failure inside
-`.tsx` and `.jsx` rather than removing it. It is a wrong label and not a wrong edge, and it is
-knowingly left rather than unnoticed.
+**What the glob narrows it is not what it eliminates, and the rest of it is closed by the same field
+the tag rules use.** A `.tsx` whose only tag-shaped text sat inside a string literal was kinded
+`component` though it rendered nothing, because the pattern deliberately allows a lowercase tag (a
+React component rendering only html is a component) and a kind rule read string contents as written.
+The glob kept that failure inside `.tsx` and `.jsx` rather than removing it. `maskStrings` is now a
+field on a kind rule as well as an edge rule (section 4), the React rule declares it, and its
+`contentPattern` reads the string-blanked view instead. That moved the typescript pack from 1.6.0 to
+1.7.0; the php pack declares the field nowhere and is untouched.
 
-**The edge face of that same defect is closed and this one is not, which is a difference in the
-field and not in the argument.** `maskStrings` (section 4) is an edge-rule field: the tag rules can
-decline to read prose, `kindRules.contentPattern` has no such field and still reads the file as
-written. The label is worth more than cosmetic, because it is what `targetKinds` filters on:
-`uniqueId` in `src/engine/resolver.ts` refuses a tag that resolves to a node of an unlisted kind,
-so a file wrongly kinded `component` is a file a tag is allowed to land on. It costs a wrong edge
-only where such a file is also the lone carrier of a name somebody renders, which is why it is still
-a label defect rather than an edge one — but that is a bound, not an absence.
+Measured, not argued. Declaring the field moved no node the corpus already held: 63 edges before and
+63 after, and not one kind changed. `src/packs/typescript/fixtures/src/src/react/cards/CardTemplates.tsx`
+is the whole of the difference, a `.tsx` under no role directory whose only tag-shaped text sits in
+two string literals and which renders nothing. Drop `maskStrings` from the rule and that one file
+goes back to `component` while every other line of the snapshot stays as it was. Its sibling
+`CardDocs.tsx` pins the other half from a file that holds both shapes: it renders a real
+`<OrderCard />` and names two more components in strings, and it stays `component` throughout, so
+the rule declines to read prose without declining to read the tag beside it.
+
+**It was a wrong label and not a wrong edge, and the reason to close it anyway is `targetKinds`.**
+`uniqueId` in `src/engine/resolver.ts` gates every `short-name` resolution on the target node's
+kind, so `targetKinds`, the clause that exists to refuse a tag landing on a same-named
+non-component, reads exactly the field this defect corrupted. A file over-promoted to `component`
+was a file a tag was allowed to land on, and the refusal stopped working with nothing said. It cost
+a wrong edge only where such a file was also the lone carrier of a name somebody renders, which is
+why it stood as a label defect for as long as it did. That is a bound and not an absence, and a
+bound is a poor thing to leave a silent refusal standing on.
+
+The price is the one the edge rules already accepted, and it lands on the label instead of the edge:
+prose that looks like a literal is blanked like one, so a component whose only tag-shaped text sits
+inside the apparent quotes loses its `component` kind and falls through to `module`. **The backtick
+is the wide case and it is worth stating exactly, because it is not confined to one line.** `` ` ``
+is in the typescript pack's `multilineQuotes`, so two literal backticks in JSX text open and close a
+literal across however many lines lie between them, and every tag in between goes with them. A help
+panel written as
+
+    Press ` to open the console.
+    <Console />
+    Press ` again to close it.
+
+renders a real component and is kinded `module`, because the blanked `<Console />` was the file's
+only evidence and a `<>` fragment closer matches no tag pattern. An apostrophe is the narrow case: it
+may not hold a raw newline (section 3), so it reaches only to the end of its own line, and prose like
+`<p>It's here <Badge /> and that's it</p>` keeps its kind anyway, because the `</p>` outside the
+apparent literal still answers the pattern. A file that under-reports
+its kind is a file `targetKinds` refuses a tag on, which is a missing edge; a file that over-reports
+it is one `targetKinds` waves through, which is an invented one. The direction is the same one
+section 4 takes for the edge itself.
 
 `arrivedBy: "user"` is a **second axis over the same rules**, and it answers the other question a
 zero-fan-in node raises. `resolvedBy` says who reaches this kind, so the absence of an edge is not
@@ -304,8 +342,11 @@ is a broken promise.
 unless a rule asks otherwise, through `maskStrings` (section 4), and for almost every rule they must
 be: the `string` edge family is a class name inside quotes, php's `@livewire('cart')` is a component
 name inside quotes, and every route path a `produces` or `consumes` rule reads lives inside one. The
-one shape that needs the opposite is a rule whose capture can only ever be code, and it asks per
-rule. When it does, only the **contents** go and the quote characters stay standing, and the blanking
+one shape that needs the opposite is a rule whose pattern can only ever describe code, an edge rule's
+or a kind rule's alike, and it asks per rule. Both views are built once per file and only where some
+rule asked for the second, so a pack with no asker pays nothing and a pack whose only asker is a kind
+rule still gets it. When a rule does ask, only the **contents** go and the quote characters stay
+standing, and the blanking
 preserves length and newlines exactly as comment masking does, so both views of a file share one
 `lineStarts` and a capture from either cites the line a reader will actually find.
 
@@ -398,19 +439,45 @@ which is what every rule did before the field existed and what almost every rule
 **per rule and not per family**, and that is load-bearing rather than tidy: php's `template` family
 carries both `<x-cart>`, which is markup and can only be markup, and `@livewire('cart')`, whose
 component name is inside the quotes and vanishes entirely if they are blanked. A per-family or
-per-pack flag would have to pick one of those two and be wrong about the other. Only the typescript
-pack's two `template` rules declare it, which moved that pack from 1.5.0 to 1.6.0 (section 8's pin
-demands the bump rather than trusting anybody to remember it); the php pack is untouched by the
-change, and the edges it emits are byte-identical before and after.
+per-pack flag would have to pick one of those two and be wrong about the other.
 
-Declaring it where the pack names no `stringQuotes` at all, in `comments` or in any
-`commentsByExtension` entry, is **rejected at load** rather than accepted and ignored. The masker
-finds a literal only through those quotes, so the flag would be inert, and a rule that asked not to
-read prose would go on reading it with nothing anywhere to say the request had been dropped. That is
-the failure shape `multilineQuotes` was bitten by in section 3, a declared field the schema stripped
-at load while the masking fix that read it quietly stopped working, and the remedy is the same one:
-make the honest answer arrive at load, where a message can name the pack and the rule's position in
-its family.
+**It is a field on a kind rule too**, where it does the same thing to `contentPattern` (section 2).
+The reason for the second half is not the label's own display but `targetKinds` above it: a kind is
+read like an edge, because `uniqueId` in `engine/resolver.ts` checks a tag's target against exactly
+that label, so a file over-promoted off tag-shaped text in a string becomes an eligible target and
+the refusal goes quiet. Declared per rule there for the same reason as here, and it is the same
+reason twice rather than a coincidence: a pattern describing code asks for the blanked view, a
+pattern keying off a string the framework itself reads must not.
+
+The typescript pack's two `template` rules declared it first, which moved that pack from 1.5.0 to
+1.6.0; its `**/*.{tsx,jsx}` kind rule declares it now, which moved the pack to 1.7.0 (section 8's
+pin demands the bump rather than trusting anybody to remember it). The php pack declares it nowhere
+and is untouched by either change, and the edges it emits are byte-identical before and after.
+
+Two ways of declaring the field are **rejected at load** rather than accepted and ignored. Declaring
+it where the pack names no `stringQuotes` at all, in `comments` or in any `commentsByExtension`
+entry, is refused for either rule kind: the masker finds a literal only through those quotes, so the
+flag would be inert, and a rule that asked not to read prose would go on reading it with nothing
+anywhere to say the request had been dropped. Declaring it on a **kind rule carrying no
+`contentPattern`** is refused as well, because such a rule reads no source at all: the flag would
+change nothing while reading to anybody auditing the pack as a guarantee that this kind cannot be
+won off the contents of a string. Both
+are the failure shape `multilineQuotes` was bitten by in section 3, a declared field the schema
+stripped at load while the masking fix that read it quietly stopped working, and the remedy is the
+same one: make the honest answer arrive at load, where a message can name the pack and the rule's
+position in its family or in `kindRules`.
+
+**The first of those two checks is pack-wide and the masker is per-extension, so it is a floor and
+not a guarantee.** It passes as soon as `comments` or any one `commentsByExtension` entry names a
+quote, while `commentSyntaxFor` picks the syntax by the file's own extension. A pack whose
+`commentsByExtension[".tsx"]` omits `stringQuotes` while `comments` declares them therefore loads
+clean, and `maskStrings` is silently inert for exactly the files it was written for: measured on the
+typescript pack with that one entry rewritten, `src/lone/Tips.tsx` holding only
+`export const tip = "render a <Tips /> here";` comes back `component` and the invented `template`
+edge comes back with it. Closing it means deciding which extensions a rule can reach, which means
+resolving its `pathGlob` against the pack's `match.extensions`, and that is a larger change than the
+one this section describes. Until then the check catches the pack that declares no quotes anywhere,
+which is the common way to get this wrong, and not the pack that declares them in the wrong place.
 
 A rule may carry **`targetKinds`**, the list of node kinds a name-resolving strategy is allowed to
 land on, read from the target node's own `kindRules` answer. Only `short-name` and `observer` resolve
@@ -504,7 +571,10 @@ Vue prose opens a literal, and a tag written between two apostrophes **on one li
 with them — `<p>It's here <CartBadge /> and that's it</p>` loses the tag. Two apostrophes on separate
 lines are already safe, because `'` is not in the pack's `multilineQuotes` and so may not hold a raw
 newline (section 3), and a lone apostrophe is safe because the masker never finds its closer and
-steps over the character rather than guessing. That is the whole of the new false-negative surface,
+steps over the character rather than guessing. The **backtick is the wider half of the same trade and
+is not confined to a line**: `` ` `` is in this pack's `multilineQuotes`, so two literal backticks in
+JSX or Vue text blank every tag on every line between them. Prose about keyboard shortcuts is where
+that actually happens. Those two shapes are the new false-negative surface,
 and it is the direction this repository already takes on the hazard axis: a missed edge is a gap a
 reader can be told about, an invented one is a fabricated finding with a `file:line` under it.
 

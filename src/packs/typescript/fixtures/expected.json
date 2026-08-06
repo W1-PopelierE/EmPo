@@ -286,6 +286,18 @@
       "assertsValue": false
     },
     {
+      "id": "src/react/cards/CardTemplates.tsx",
+      "file": "src/react/cards/CardTemplates.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "module",
+      "name": "CardTemplates",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
       "id": "src/react/cards/OrderCard.tsx",
       "file": "src/react/cards/OrderCard.tsx",
       "root": ".",
