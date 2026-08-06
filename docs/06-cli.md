@@ -343,12 +343,12 @@ staleness line under every answer already names.
 parsing, so enclosure is **lexical**: a dispatch counts when it is written between the two
 coordinates of a transaction in one file. A dispatch reached through a helper the transaction calls
 is invisible, however certain it is at runtime, and so is a transaction opened in a parent class or a
-middleware. String literals are deliberately never masked before pack rules run
-([04-language-packs](04-language-packs.md) section 3), so a transaction opener written inside a
-quoted string opens an extent that no database opened, and the dispatches it appears to enclose are
-reported. Both blind spots are set out with their measurable direction in
-[04-language-packs](04-language-packs.md) section 7. Read the list the way every other answer here
-asks to be read: a floor, not a ceiling.
+middleware. Hazard rules always read string contents as written: an `edges` rule can ask for them to
+be blanked and a hazard rule has no such switch ([04-language-packs](04-language-packs.md) section
+3), so a transaction opener written inside a quoted string opens an extent that no database opened,
+and the dispatches it appears to enclose are reported. Both blind spots are set out with their
+measurable direction in [04-language-packs](04-language-packs.md) section 7. Read the list the way
+every other answer here asks to be read: a floor, not a ceiling.
 
 ## `empo verify`
 

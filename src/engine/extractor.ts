@@ -76,6 +76,8 @@ interface CompiledEdgeRule {
   /** Undefined where the rule declares no `pathGlob`, which means it runs over every file. */
   matchesPath?: (relPath: string) => boolean;
   targetKinds?: string[];
+  /** True where the rule reads the view with string contents blanked. See src/engine/mask.ts. */
+  maskStrings: boolean;
 }
 
 interface CompiledSymbolRule {
@@ -116,6 +118,7 @@ export function compilePack(pack: Pack): CompiledPack {
         normalize: rule.normalize ?? [],
         matchesPath: rule.pathGlob ? picomatch(rule.pathGlob) : undefined,
         targetKinds: rule.targetKinds,
+        maskStrings: rule.maskStrings === true,
       });
     }
   }
@@ -159,10 +162,21 @@ export function extractFile(compiled: CompiledPack, scanned: ScannedFile): Extra
   // chosen by extension, because a pack of one language can hold two: a Vue SFC's html template
   // and its TypeScript script comment differently, and the `.ts` files must not carry the html
   // pair (docs/04-language-packs.md).
-  const source = maskComments(scanned.source, commentSyntaxFor(compiled.pack, scanned.relPath));
+  const syntax = commentSyntaxFor(compiled.pack, scanned.relPath);
+  const source = maskComments(scanned.source, syntax);
 
   const identity = identify(compiled, source, scanned);
   if (identity === null) return null;
+
+  // The second view, for rules that declared `maskStrings`: the same source with string contents
+  // blanked too. Built once per file and only where a rule asked, because most packs have no such
+  // rule and would pay a second pass over every file for a view nothing reads.
+  //
+  // Blanking preserves length and newlines exactly as comment masking does, so the two views share
+  // one `lineStarts` and a capture from either cites the same line a reader will find in the file.
+  const codeOnly = compiled.edgeRules.some((rule) => rule.maskStrings)
+    ? maskComments(scanned.source, syntax, true)
+    : source;
 
   const starts = lineStarts(source);
   const isTest = compiled.testPaths.some((matches) => matches(scanned.relPath));
@@ -178,7 +192,7 @@ export function extractFile(compiled: CompiledPack, scanned: ScannedFile): Extra
     assertsValue: isTest && assertsValue(compiled.pack, source),
     produces: extractSymbols(compiled.produces, source, scanned.relPath, starts),
     consumes: extractSymbols(compiled.consumes, source, scanned.relPath, starts),
-    captures: extractCaptures(compiled.edgeRules, source, scanned.relPath, starts),
+    captures: extractCaptures(compiled.edgeRules, source, codeOnly, scanned.relPath, starts),
     // The masked source, like every other rule: a dispatch inside a commented-out block is not a
     // dispatch, and a pack whose rules read the raw text would report hazards nobody can run.
     dispatches: compiled.hazards === null ? [] : findEnclosedDispatches(compiled.hazards, source),
@@ -287,6 +301,7 @@ function assertsValue(pack: Pack, source: string): boolean {
 function extractCaptures(
   rules: CompiledEdgeRule[],
   source: string,
+  codeOnly: string,
   relPath: string,
   starts: number[],
 ): Capture[] {
@@ -295,7 +310,10 @@ function extractCaptures(
     // Root-relative, like every other pack-declared glob (`kindRules`, `tests.paths`). A rule the
     // path excludes never runs, so it can neither match nor cost anything.
     if (rule.matchesPath && !rule.matchesPath(relPath)) continue;
-    for (const match of matchAll(rule.regex, source)) {
+    // Which view of the file this rule reads is the rule's own declaration, because one family
+    // holds both answers: a JSX tag is code and can only be code, while php's `@livewire('cart')`
+    // names its component inside the quotes the other view blanks.
+    for (const match of matchAll(rule.regex, rule.maskStrings ? codeOnly : source)) {
       captures.push({
         family: rule.family,
         resolve: rule.resolve,

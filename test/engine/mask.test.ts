@@ -187,3 +187,79 @@ describe("maskComments over a single-file component", () => {
     expect(maskComments(source, php)).toBe(source);
   });
 });
+
+/**
+ * The third parameter, for the one rule shape that must not read prose about code: a JSX tag rule,
+ * where `const tip = "<Button />"` is indistinguishable from a rendering of it. Every other rule
+ * still reads strings as written, which is why this is a parameter and not the default.
+ */
+describe("maskComments blanking string contents", () => {
+  test("blanks the contents of a string and leaves its quotes standing", () => {
+    const source = 'const tip = "<Button />";\n';
+
+    const masked = maskComments(source, typescript, true);
+
+    expect(masked).toBe('const tip = "          ";\n');
+    expect(masked).toHaveLength(source.length);
+  });
+
+  test("leaves a tag whose attribute is a string still readable as a tag", () => {
+    // The reason only the contents go and the quotes stay. Blanking the delimiters too would turn
+    // every real tag carrying a prop into text no tag rule matches, trading an invented edge for a
+    // missing one across the whole corpus rather than in the corner this is aimed at.
+    const source = '<Button title="hi" />\n';
+
+    expect(maskComments(source, typescript, true)).toBe('<Button title="  " />\n');
+  });
+
+  test("blanks a comment and a string in one pass", () => {
+    const source = 'const a = "<Ghost />"; // <Phantom />\n';
+
+    const masked = maskComments(source, typescript, true);
+
+    expect(masked).not.toContain("Ghost");
+    expect(masked).not.toContain("Phantom");
+    expect(masked).toHaveLength(source.length);
+  });
+
+  test("keeps every line number, so both views of a file share one line index", () => {
+    // The engine reads captures out of two views of the same file and cites lines computed once
+    // (src/engine/extractor.ts). A blank that ate a newline inside a template literal would send a
+    // reader chasing a tag to the wrong line, which is the failure the whole citation gate rests on.
+    const source = "const a = `\n  <Ghost />\n`;\nconst b = 2;\n";
+
+    const masked = maskComments(source, typescript, true);
+
+    expect(masked).toHaveLength(source.length);
+    expect(masked.split("\n")).toHaveLength(source.split("\n").length);
+    expect(masked).not.toContain("Ghost");
+    expect(masked.split("\n")[3]).toBe("const b = 2;");
+  });
+
+  test("steps over a quote whose closer never arrives rather than blanking to the end of the file", () => {
+    // The same argument the comment path already makes: a quote with no closer was never an opener,
+    // so blanking on that guess would delete the rest of a real file. An apostrophe in JSX prose is
+    // exactly that character, and this is what keeps the tag on the next line readable.
+    const source = "<p>It's here</p>\n<CartBadge />\n";
+
+    expect(maskComments(source, typescript, true)).toBe(source);
+  });
+
+  test("blanks a tag written between two apostrophes on one line, which is what this costs", () => {
+    // The honest cost, pinned rather than left to be discovered. Two apostrophes on one line of JSX
+    // prose look exactly like a string literal and nothing short of a parser tells them apart, so a
+    // tag between them is lost. Under-reporting is a gap and over-reporting is a fabricated finding,
+    // and the two are not equally acceptable here. Separate lines are already safe, which the test
+    // above pins; this is the residue.
+    const source = "<p>It's here <CartBadge /> and that's it</p>\n";
+
+    expect(maskComments(source, typescript, true)).not.toContain("CartBadge");
+  });
+
+  test("changes nothing for a caller that does not ask", () => {
+    const source = 'const map = { observer: "Acme\\Observers\\OrderObserver" };\n';
+
+    expect(maskComments(source, typescript)).toBe(source);
+    expect(maskComments(source, typescript, false)).toBe(source);
+  });
+});

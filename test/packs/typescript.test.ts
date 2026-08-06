@@ -21,7 +21,7 @@ describe("typescript pack", () => {
 
   test("loads with its declared identity", () => {
     expect(pack.name).toBe("typescript");
-    expect(pack.version).toBe("1.5.0");
+    expect(pack.version).toBe("1.6.0");
   });
 
   test("reproduces the expected nodes", () => {
@@ -269,8 +269,10 @@ describe("typescript pack", () => {
     // including the hooks module and the types module every React tree has. OldOrderScreen.tsx is
     // the .tsx here that holds no tag, and Badge.tsx is the control: its only tag is a lowercase
     // element, which is a rendered component all the same. What the content half does not do is
-    // tell a tag from a tag inside a string, since string contents are never masked, and that limit
-    // is a known gap rather than a claim made here.
+    // tell a tag from a tag inside a string: `maskStrings` is an edge-rule field and a kind rule
+    // has none, so this one reads string contents as written even now that the tag rules do not.
+    // That limit is a known gap rather than a claim made here, and it is not only cosmetic, because
+    // `uniqueId` in engine/resolver.ts filters on the kind this defect gets wrong.
     expect(node("src/legacy/OldOrderScreen.tsx")?.kind).toBe("module");
     expect(node("src/react/types/OrderRow.ts")?.kind).toBe("module");
     expect(node("src/react/cards/Badge.tsx")?.kind).toBe("component");
@@ -304,13 +306,33 @@ describe("typescript pack", () => {
     ]);
   });
 
+  test("reads no tag out of a string in the very files the tag rules are for", () => {
+    // The half `pathGlob` could not reach. registry.ts below is kept out by its extension, but
+    // CardDocs.tsx is a .tsx, which is exactly what the tag rules are supposed to read, so no glob
+    // separates its rendered `<OrderCard />` from the two component names in its `examples`
+    // strings. The rules declare `maskStrings`, so they read a view of the file with string
+    // contents blanked and the prose cannot match.
+    //
+    // Both halves are asserted from one file on purpose: suppression alone would also be bought by
+    // a rule that matched nothing, and the import edge is here to show the file really does sit
+    // beside OrderCard in the graph. Drop `maskStrings` from the pack and this goes red with edges
+    // to OrderList.tsx and OrderScreenView.tsx, which is 16 template edges in the corpus instead of
+    // 14, and coverage travels along every non-bridge edge, so a test touching this module would
+    // start reaching two components it never mounted.
+    expect(from("src/react/cards/CardDocs.tsx").map((edge) => `${edge.kind} ${edge.to}`)).toEqual([
+      "import src/react/cards/OrderCard.tsx",
+      "template src/react/cards/OrderCard.tsx",
+    ]);
+  });
+
   test("runs no tag rule over a file that cannot hold a tag", () => {
     // registry.ts is a .ts module whose two string values are `<OrderCard />` and
-    // `<OrderList>rows</OrderList>`, both naming components this graph holds. String contents are
-    // never masked and must not be, so the only thing keeping those out of the graph is the rules'
-    // pathGlob. Remove it and this file couples to two components it neither imports nor renders,
-    // and because coverage travels along every non-bridge edge the same line in a test would make
-    // that test reach a component it never mounted.
+    // `<OrderList>rows</OrderList>`, both naming components this graph holds. The rules' pathGlob
+    // is what keeps them out here, and it is checked before anything reads the file, so this stays
+    // the pathGlob's own test even now that the tag rules also decline to read strings: remove the
+    // glob and the rule runs over a .ts file it has no business in. What the glob buys that
+    // `maskStrings` does not is every other rule shape a .ts file could trip; what `maskStrings`
+    // buys that the glob cannot is the .tsx case the glob must let through (CardDocs.tsx above).
     expect(from("src/react/registry.ts")).toEqual([]);
   });
 

@@ -262,6 +262,18 @@
       "assertsValue": false
     },
     {
+      "id": "src/react/cards/CardDocs.tsx",
+      "file": "src/react/cards/CardDocs.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "CardDocs",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
       "id": "src/react/cards/CardHeader.tsx",
       "file": "src/react/cards/CardHeader.tsx",
       "root": ".",
@@ -799,6 +811,26 @@
       "evidence": {
         "file": "src/react/Pages/Orders/Print.jsx",
         "line": 7
+      }
+    },
+    {
+      "from": "src/react/cards/CardDocs.tsx",
+      "to": "src/react/cards/OrderCard.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/CardDocs.tsx",
+        "line": 13
+      }
+    },
+    {
+      "from": "src/react/cards/CardDocs.tsx",
+      "to": "src/react/cards/OrderCard.tsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/CardDocs.tsx",
+        "line": 21
       }
     },
     {

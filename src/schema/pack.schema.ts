@@ -71,10 +71,14 @@ export const extractRuleSchema = z
      * already uses. It exists because a rule's blast radius is the whole pack: `edges` rules run
      * over every file `match.extensions` claims, and the typescript pack matches seven extensions
      * of which two can hold JSX. A JSX tag rule left unscoped reads `"<Widget />"` out of a string
-     * in a `.ts` file (string contents are never masked, and must not be, since every route path
-     * lives in one) and emits an edge to a file that source neither imports nor renders. An
+     * in a `.ts` file and emits an edge to a file that source neither imports nor renders. An
      * invented edge is the one failure this tool exists to prevent, so the pack says where its rule
      * is allowed to look. Absent means everywhere, which is what every rule did before this field.
+     *
+     * It is the first half of that answer and not the whole of it. The glob decides which files a
+     * rule opens; `maskStrings` below decides what counts as code once it is inside one, which is
+     * the question a `.tsx` naming a component inside a string asks and no glob can answer, because
+     * that file is exactly the file the rule is meant to read.
      */
     pathGlob: z.string().min(1).optional(),
     /**
@@ -89,6 +93,26 @@ export const extractRuleSchema = z
      * fact about the language, and both the kind and the rule are declared in the same file.
      */
     targetKinds: z.array(z.string().min(1)).min(1).optional(),
+    /**
+     * Blank the contents of every string literal before this rule runs. It is per rule and not per
+     * family because one family holds both answers: php's `template` family carries `<x-cart>`,
+     * which is markup and can only be markup, and `@livewire('cart')`, whose component name is
+     * inside the quotes and disappears if they are blanked.
+     *
+     * `pathGlob` was the first half of this answer and could not be the whole of it. It keeps a JSX
+     * tag rule out of a `.ts` file, but a `.tsx` file naming a component inside a quoted string is
+     * exactly the file the rule is supposed to read, and no glob separates `const tip = "<Button
+     * />"` from a rendered `<Button />`. An invented edge is the one failure this tool exists to
+     * prevent, so the rule that cannot tell prose from code declines to read prose.
+     *
+     * What it costs is a missed edge where a quote is not a quote: an apostrophe in JSX prose opens
+     * a literal this masker believes in, so a tag between two of them on **one line** is blanked
+     * with it. Two apostrophes on separate lines are already safe, because a `'` may not hold a raw
+     * newline (`multilineQuotes`). Under-reporting is a gap and over-reporting is a fabricated
+     * finding, and the two are not equally acceptable here, which is the same trade the hazard
+     * axis's statement boundary makes (src/engine/hazards.ts).
+     */
+    maskStrings: z.boolean().optional(),
   })
   .refine((rule) => groupCount(rule.pattern) >= GROUPS_REQUIRED[rule.resolve], {
     message: "pattern has fewer capture groups than its resolve strategy reads",
@@ -279,118 +303,143 @@ const aliasSourceSchema = z.object({
   extends: z.string().min(1).optional(),
 });
 
-export const packSchema = z.object({
-  name: z.string().min(1),
-  version: z.string().min(1),
-  match: z.object({
-    extensions: z.array(z.string().min(1)).min(1),
-    manifest: z.array(z.string()).optional(),
-  }),
-  node: z.object({
-    id: z.object({
-      strategy: z.enum(["fqcn", "module-path", "symbol"]),
-      namespacePattern: regex.optional(),
-      namePattern: regex.optional(),
-      fallback: z.literal("path").optional(),
-      indexNames: z.array(z.string().min(1)).optional(),
+export const packSchema = z
+  .object({
+    name: z.string().min(1),
+    version: z.string().min(1),
+    match: z.object({
+      extensions: z.array(z.string().min(1)).min(1),
+      manifest: z.array(z.string()).optional(),
     }),
-    kindRules: z
-      .array(
-        z.object({
-          kind: z.string().min(1),
-          pathGlob: z.string().optional(),
-          contentPattern: regex.optional(),
-          /**
-           * Marks a kind the framework reaches by name or by convention rather than through an edge
-           * any rule in this pack can see: a Laravel view rendered by `view('orders.index')`, a
-           * migration the runner discovers, a policy found by its class name. Those nodes have a
-           * fan-in of zero forever, so `empo query --orphans` must not offer them as dead code.
-           *
-           * An enum and not a boolean, because the useful fact is *who* resolves the node, and the
-           * next value to want (a DI container, a plugin registry) is a sibling rather than a
-           * second flag. A reader of `true` would have to guess which of those was meant.
-           */
-          resolvedBy: z.enum(["framework"]).optional(),
-          /**
-           * Marks a kind somebody outside the code arrives at: a route file a request hits, a
-           * console command an operator runs, a Livewire component a page mounts. `empo init`'s map
-           * brief keeps these and ranks them first, so the strongest flow signal a repository has
-           * cannot be pushed past the cap by a directory of migrations.
-           *
-           * A second axis rather than a reading of `resolvedBy`, because the two ask different
-           * questions of one set of zero-fan-in nodes. `--orphans` asks "is this dead?", where a
-           * framework-resolved kind means there is no evidence either way, so hide it. The brief
-           * asks "does a journey start here?", where a route file is emphatically yes. Both marks
-           * on one rule is the normal case for a route file, not a contradiction.
-           *
-           * An enum and not a boolean for the same reason as `resolvedBy`: the useful fact is *who*
-           * arrives, so a scheduler or a webhook sender is a sibling value rather than a second
-           * flag.
-           */
-          arrivedBy: z.enum(["user"]).optional(),
-        }),
-      )
-      .min(1),
-  }),
-  comments: commentSyntaxSchema.optional(),
-  /**
-   * Comment syntax that varies by file extension, overriding `comments` for files that match. A
-   * pack of one language can still hold two syntaxes: a Vue SFC's `<template>` is html, where
-   * `<!-- -->` is a comment, while the pack's `.ts` files must not treat `<!--` as one, because
-   * `a <!--b` is `a < !(--b)` and reading it as a comment blanks the rest of the file. The key is a
-   * dotted extension (".vue") and the value is a whole syntax, not a patch, so what applies to a
-   * file is one object a reader can see in full rather than a base merged with an override.
-   */
-  commentsByExtension: z.record(z.string().regex(/^\./), commentSyntaxSchema).optional(),
-  edges: z
-    .object({
-      import: z.array(extractRuleSchema).optional(),
-      fqcn: z.array(extractRuleSchema).optional(),
-      string: z.array(extractRuleSchema).optional(),
-      template: z.array(extractRuleSchema).optional(),
-      hook: z.array(extractRuleSchema).optional(),
-    })
-    .default({}),
-  produces: z.array(symbolRuleSchema).default([]),
-  consumes: z.array(symbolRuleSchema).default([]),
-  tests: z
-    .object({
-      paths: z.array(z.string()).default([]),
-      importsRule: z.string().default("import"),
-      assertionTerms: z.array(z.string()).default([]),
-      /**
-       * Occurrences removed from the source before the terms are matched, so a term whose value
-       * claim depends on its argument can still be carried. `assertTrue(` is a value assertion in
-       * `assertTrue($order->isPaid())` and a liveness assertion in
-       * `assertTrue(method_exists($c, 'confirm'))`, and no substring can tell them apart; naming
-       * the second form here keeps the first. Declared in the schema on purpose, because a field
-       * the schema does not name is stripped at load and the code reading it dies silently.
-       */
-      assertionExcludes: z.array(z.string()).default([]),
-    })
-    .default({ paths: [], importsRule: "import", assertionTerms: [], assertionExcludes: [] }),
-  /**
-   * Optional, and optional is the point: a pack that declares nothing here says this language has
-   * no hazard worth looking for, which is a different answer from finding none. `empo query
-   * --hazards` prints that difference rather than showing an empty list either way.
-   */
-  hazards: hazardsSchema.optional(),
-  /**
-   * Where this language's toolchain writes its import aliases, so `empo init` can seed config
-   * `aliases` instead of leaving a human to copy a tsconfig by hand.
-   *
-   * This block exists because the alternative was worse in the one way this repository cares about:
-   * the seeder has to open `tsconfig.json` and read `compilerOptions.paths`, and both of those
-   * strings are TypeScript facts. Written into `src/engine/` they would be the first
-   * language-specific logic in the engine (docs/04-language-packs.md, and the rule that adding a
-   * language is a data file). Written here they are what every other language fact in EmPo is: a
-   * line in a pack, which a python or go pack fills with its own file and its own field.
-   *
-   * **Read by `empo init` only, never by `empo index`.** The graph is a function of the config plus
-   * the files, so a build never opens one of these; what a root resolves is whatever a human left
-   * in `aliases` after reading what init seeded. That is the whole reason the seed goes through
-   * config rather than being resolved live.
-   */
-  aliasSources: z.array(aliasSourceSchema).optional(),
-  module: z.string().optional(),
-});
+    node: z.object({
+      id: z.object({
+        strategy: z.enum(["fqcn", "module-path", "symbol"]),
+        namespacePattern: regex.optional(),
+        namePattern: regex.optional(),
+        fallback: z.literal("path").optional(),
+        indexNames: z.array(z.string().min(1)).optional(),
+      }),
+      kindRules: z
+        .array(
+          z.object({
+            kind: z.string().min(1),
+            pathGlob: z.string().optional(),
+            contentPattern: regex.optional(),
+            /**
+             * Marks a kind the framework reaches by name or by convention rather than through an edge
+             * any rule in this pack can see: a Laravel view rendered by `view('orders.index')`, a
+             * migration the runner discovers, a policy found by its class name. Those nodes have a
+             * fan-in of zero forever, so `empo query --orphans` must not offer them as dead code.
+             *
+             * An enum and not a boolean, because the useful fact is *who* resolves the node, and the
+             * next value to want (a DI container, a plugin registry) is a sibling rather than a
+             * second flag. A reader of `true` would have to guess which of those was meant.
+             */
+            resolvedBy: z.enum(["framework"]).optional(),
+            /**
+             * Marks a kind somebody outside the code arrives at: a route file a request hits, a
+             * console command an operator runs, a Livewire component a page mounts. `empo init`'s map
+             * brief keeps these and ranks them first, so the strongest flow signal a repository has
+             * cannot be pushed past the cap by a directory of migrations.
+             *
+             * A second axis rather than a reading of `resolvedBy`, because the two ask different
+             * questions of one set of zero-fan-in nodes. `--orphans` asks "is this dead?", where a
+             * framework-resolved kind means there is no evidence either way, so hide it. The brief
+             * asks "does a journey start here?", where a route file is emphatically yes. Both marks
+             * on one rule is the normal case for a route file, not a contradiction.
+             *
+             * An enum and not a boolean for the same reason as `resolvedBy`: the useful fact is *who*
+             * arrives, so a scheduler or a webhook sender is a sibling value rather than a second
+             * flag.
+             */
+            arrivedBy: z.enum(["user"]).optional(),
+          }),
+        )
+        .min(1),
+    }),
+    comments: commentSyntaxSchema.optional(),
+    /**
+     * Comment syntax that varies by file extension, overriding `comments` for files that match. A
+     * pack of one language can still hold two syntaxes: a Vue SFC's `<template>` is html, where
+     * `<!-- -->` is a comment, while the pack's `.ts` files must not treat `<!--` as one, because
+     * `a <!--b` is `a < !(--b)` and reading it as a comment blanks the rest of the file. The key is a
+     * dotted extension (".vue") and the value is a whole syntax, not a patch, so what applies to a
+     * file is one object a reader can see in full rather than a base merged with an override.
+     */
+    commentsByExtension: z.record(z.string().regex(/^\./), commentSyntaxSchema).optional(),
+    edges: z
+      .object({
+        import: z.array(extractRuleSchema).optional(),
+        fqcn: z.array(extractRuleSchema).optional(),
+        string: z.array(extractRuleSchema).optional(),
+        template: z.array(extractRuleSchema).optional(),
+        hook: z.array(extractRuleSchema).optional(),
+      })
+      .default({}),
+    produces: z.array(symbolRuleSchema).default([]),
+    consumes: z.array(symbolRuleSchema).default([]),
+    tests: z
+      .object({
+        paths: z.array(z.string()).default([]),
+        importsRule: z.string().default("import"),
+        assertionTerms: z.array(z.string()).default([]),
+        /**
+         * Occurrences removed from the source before the terms are matched, so a term whose value
+         * claim depends on its argument can still be carried. `assertTrue(` is a value assertion in
+         * `assertTrue($order->isPaid())` and a liveness assertion in
+         * `assertTrue(method_exists($c, 'confirm'))`, and no substring can tell them apart; naming
+         * the second form here keeps the first. Declared in the schema on purpose, because a field
+         * the schema does not name is stripped at load and the code reading it dies silently.
+         */
+        assertionExcludes: z.array(z.string()).default([]),
+      })
+      .default({ paths: [], importsRule: "import", assertionTerms: [], assertionExcludes: [] }),
+    /**
+     * Optional, and optional is the point: a pack that declares nothing here says this language has
+     * no hazard worth looking for, which is a different answer from finding none. `empo query
+     * --hazards` prints that difference rather than showing an empty list either way.
+     */
+    hazards: hazardsSchema.optional(),
+    /**
+     * Where this language's toolchain writes its import aliases, so `empo init` can seed config
+     * `aliases` instead of leaving a human to copy a tsconfig by hand.
+     *
+     * This block exists because the alternative was worse in the one way this repository cares about:
+     * the seeder has to open `tsconfig.json` and read `compilerOptions.paths`, and both of those
+     * strings are TypeScript facts. Written into `src/engine/` they would be the first
+     * language-specific logic in the engine (docs/04-language-packs.md, and the rule that adding a
+     * language is a data file). Written here they are what every other language fact in EmPo is: a
+     * line in a pack, which a python or go pack fills with its own file and its own field.
+     *
+     * **Read by `empo init` only, never by `empo index`.** The graph is a function of the config plus
+     * the files, so a build never opens one of these; what a root resolves is whatever a human left
+     * in `aliases` after reading what init seeded. That is the whole reason the seed goes through
+     * config rather than being resolved live.
+     */
+    aliasSources: z.array(aliasSourceSchema).optional(),
+    module: z.string().optional(),
+  })
+  .superRefine((pack, ctx) => {
+    // `maskStrings` is answered by the masker, and the masker finds a string literal only through
+    // `stringQuotes`. A pack declaring the flag and no quotes has asked for a protection it will not
+    // get, and the rule goes on matching inside every literal in the language with nothing to show
+    // that its request was dropped. That is the shape this repository has been bitten by before (a
+    // pack field the schema stripped, a normalizer list nobody applied), and the remedy each time was
+    // to make the honest answer arrive at load rather than as an edge nobody can explain.
+    const declaresQuotes = [pack.comments, ...Object.values(pack.commentsByExtension ?? {})].some(
+      (syntax) => syntax !== undefined && syntax.stringQuotes.length > 0,
+    );
+    if (declaresQuotes) return;
+
+    for (const [family, rules] of Object.entries(pack.edges)) {
+      for (const [position, rule] of (rules ?? []).entries()) {
+        if (rule.maskStrings !== true) continue;
+        ctx.addIssue({
+          code: "custom",
+          path: ["edges", family, position, "maskStrings"],
+          message:
+            "maskStrings needs a comment syntax declaring stringQuotes, or there is no literal to mask",
+        });
+      }
+    }
+  });

@@ -1,6 +1,6 @@
 {
   "name": "typescript",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "match": {
     "extensions": [".ts", ".tsx", ".vue", ".js", ".jsx", ".mjs", ".cjs"],
     "manifest": ["package.json", "tsconfig.json"]
@@ -73,12 +73,14 @@
         "pattern": "</([A-Z][A-Za-z0-9_]*)(?:\\.[A-Za-z0-9_]+)*\\s*>",
         "resolve": "short-name",
         "pathGlob": "**/*.{tsx,jsx,vue}",
+        "maskStrings": true,
         "targetKinds": ["component", "screen"]
       },
       {
         "pattern": "<([A-Z][A-Za-z0-9_]*)(?:\\.[A-Za-z0-9_]+)*(?:<[^<>]*>)?(?:\\s[^<]*?)?/>",
         "resolve": "short-name",
         "pathGlob": "**/*.{tsx,jsx,vue}",
+        "maskStrings": true,
         "targetKinds": ["component", "screen"]
       }
     ]

@@ -914,10 +914,32 @@ suite, and both generalize past that pack.
 while looking at one kind of file and then runs over every file `match.extensions` claims. The
 typescript pack matches seven extensions of which two can hold JSX, so a tag rule written for `.tsx`
 also read `.ts`, `.js`, `.mjs` and `.cjs`, where a component name inside a quoted string is not a tag
-and string contents are never masked. The result was a real edge out of a documentation constant, and
-because coverage travels along every non-bridge edge, the same string in a test would have made that
-test reach a component it never mounted. `pathGlob` on an extract rule is the fix and the general
+and nothing was blanking string contents. The result was a real edge out of a documentation constant,
+and because coverage travels along every non-bridge edge, the same string in a test would have made
+that test reach a component it never mounted. `pathGlob` on an extract rule is the fix and the general
 answer: a rule that is about a dialect says so.
+
+That glob closed four extensions and left the fifth open, and closing it took the masker learning to
+answer per rule (typescript pack 1.6.0). `const tip = "<Button />"` written in a `.tsx`, `.jsx` or
+`.vue` file produced the same phantom `template` edge to a file it neither imports nor renders, and
+no glob could refuse that one, because that file is exactly the file the tag rules exist to read.
+`maskComments(source, syntax, maskStrings)` now blanks the **contents** of every string literal as
+well when asked, keeping the quote characters, the length and the newlines so every line number
+downstream is unchanged, and `maskStrings?: boolean` on an edge rule (`schema/types.ts`, validated in
+`extractRuleSchema`) is how a rule asks; absent is the previous behaviour. It is per rule and not per
+family deliberately: php's `template` family holds both `<x-cart>`, which is markup, and
+`@livewire('cart')`, whose whole answer lives inside the quotes, so a family-wide switch would break
+the second. Only the typescript pack's two `template` rules declare it and the php pack is untouched.
+`engine/extractor.ts` builds the second code-only view once per file and only when some rule asked
+for it, and each rule reads the view it declared. The price is one new false negative: a tag written
+between two apostrophes on the same line of JSX or Vue prose. Separate lines stay safe, because `'`
+is not in `multilineQuotes`. Regenerating the typescript fixture snapshot produced only additions, so
+no edge that was ever real was lost. What this does not touch is the label: `maskStrings` is an
+edge-rule field, `kindRules.contentPattern` reads the comment-masked source and no other view, and
+so a `.tsx` whose only tag-shaped text sits inside a string is still kinded `component`. That label
+is not cosmetic, which is the part worth writing down: `uniqueId` in `engine/resolver.ts` gates
+every `short-name` resolution on the target's kind, so `targetKinds` — the clause that exists to
+refuse a tag landing on a same-named non-component — reads the one field this defect corrupts.
 
 **A name-resolving strategy is only as safe as the namespace it resolves into.** `short-name` was
 built for Blade, where a `<x-price-badge>` names something in this repository by construction, and it
