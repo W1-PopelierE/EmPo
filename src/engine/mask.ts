@@ -10,10 +10,24 @@ import type { CommentSyntax } from "../schema/types";
  * coupled to a route that does not exist.
  *
  * Comments are replaced by spaces rather than removed, so the string keeps its length and its
- * newlines and every line number computed downstream stays correct. String literals are tracked
- * but never masked: the `string` edge family and every route path live inside them.
+ * newlines and every line number computed downstream stays correct.
+ *
+ * String literals are tracked always and blanked only when `maskStrings` asks for it, because the
+ * two answers are both right and only the rule knows which it needs. Most rules must read string
+ * contents: the `string` edge family is a class name inside quotes, php's `@livewire('cart')` is a
+ * component name inside quotes, and every route path a `consumes` rule reads lives inside one. A
+ * JSX tag rule needs the opposite, because `const tip = "<Button />"` in a `.tsx` file is prose
+ * about a component and not a rendering of it, and nothing about the text tells the two apart
+ * (docs/04-language-packs.md section 4). So the caller asks, per rule.
+ *
+ * Only the **contents** are blanked; the quote characters stay, so a rule reading `<Button
+ * title="hi" />` still sees a tag with a well-formed attribute rather than a truncated one.
  */
-export function maskComments(source: string, syntax: CommentSyntax | undefined): string {
+export function maskComments(
+  source: string,
+  syntax: CommentSyntax | undefined,
+  maskStrings = false,
+): string {
   if (syntax === undefined) return source;
 
   const line = syntax.line ?? [];
@@ -21,7 +35,12 @@ export function maskComments(source: string, syntax: CommentSyntax | undefined):
   const quotes = syntax.stringQuotes ?? [];
   const escapeChar = syntax.stringEscape;
   const multiline = syntax.multilineQuotes;
-  if (line.length === 0 && block.length === 0) return source;
+  // Nothing to blank and nothing asked for: the walk could only return the source it was given.
+  // The `maskStrings` clause is why this is not just the comment test. An embedded template
+  // language declares no comment pair of its own and still declares quotes (docs/04 section 3), and
+  // a rule over such a file that asked not to read strings would otherwise be answered with the raw
+  // source and no sign that its request had been dropped.
+  if (line.length === 0 && block.length === 0 && !(maskStrings && quotes.length > 0)) return source;
 
   const out = [...source];
   let index = 0;
@@ -36,7 +55,16 @@ export function maskComments(source: string, syntax: CommentSyntax | undefined):
       // import in the rest of the file becomes an edge. Stepping over the one character instead
       // costs nothing when the guess was wrong and saves the whole file when it was right.
       const end = skipString(source, index, quote, escapeChar, spansLines(multiline, quote));
-      index = end ?? index + quote.length;
+      if (end === null) {
+        index += quote.length;
+        continue;
+      }
+      // The contents, not the quotes: `end` is past the closer and `index` is at the opener, so the
+      // two delimiters are left standing and everything between them goes. A closer this masker
+      // could not find means the character was never an opener, and blanking on that guess would
+      // delete real code, so the branch above steps over it instead.
+      if (maskStrings) blank(out, source, index + quote.length, end - quote.length);
+      index = end;
       continue;
     }
 

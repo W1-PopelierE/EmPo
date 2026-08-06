@@ -260,6 +260,80 @@ describe("packSchema", () => {
     expect(result.data?.edges.template?.[0]?.targetKinds).toEqual(["component", "screen"]);
   });
 
+  test("keeps an edge rule's maskStrings, rather than stripping it at load", () => {
+    // The same scar once more. A stripped `maskStrings` does not fail either: the rule goes on
+    // reading `const tip = "<Button />"` as a rendered tag and emits an edge to a file the source
+    // only mentions in prose, while the pack reads as though it had declined to look inside quotes.
+    const rule = {
+      pattern: "<([A-Z][A-Za-z0-9_]*)\\s*/>",
+      resolve: "short-name",
+      maskStrings: true,
+    };
+
+    const result = packSchema.safeParse(
+      pack({
+        comments: { line: ["//"], stringQuotes: ["'", '"', "`"] },
+        edges: { template: [rule] },
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.data?.edges.template?.[0]?.maskStrings).toBe(true);
+  });
+
+  test("rejects maskStrings on a pack whose comment syntax declares no stringQuotes", () => {
+    // The masker finds a literal only through `stringQuotes`, so without them the flag is inert:
+    // the rule keeps matching inside every literal and nothing shows that its request was dropped.
+    const rule = {
+      pattern: "<([A-Z][A-Za-z0-9_]*)\\s*/>",
+      resolve: "short-name",
+      maskStrings: true,
+    };
+
+    const { success, issues } = parse(
+      pack({ comments: { line: ["//"] }, edges: { template: [rule] } }),
+    );
+
+    expect(success).toBe(false);
+    expect(issues).toContain(
+      "edges.template.0.maskStrings: maskStrings needs a comment syntax declaring stringQuotes, or there is no literal to mask",
+    );
+  });
+
+  test("accepts maskStrings when only commentsByExtension declares the quotes", () => {
+    // A pack may leave `comments` off entirely and describe each extension in full, which is what
+    // `commentsByExtension` is for. The quotes are declared, the masker will find literals in the
+    // files that matter, and a check reading only the top-level `comments` would refuse this pack.
+    const rule = {
+      pattern: "<([A-Z][A-Za-z0-9_]*)\\s*/>",
+      resolve: "short-name",
+      maskStrings: true,
+    };
+
+    const result = packSchema.safeParse(
+      pack({
+        commentsByExtension: { ".tsx": { line: ["//"], stringQuotes: ["'", '"', "`"] } },
+        edges: { template: [rule] },
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.data?.edges.template?.[0]?.maskStrings).toBe(true);
+  });
+
+  test("leaves maskStrings absent when a rule does not ask for it", () => {
+    // No runtime default, in both directions. `false` would be a value the shipped packs never
+    // wrote, and test/packs/versions.test.ts hashes the parsed pack, so a default would move both
+    // packs' hashes and read as a pack change nobody made.
+    const rule = { pattern: "<x-([a-z0-9-]+)", resolve: "short-name" };
+
+    const result = packSchema.safeParse(pack({ edges: { template: [rule] } }));
+
+    expect(result.success).toBe(true);
+    expect(result.data?.edges.template?.[0]?.maskStrings).toBeUndefined();
+    expect(Object.hasOwn(result.data?.edges.template?.[0] ?? {}, "maskStrings")).toBe(false);
+  });
+
   test("rejects targetKinds on a strategy that does not resolve by name", () => {
     // A `module-path` rule resolves a specifier against the filesystem and never asks the index of
     // names, so a `targetKinds` beside it is a filter nothing applies: the rule goes on resolving

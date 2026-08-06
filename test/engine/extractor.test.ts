@@ -237,6 +237,124 @@ describe("comment syntax by extension", () => {
   });
 });
 
+describe("edge rules that mask string literals", () => {
+  // basePack declares no `comments` block at all, so nothing is ever masked in it. The masker finds
+  // a literal only through `stringQuotes` (src/engine/mask.ts), so a pack exercising `maskStrings`
+  // has to declare one. This is the JSX shape the field exists for: a `<Button />` written inside
+  // quotes in a .tsx file is prose about a component, not a rendering of it.
+  const quoteSyntax: NonNullable<Pack["comments"]> = {
+    line: ["//"],
+    block: [["/*", "*/"]],
+    stringQuotes: ['"', "'", "`"],
+    stringEscape: "\\",
+    multilineQuotes: ["`"],
+  };
+
+  /** A pack whose single template rule reads the view the caller asks for. */
+  function tagPack(maskStrings: boolean): Pack {
+    return {
+      ...fallbackPack,
+      match: { extensions: [".tsx"] },
+      comments: quoteSyntax,
+      edges: {
+        template: [
+          {
+            pattern: "<([A-Z][A-Za-z0-9_]*)",
+            resolve: "short-name",
+            ...(maskStrings ? { maskStrings } : {}),
+          },
+        ],
+      },
+    };
+  }
+
+  // One file holding both spellings, so the flag has to be selective rather than merely
+  // suppressive: a red where the code-real tag is missing means the second view is being read for
+  // everything, and a red with two captures means `maskStrings` never reached the masker.
+  const bothSpellings = [
+    'const tip = "<Button />";',
+    "export const Panel = () => <Button />;",
+  ].join("\n");
+
+  test("skips a target written inside a string literal but keeps the one written as code", () => {
+    const extracted = extract(tagPack(true), file("src/Panel.tsx", bothSpellings));
+
+    expect(extracted.captures.map((capture) => capture.groups[1])).toEqual(["Button"]);
+    expect(extracted.captures.map((capture) => capture.line)).toEqual([2]);
+  });
+
+  test("still reads inside a string literal for a rule that does not declare the flag", () => {
+    // The regression guard for every pack that shipped before this field existed. The `string` edge
+    // family is a class name inside quotes and every route path a `consumes` rule reads lives in
+    // one, so the default must stay "read the source as written". A red here is the php pack losing
+    // its edges wholesale.
+    const extracted = extract(tagPack(false), file("src/Panel.tsx", bothSpellings));
+
+    expect(extracted.captures.map((capture) => capture.groups[1])).toEqual(["Button", "Button"]);
+  });
+
+  test("gives each rule over one file its own view of that file", () => {
+    // Both views are built from the same source and both rules run in one pass, so a red here means
+    // the choice is being made once per file instead of once per rule.
+    const twoViewPack: Pack = {
+      ...tagPack(true),
+      edges: {
+        template: [{ pattern: "<([A-Z][A-Za-z0-9_]*)", resolve: "short-name", maskStrings: true }],
+        string: [{ pattern: "<([A-Z][A-Za-z0-9_]*)", resolve: "short-name" }],
+      },
+    };
+
+    const extracted = extract(twoViewPack, file("src/Panel.tsx", bothSpellings));
+
+    const byFamily = extracted.captures.filter((capture) => capture.family === "template");
+    const rest = extracted.captures.filter((capture) => capture.family === "string");
+    expect(byFamily.map((capture) => capture.line)).toEqual([2]);
+    expect(rest.map((capture) => capture.line)).toEqual([1, 2]);
+  });
+
+  test("reports the line a match sits on after a multi-line literal has been blanked", () => {
+    // Blanking replaces contents with spaces and leaves the newlines standing, which is what lets
+    // both views share one lineStarts computed from the comment-masked source. A view that dropped
+    // the three lines of the template literal would report this match on line 1, and every citation
+    // `empo query` prints from a masked-string rule would point at the wrong place in the file.
+    const source = [
+      "const doc = `",
+      "<Button />",
+      "`;",
+      "export const Panel = () => <Button />;",
+    ].join("\n");
+
+    const extracted = extract(tagPack(true), file("src/Panel.tsx", source));
+
+    expect(extracted.captures.map((capture) => capture.groups[1])).toEqual(["Button"]);
+    expect(extracted.captures.map((capture) => capture.line)).toEqual([4]);
+  });
+});
+
+describe("edge rule path globs", () => {
+  // `pathGlob` is compiled for edge rules exactly as it is for kindRules, but only the kindRules
+  // half was pinned. A rule the path excludes must never run: a red here means a pack scoping a
+  // rule to one tree gets it applied to every file, which is how a `<x-` template rule meant for
+  // views starts firing on the PHP that merely mentions one.
+  const scopedPack: Pack = {
+    ...fallbackPack,
+    edges: {
+      import: [
+        { pattern: "^use ([A-Za-z0-9_\\\\]+);", resolve: "fqcn", pathGlob: "app/Models/**" },
+      ],
+    },
+  };
+  const source = "<?php\n\nuse Acme\\Support\\Money;\n";
+
+  test("runs an edge rule only over the files its pathGlob matches", () => {
+    const inScope = extract(scopedPack, file("app/Models/Order.php", source));
+    const outOfScope = extract(scopedPack, file("app/Support/Money.php", source));
+
+    expect(inScope.captures.map((capture) => capture.groups[1])).toEqual(["Acme\\Support\\Money"]);
+    expect(outOfScope.captures).toEqual([]);
+  });
+});
+
 describe("edge rule normalizers", () => {
   // The capture the pack hands its resolve strategy, spelled as the call site writes it and as the
   // declaration writes it. Nothing named Blade, Laravel or PHP enters the engine: the engine holds

@@ -136,6 +136,14 @@ export interface ExtractRule {
    */
   targetKinds?: string[];
   /**
+   * Blank the contents of every string literal before this rule runs, so a name written inside
+   * quotes cannot match it. Absent means read the source as written, which is what every rule did
+   * before this field existed and what most rules still need: the `string` family, php's
+   * `@livewire('cart')` and every route path a `consumes` rule reads all live inside quotes. Only a
+   * rule whose shape is code and never prose about code asks for it. See src/schema/pack.schema.ts.
+   */
+  maskStrings?: boolean;
+  /**
    * String operations applied to every capture group before the strategy reads it, so a pack can
    * say that its language spells a name one way at the call site and another way at the
    * declaration. A Blade `<x-forms.text-input>` names the class `Forms\TextInput`, and turning the
@@ -183,8 +191,9 @@ export interface PackNodeId {
 
 /**
  * How this language writes comments and string literals, so the engine can blank comments before
- * the rules run. String literals are tracked only to know where a comment does not start; their
- * contents are never masked.
+ * the rules run. String literals are tracked so the masker knows where a comment does not start;
+ * their contents are blanked only for a rule that declared `maskStrings`, and left as written for
+ * every other, which is what the `string` family and every route path need.
  */
 export interface CommentSyntax {
   line?: string[];

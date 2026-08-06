@@ -65,8 +65,11 @@ exactly the honesty this tradeoff requires.
   },
 
   // 4. intra-language edges (level 1)
-  //    a rule may also carry "pathGlob" (where it is allowed to run) and "targetKinds" (what kinds a
-  //    name may resolve to); the typescript pack's two JSX rules declare both, php's rules neither
+  //    a rule may also carry "pathGlob" (where it is allowed to run), "targetKinds" (what kinds a
+  //    name may resolve to) and "maskStrings" (read the file with string contents blanked); the
+  //    typescript pack's two JSX rules declare all three and php's rules none, and this family is
+  //    why the last one is per rule: php's template family also holds @livewire('cart'), whose
+  //    component name lives inside the quotes that flag would blank
   "edges": {
     "import":  [ { "pattern": "^[ \\t]*use\\s+([A-Za-z0-9_\\\\]+)(?:\\s+as\\s+\\w+)?\\s*;", "resolve": "fqcn" } ],
     "fqcn":    [ { "pattern": "\\\\(Acme\\\\[A-Za-z0-9_\\\\]+)::", "resolve": "fqcn" } ],
@@ -229,8 +232,8 @@ is a marker on its own. The glob is `**/*.{tsx,jsx}`, because the extension is w
 the pattern requires a real tag, closing or self-closing, because a `.tsx` that renders nothing is
 not a component. Each half is load-bearing in a different direction. The glob alone promotes every
 hooks module and every type module written in `.tsx` beside the components; the pattern alone would
-classify a file from a `</div>` written inside a quoted string, because string contents are never
-masked (section 3) and must not be. That second direction is also why **a React component written in
+classify a file from a `</div>` written inside a quoted string, because a kind rule reads the source
+with comments blanked and string contents as written (section 3). That second direction is also why **a React component written in
 a plain `.js` file is deliberately left `module`**: the extension is the honest boundary, and
 widening the glob to `.js` would buy the kind at the price of classifying half the language off the
 contents of its strings. The rule sits after `**/screens/**`, `**/components/**` and `**/api/**` and
@@ -241,9 +244,18 @@ before the catch-all `module`, so a role directory still wins, which is the orde
 **What the glob narrows it is not what it eliminates, and that was measured.** A `.tsx` whose only
 tag-shaped text sits inside a string literal is kinded `component` though it renders nothing, because
 the pattern deliberately allows a lowercase tag (a React component rendering only html is a
-component) and string contents are never masked. The glob keeps that failure inside `.tsx` and `.jsx`
-rather than removing it. It is a wrong label and not a wrong edge, and it is knowingly left rather
-than unnoticed.
+component) and a kind rule reads string contents as written. The glob keeps that failure inside
+`.tsx` and `.jsx` rather than removing it. It is a wrong label and not a wrong edge, and it is
+knowingly left rather than unnoticed.
+
+**The edge face of that same defect is closed and this one is not, which is a difference in the
+field and not in the argument.** `maskStrings` (section 4) is an edge-rule field: the tag rules can
+decline to read prose, `kindRules.contentPattern` has no such field and still reads the file as
+written. The label is worth more than cosmetic, because it is what `targetKinds` filters on:
+`uniqueId` in `src/engine/resolver.ts` refuses a tag that resolves to a node of an unlisted kind,
+so a file wrongly kinded `component` is a file a tag is allowed to land on. It costs a wrong edge
+only where such a file is also the lone carrier of a name somebody renders, which is why it is still
+a label defect rather than an edge one — but that is a bound, not an absence.
 
 `arrivedBy: "user"` is a **second axis over the same rules**, and it answers the other question a
 zero-fan-in node raises. `resolvedBy` says who reaches this kind, so the absence of an edge is not
@@ -288,8 +300,14 @@ citation pointing at a comment. Absence of an edge is a documented blind spot; a
 is a broken promise.
 
 `stringQuotes` and `stringEscape` exist only so the masker knows where a comment does not start:
-`'https://acme.test'` must not blank the rest of its line. String **contents** are never masked, and
-must not be, because the `string` edge family and every route path live inside them.
+`'https://acme.test'` must not blank the rest of its line. String **contents** are left as written
+unless a rule asks otherwise, through `maskStrings` (section 4), and for almost every rule they must
+be: the `string` edge family is a class name inside quotes, php's `@livewire('cart')` is a component
+name inside quotes, and every route path a `produces` or `consumes` rule reads lives inside one. The
+one shape that needs the opposite is a rule whose capture can only ever be code, and it asks per
+rule. When it does, only the **contents** go and the quote characters stay standing, and the blanking
+preserves length and newlines exactly as comment masking does, so both views of a file share one
+`lineStarts` and a capture from either cites the line a reader will actually find.
 
 `multilineQuotes` names the quotes whose literal may hold a raw newline. It has to be declared
 because two languages disagree: PHP's `'...'` spans lines, while JavaScript's `'...'` and `"..."` may
@@ -360,11 +378,39 @@ A rule may carry **`pathGlob`**, which says where it is allowed to run, as a glo
 root-relative path in the same dialect `kindRules` and `tests.paths` use. It exists because a rule's
 reach is the whole pack: an `edges` rule runs over every file `match.extensions` claims, and the
 typescript pack claims seven extensions of which two can hold JSX. A tag rule left unscoped reads
-`"<Widget />"` out of a string in a `.ts` file, because string contents are never masked and must not
-be (section 3, and every route path lives inside one), and emits an edge to a file that source
-neither imports nor renders. A rule the path excludes never runs at all, so it can neither match nor
-cost anything, and a rule declaring no `pathGlob` runs everywhere, which is what every rule did
-before the field existed.
+`"<Widget />"` out of a string in a `.ts` file, because a rule reads the source as written unless it
+says otherwise (section 3, and every route path lives inside a literal), and emits an edge to a file
+that source neither imports nor renders. A rule the path excludes never runs at all, so it can
+neither match nor cost anything, and a rule declaring no `pathGlob` runs everywhere, which is what
+every rule did before the field existed.
+
+**It is the first half of that answer and not the whole of it**, which is worth saying because it was
+first written here as the whole. A glob separates files, and the string problem is not a property of
+a file: a `.tsx` naming a component inside a quoted string is exactly the file the tag rules exist to
+read, so there is no glob that keeps `const tip = "<Button />"` out while letting a rendered
+`<Button />` in. `pathGlob` closed the `.ts`/`.js` face and could close no more of it. The second half
+is `maskStrings`.
+
+A rule may carry **`maskStrings`**, which says the rule reads a view of the file with the contents of
+every string literal blanked (the quotes themselves stay, so `<Button title="hi" />` is still a tag
+with a well-formed attribute rather than a truncated one). Absent means read the source as written,
+which is what every rule did before the field existed and what almost every rule still needs. It is
+**per rule and not per family**, and that is load-bearing rather than tidy: php's `template` family
+carries both `<x-cart>`, which is markup and can only be markup, and `@livewire('cart')`, whose
+component name is inside the quotes and vanishes entirely if they are blanked. A per-family or
+per-pack flag would have to pick one of those two and be wrong about the other. Only the typescript
+pack's two `template` rules declare it, which moved that pack from 1.5.0 to 1.6.0 (section 8's pin
+demands the bump rather than trusting anybody to remember it); the php pack is untouched by the
+change, and the edges it emits are byte-identical before and after.
+
+Declaring it where the pack names no `stringQuotes` at all, in `comments` or in any
+`commentsByExtension` entry, is **rejected at load** rather than accepted and ignored. The masker
+finds a literal only through those quotes, so the flag would be inert, and a rule that asked not to
+read prose would go on reading it with nothing anywhere to say the request had been dropped. That is
+the failure shape `multilineQuotes` was bitten by in section 3, a declared field the schema stripped
+at load while the masking fix that read it quietly stopped working, and the remedy is the same one:
+make the honest answer arrive at load, where a message can name the pack and the rule's position in
+its family.
 
 A rule may carry **`targetKinds`**, the list of node kinds a name-resolving strategy is allowed to
 land on, read from the target node's own `kindRules` answer. Only `short-name` and `observer` resolve
@@ -428,27 +474,48 @@ them was chosen adversarially rather than written from taste.** One rule reads a
 `</([A-Z][A-Za-z0-9_]*)(?:\.[A-Za-z0-9_]+)*\s*>`, and the other a self-closing one,
 `<([A-Z][A-Za-z0-9_]*)(?:\.[A-Za-z0-9_]+)*(?:<[^<>]*>)?(?:\s[^<]*?)?/>`. Both serve JSX and a Vue
 SFC template, which compose with the same PascalCase tag. Both also declare
-`"pathGlob": "**/*.{tsx,jsx,vue}"` and `"targetKinds": ["component", "screen"]`, so each rule reads
-only the three extensions that can hold a tag and can only land on a node the pack already kinded as
-one of the two things a tag names. Neither field was in the first version of these rules, and an
-adversarial review of it is what put them there.
+`"pathGlob": "**/*.{tsx,jsx,vue}"`, `"maskStrings": true` and
+`"targetKinds": ["component", "screen"]`, so each rule reads only the three extensions that can hold
+a tag, reads them with string contents blanked, and can only land on a node the pack already kinded
+as one of the two things a tag names. None of the three fields was in the first version of these
+rules, and an adversarial review of it is what put them there.
 
 The first letter must be uppercase, which is JSX's own rule for "this tag is a component and not an
-element". It is also what keeps html written inside a quoted string out of the graph, since string
-contents are never masked and every html tag is lowercase. **It is not what keeps a component name
-out of one**: a file holding `"<Spinner size={2} />"` inside quotes reads exactly like a file
-rendering it, and the clause that buys the html refusal is the clause that sells this one. No version
-of the rule has both, so what `pathGlob` does is bound the damage rather than end it, and the bound
-is worth naming. A `.ts`, `.js`, `.mjs` or `.cjs` module can no longer produce a `template`
+element". It also used to be what kept html written inside a quoted string out of the graph, every
+html tag being lowercase; `maskStrings` does that job now, and the clause is left doing only the job
+it was for. **What the clause could never do was keep a component name out of one**: to a regex a
+file holding `"<Spinner size={2} />"` inside quotes read exactly like a file rendering it, and the
+clause that bought the html refusal was the clause that sold this one. No version of the pattern has
+both, which is why the answer is a second view of the file rather than a cleverer regex. `pathGlob`
+bounded that damage before it was ended, and the bound is still worth naming, because it is what
+scopes the family. A `.ts`, `.js`, `.mjs` or `.cjs` module can no longer produce a `template`
 edge at all, and neither can a test written in one, which matters because `engine/coverage.ts`
 carries reach along every non-bridge edge, so an `expect(html).toContain("<OrderCard />")` in a `.ts`
 test used to make that test reach a component it never mounted and a flow through that component stop
 reporting blind. **Measured** through the built bundle, on the same 16-file React tree
 the family's other numbers come from: a `.ts` registry holding `"<Spinner size={2} />"` and
 `"<StatusPill status=\"open\" />"` produced two invented edges before and produces none now, and all
-12 real template edges in that tree survive both fields, so neither costs a true positive. What is
-left, a `.tsx`, `.jsx` or `.vue` file naming a component inside a quoted string, stays open and is a
-known way this family invents an edge.
+12 real template edges in that tree survive both fields, so neither costs a true positive.
+
+**What that left, a `.tsx`, `.jsx` or `.vue` file naming a component inside a quoted string, is now
+closed too, and the trade taken is the point of the entry.** `maskStrings` is what closes it, and it
+is a trade rather than a free fix: the masker believes a quote is a quote, so an apostrophe in JSX or
+Vue prose opens a literal, and a tag written between two apostrophes **on one line** is blanked along
+with them — `<p>It's here <CartBadge /> and that's it</p>` loses the tag. Two apostrophes on separate
+lines are already safe, because `'` is not in the pack's `multilineQuotes` and so may not hold a raw
+newline (section 3), and a lone apostrophe is safe because the masker never finds its closer and
+steps over the character rather than guessing. That is the whole of the new false-negative surface,
+and it is the direction this repository already takes on the hazard axis: a missed edge is a gap a
+reader can be told about, an invented one is a fabricated finding with a `file:line` under it.
+
+**Measured, not argued.** `react/cards/CardDocs.tsx` in the pack corpus holds both shapes in one
+file, which is the arrangement no `pathGlob` can imitate: it renders `<OrderCard />`, which must stay
+an edge, and it holds `"<OrderList>rows</OrderList>"` and `"<OrderScreenView />"` in a docs constant,
+which must not become edges to files it neither imports nor renders. Without the flag that corpus
+carries 16 `template` edges; with it, 14, and the two that go are exactly those two strings — one per
+rule, so the fixture exercises the closing-tag rule and the self-closing rule both. Regenerating the
+snapshot over the 39-node corpus produced **only additions**: no template edge that was real before
+the change is missing after it.
 
 **`targetKinds` closed the second half of the same review, and that one never shipped as a defect.**
 A JSX tag's namespace is mostly npm, so `<View>` and `<Text>` from react-native or `<Link>` from
