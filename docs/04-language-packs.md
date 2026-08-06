@@ -282,9 +282,11 @@ is in the typescript pack's `multilineQuotes`, so two literal backticks in JSX t
 literal across however many lines lie between them, and every tag in between goes with them. A help
 panel written as
 
-    Press ` to open the console.
-    <Console />
-    Press ` again to close it.
+```jsx
+Press ` to open the console.
+<Console />
+Press ` again to close it.
+```
 
 renders a real component and is kinded `module`, because the blanked `<Console />` was the file's
 only evidence and a `<>` fragment closer matches no tag pattern. An apostrophe is the narrow case: it
@@ -455,10 +457,11 @@ pin demands the bump rather than trusting anybody to remember it). The php pack 
 and is untouched by either change, and the edges it emits are byte-identical before and after.
 
 Two ways of declaring the field are **rejected at load** rather than accepted and ignored. Declaring
-it where the pack names no `stringQuotes` at all, in `comments` or in any `commentsByExtension`
-entry, is refused for either rule kind: the masker finds a literal only through those quotes, so the
-flag would be inert, and a rule that asked not to read prose would go on reading it with nothing
-anywhere to say the request had been dropped. Declaring it on a **kind rule carrying no
+it where some extension the rule can read names no `stringQuotes` is refused for either rule kind:
+the masker finds a literal only through those quotes, so the flag would be inert for those files, and
+a rule that asked not to read prose would go on reading it with nothing anywhere to say the request
+had been dropped. The next paragraph is how "can read" is decided. Declaring it on a **kind rule
+carrying no
 `contentPattern`** is refused as well, because such a rule reads no source at all: the flag would
 change nothing while reading to anybody auditing the pack as a guarantee that this kind cannot be
 won off the contents of a string. Both
@@ -467,17 +470,28 @@ stripped at load while the masking fix that read it quietly stopped working, and
 same one: make the honest answer arrive at load, where a message can name the pack and the rule's
 position in its family or in `kindRules`.
 
-**The first of those two checks is pack-wide and the masker is per-extension, so it is a floor and
-not a guarantee.** It passes as soon as `comments` or any one `commentsByExtension` entry names a
-quote, while `commentSyntaxFor` picks the syntax by the file's own extension. A pack whose
-`commentsByExtension[".tsx"]` omits `stringQuotes` while `comments` declares them therefore loads
-clean, and `maskStrings` is silently inert for exactly the files it was written for: measured on the
-typescript pack with that one entry rewritten, `src/lone/Tips.tsx` holding only
-`export const tip = "render a <Tips /> here";` comes back `component` and the invented `template`
-edge comes back with it. Closing it means deciding which extensions a rule can reach, which means
-resolving its `pathGlob` against the pack's `match.extensions`, and that is a larger change than the
-one this section describes. Until then the check catches the pack that declares no quotes anywhere,
-which is the common way to get this wrong, and not the pack that declares them in the wrong place.
+**The `stringQuotes` check is per extension, because the masker is.** A pack-wide check would pass as
+soon as `comments` or any one `commentsByExtension` entry named a quote, while `commentSyntaxFor`
+picks the syntax by the file's own extension, so a pack declaring quotes on `comments` and omitting
+them from `commentsByExtension[".tsx"]` would load clean with `maskStrings` inert for exactly the
+files it was written for. Measured before the check was tightened: the typescript pack with that one
+entry rewritten kinds `src/lone/Tips.tsx`, holding only
+`export const tip = "render a <Tips /> here";`, as `component`, and the invented `template` edge
+comes back with it.
+
+So the check resolves each declaring rule's reach instead. The candidate suffixes are
+`match.extensions` together with every `commentsByExtension` key, which is how a **compound**
+extension gets considered at all: `.blade.php` is never in `match.extensions`, because the scanner
+admits the file through its plain `.php` tail, and `posix.extname` answers `.php` for
+`card.blade.php`, so a check reading either alone cannot see the entry that actually masks the file.
+A rule with no `pathGlob` reaches all of them; a rule with one reaches those its glob matches. Each
+reachable suffix is then resolved the way the masker resolves it, longest declared dotted suffix
+first, and a syntax that is missing or declares no quotes names that extension in the error.
+
+Two remedies, and the pack author picks: declare the quotes for that extension, or scope the rule
+away from it with a `pathGlob`. Both are checked in the corpus. Note that `**/*.php` is **not** a way
+to scope away from `.blade.php`, because `*` matches `card.blade` and the glob therefore does reach
+blade files; excluding them takes a glob that says so.
 
 A rule may carry **`targetKinds`**, the list of node kinds a name-resolving strategy is allowed to
 land on, read from the target node's own `kindRules` answer. Only `short-name` and `observer` resolve

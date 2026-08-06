@@ -1,3 +1,4 @@
+import picomatch from "picomatch";
 import { z } from "zod";
 
 /**
@@ -303,6 +304,112 @@ const aliasSourceSchema = z.object({
   extends: z.string().min(1).optional(),
 });
 
+/** Everything the `maskStrings` check needs to know about one declared comment syntax. */
+type QuoteBearingSyntax = { stringQuotes: string[] };
+
+/**
+ * The file-name stem the `maskStrings` check builds its synthetic paths from.
+ *
+ * Distinctive on purpose. `commentSyntaxFor` refuses a suffix that is not strictly shorter than the
+ * basename (`suffix.length >= base.length`), so a stem of `""` would make `".tsx"` unable to claim
+ * `".tsx"` and the check would resolve every extension to the pack default. A real-looking stem
+ * keeps the length guard behaving here exactly as it behaves at extraction time.
+ */
+const SAMPLE_STEM = "sample";
+
+/**
+ * Every file suffix this pack can put in front of the masker, as the union of two sources that do
+ * not contain each other.
+ *
+ * `match.extensions` is what the scanner admits, and it holds the simple ones (`.php`, `.tsx`).
+ * `commentsByExtension` may key a COMPOUND suffix (`.blade.php`) that `match.extensions` never
+ * lists, because the scanner admits such a file through its plain `.php` tail. Reading only the
+ * first source would miss exactly the extension a compound key was written for, which is the case
+ * `posix.extname` also cannot see.
+ */
+function candidateSuffixes(pack: {
+  match: { extensions?: string[] };
+  commentsByExtension?: Record<string, unknown>;
+}): string[] {
+  const suffixes = new Set<string>(pack.match.extensions ?? []);
+  for (const key of Object.keys(pack.commentsByExtension ?? {})) suffixes.add(key);
+  return [...suffixes];
+}
+
+/**
+ * Whether a rule scoped by `pathGlob` can read a file carrying this suffix.
+ *
+ * A rule with no glob reads every file the pack scans, so every candidate suffix is reachable. A
+ * rule with one is tested against BOTH a bare basename and a nested path, and counted reachable if
+ * either matches, because the two answer differently: a leading `**` in picomatch wants a directory
+ * segment to consume, so a glob anchored that way misses a bare `sample.tsx` while it matches every
+ * `dir/sample.tsx`. Taking either as reachable is the conservative direction: this check refuses a
+ * pack, so an over-narrow reading of a glob would reject a pack whose rule is in fact scoped away.
+ *
+ * Compiled with picomatch's defaults, which is what `engine/extractor.ts` does with the same glob.
+ */
+function ruleReaches(pathGlob: string | undefined, suffix: string): boolean {
+  if (pathGlob === undefined) return true;
+  const matches = picomatch(pathGlob);
+  return matches(`${SAMPLE_STEM}${suffix}`) || matches(`dir/${SAMPLE_STEM}${suffix}`);
+}
+
+/**
+ * The syntax the masker will really use for a file carrying this suffix.
+ *
+ * This MIRRORS `commentSyntaxFor` in `src/engine/extractor.ts` and must keep mirroring it: the
+ * longest declared dotted suffix the basename ends in, guarded so a key can never claim a file whose
+ * name merely ends in the same letters, and the pack default when none matches. A check that
+ * resolved the syntax differently from the masker would either refuse a pack that works or pass one
+ * that does not, and both are worse than no check at all.
+ */
+function effectiveSyntaxFor<T>(
+  pack: { comments?: T; commentsByExtension?: Record<string, T> },
+  suffix: string,
+): T | undefined {
+  const byExtension = pack.commentsByExtension;
+  if (byExtension !== undefined) {
+    const base = `${SAMPLE_STEM}${suffix}`;
+    let best: string | undefined;
+    for (const key of Object.keys(byExtension)) {
+      if (key.length >= base.length || !base.endsWith(key)) continue;
+      if (best === undefined || key.length > best.length) best = key;
+    }
+    if (best !== undefined) return byExtension[best];
+  }
+  return pack.comments;
+}
+
+/**
+ * The first extension a `maskStrings` rule can read whose syntax gives the masker nothing to work
+ * with, or `undefined` when every extension it reaches is fine. Suffixes are checked in declaration
+ * order so the message a pack author reads is stable rather than dependent on Set iteration luck.
+ */
+function quotelessSuffixFor(
+  pack: {
+    match: { extensions?: string[] };
+    comments?: QuoteBearingSyntax;
+    commentsByExtension?: Record<string, QuoteBearingSyntax>;
+  },
+  pathGlob: string | undefined,
+): { suffix: string; syntax: QuoteBearingSyntax | undefined } | undefined {
+  for (const suffix of candidateSuffixes(pack)) {
+    if (!ruleReaches(pathGlob, suffix)) continue;
+    const syntax = effectiveSyntaxFor(pack, suffix);
+    if (syntax === undefined || syntax.stringQuotes.length === 0) return { suffix, syntax };
+  }
+  return undefined;
+}
+
+/** Names the extension, because that is the only thing a pack author can act on. */
+function quotelessMessage(offender: { suffix: string; syntax: QuoteBearingSyntax | undefined }) {
+  const tail =
+    offender.syntax === undefined
+      ? "resolves to no comment syntax at all"
+      : "resolves to a comment syntax declaring none";
+  return `maskStrings needs a comment syntax declaring stringQuotes, and "${offender.suffix}" ${tail}`;
+}
+
 export const packSchema = z
   .object({
     name: z.string().min(1),
@@ -448,28 +555,37 @@ export const packSchema = z
     // that its request was dropped. That is the shape this repository has been bitten by before (a
     // pack field the schema stripped, a normalizer list nobody applied), and the remedy each time was
     // to make the honest answer arrive at load rather than as an edge nobody can explain.
-    const declaresQuotes = [pack.comments, ...Object.values(pack.commentsByExtension ?? {})].some(
-      (syntax) => syntax !== undefined && syntax.stringQuotes.length > 0,
-    );
-    if (declaresQuotes) return;
-
-    const message =
-      "maskStrings needs a comment syntax declaring stringQuotes, or there is no literal to mask";
-
+    //
+    // The check is PER EXTENSION because the masker is. The engine picks comment syntax per file
+    // through `commentSyntaxFor`, so a pack-wide "some syntax somewhere names a quote" passes a pack
+    // whose `comments` declares quotes while its `commentsByExtension[".tsx"]` omits them, and
+    // `maskStrings` is then inert for exactly the .tsx files the flag was written for: a file holding
+    // only `export const tip = "render a <Tips /> here";` comes back `component` off its own prose.
+    // So each declaring rule is asked about every extension it can actually read, and one extension
+    // the masker cannot work in is enough to refuse the pack. The remedy for a pack that means it is
+    // a `pathGlob` scoping the rule away from that extension, which is a thing a pack can say.
     for (const [family, rules] of Object.entries(pack.edges)) {
       for (const [position, rule] of (rules ?? []).entries()) {
         if (rule.maskStrings !== true) continue;
-        ctx.addIssue({ code: "custom", path: ["edges", family, position, "maskStrings"], message });
+        const offender = quotelessSuffixFor(pack, rule.pathGlob);
+        if (offender === undefined) continue;
+        ctx.addIssue({
+          code: "custom",
+          path: ["edges", family, position, "maskStrings"],
+          message: quotelessMessage(offender),
+        });
       }
     }
 
     // A kind rule asks the same question of the same masker, so it gets the same answer.
     for (const [position, rule] of pack.node.kindRules.entries()) {
       if (rule.maskStrings !== true) continue;
+      const offender = quotelessSuffixFor(pack, rule.pathGlob);
+      if (offender === undefined) continue;
       ctx.addIssue({
         code: "custom",
         path: ["node", "kindRules", position, "maskStrings"],
-        message,
+        message: quotelessMessage(offender),
       });
     }
   });

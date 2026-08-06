@@ -409,6 +409,7 @@ export interface ExtractRule {
   normalize?: Normalizer[];   // applied to every group before the strategy reads it
   pathGlob?: string;          // where the rule may run, root-relative; absent means everywhere
   targetKinds?: string[];     // kinds a name-resolving strategy may land on
+  maskStrings?: boolean;      // read the view with string contents blanked, so prose is not code
 }
 
 /** Per-part normalizers applied before a symbol key is assembled. */
@@ -447,7 +448,9 @@ export interface PackKindRule {
   kind: string;
   pathGlob?: string;
   contentPattern?: string;
+  maskStrings?: boolean;       // contentPattern reads the string-blanked view. Needs contentPattern.
   resolvedBy?: KindResolver;   // the framework resolves it by name, so fan-in zero proves nothing
+  arrivedBy?: KindArrival;     // somebody outside the code arrives here, so a journey starts
 }
 
 /** How a transaction's extent is found once its opening pattern matched. */
@@ -960,12 +963,17 @@ Two refusals at load, both in `pack.schema.ts`. `maskStrings` on a kind rule dec
 `contentPattern` is rejected, because that rule reads no source and the flag would sit there inert
 while reading as a guarantee that the kind cannot come from a string. And the existing "needs a
 comment syntax declaring `stringQuotes`" check now walks `node.kindRules` after `edges`, so both rule
-kinds get the same answer from the same masker. That second check is a floor rather than a
-guarantee, and the limit is worth knowing before trusting it: it passes if any one syntax names a
-quote, while `commentSyntaxFor` picks the syntax per extension, so a pack declaring quotes in
-`comments` and omitting them from `commentsByExtension[".tsx"]` loads clean with the flag inert for
-every `.tsx`. Closing that means resolving a rule's `pathGlob` against `match.extensions` to learn
-which syntaxes it can meet, which is a larger change than this one.
+kinds get the same answer from the same masker. That second check is **per extension**, because a
+pack-wide one is a floor rather than a guarantee: it passes if any one syntax names a quote, while
+`commentSyntaxFor` picks per extension, so a pack declaring quotes in `comments` and omitting them
+from `commentsByExtension[".tsx"]` would load clean with the flag inert for every `.tsx`. Instead
+each declaring rule's reach is resolved: candidate suffixes are `match.extensions` plus every
+`commentsByExtension` key, a `pathGlob` narrows them (tested against both a bare and a nested
+synthetic path, since a glob answers those differently), and each survivor is resolved by the same
+longest-declared-dotted-suffix rule `commentSyntaxFor` uses. Taking the keys as candidates is what
+makes a compound extension visible: `.blade.php` is in no `match.extensions` and `extname` calls it
+`.php`, so a check reading either alone would miss the entry that really masks the file. The message
+names the offending extension, which is the only thing the pack author can act on.
 
 The price is the price the edge side accepted, moved onto the label, and in the same two shapes: a
 `contentPattern` whose only match sits inside an apparent literal is blanked with it, and where that

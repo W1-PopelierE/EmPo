@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { packSchema } from "../../src/schema/pack.schema";
 
@@ -296,14 +297,15 @@ describe("packSchema", () => {
 
     expect(success).toBe(false);
     expect(issues).toContain(
-      "edges.template.0.maskStrings: maskStrings needs a comment syntax declaring stringQuotes, or there is no literal to mask",
+      'edges.template.0.maskStrings: maskStrings needs a comment syntax declaring stringQuotes, and ".php" resolves to a comment syntax declaring none',
     );
   });
 
   test("accepts maskStrings when only commentsByExtension declares the quotes", () => {
     // A pack may leave `comments` off entirely and describe each extension in full, which is what
-    // `commentsByExtension` is for. The quotes are declared, the masker will find literals in the
-    // files that matter, and a check reading only the top-level `comments` would refuse this pack.
+    // `commentsByExtension` is for. The quotes are declared for every extension this pack scans, the
+    // masker will find literals in all of them, and a check reading only the top-level `comments`
+    // would refuse this pack.
     const rule = {
       pattern: "<([A-Z][A-Za-z0-9_]*)\\s*/>",
       resolve: "short-name",
@@ -312,6 +314,7 @@ describe("packSchema", () => {
 
     const result = packSchema.safeParse(
       pack({
+        match: { extensions: [".tsx"] },
         commentsByExtension: { ".tsx": { line: ["//"], stringQuotes: ["'", '"', "`"] } },
         edges: { template: [rule] },
       }),
@@ -364,7 +367,7 @@ describe("packSchema", () => {
 
     expect(success).toBe(false);
     expect(issues).toContain(
-      "node.kindRules.0.maskStrings: maskStrings needs a comment syntax declaring stringQuotes, or there is no literal to mask",
+      'node.kindRules.0.maskStrings: maskStrings needs a comment syntax declaring stringQuotes, and ".php" resolves to a comment syntax declaring none',
     );
   });
 
@@ -405,19 +408,13 @@ describe("packSchema", () => {
     expect(success).toBe(true);
   });
 
-  test("accepts, as a known limit, quotes in comments that no commentsByExtension entry repeats", () => {
-    // This case pins a hole, not a guarantee, and it is here so the hole is visible rather than
-    // discovered from an edge nobody can explain. The stringQuotes check is pack-wide: it passes as
-    // soon as `comments` OR any one `commentsByExtension` entry names a quote. But the masker asks
-    // `commentSyntaxFor`, which picks the syntax by the FILE'S OWN extension. So the pack below —
-    // quotes on `comments`, a `.tsx` entry that omits them — loads clean while `maskStrings` is
-    // inert for every .tsx, which is exactly the file the flag was written for, and nothing anywhere
-    // says so: a .tsx holding only `export const tip = "render a <Tips /> here";` still comes back
-    // `component`. The check is a floor that catches the pack declaring no quotes anywhere, and it is
-    // documented as a floor in docs/04-language-packs.md ("The first of those two checks is pack-wide
-    // and the masker is per-extension") and docs/14-implementation-notes.md, because closing it means
-    // resolving a rule's `pathGlob` against `match.extensions` — a larger change than the one that
-    // put `maskStrings` on kind rules.
+  test("rejects quotes in comments that the extension entry the rule reads does not repeat", () => {
+    // The case the pack-wide check used to let through, and the reason the check is per extension
+    // now. Quotes on `comments`, a `.tsx` entry that omits them: the masker asks `commentSyntaxFor`,
+    // which picks by the FILE'S OWN extension, so the `.tsx` entry wins and takes the quotes away.
+    // Under the old check this pack loaded clean while `maskStrings` was inert for every .tsx, which
+    // is exactly the file the flag was written for, and a .tsx holding only
+    // `export const tip = "render a <Tips /> here";` came back `component` off its own prose.
     const node = {
       id: { strategy: "fqcn" },
       kindRules: [{ kind: "component", contentPattern: "<[A-Z]", maskStrings: true }],
@@ -425,23 +422,100 @@ describe("packSchema", () => {
 
     const { success, issues } = parse(
       pack({
+        match: { extensions: [".ts", ".tsx"] },
         comments: { line: ["//"], stringQuotes: ["'", '"', "`"] },
         commentsByExtension: { ".tsx": { line: ["//"], block: [["/*", "*/"]] } },
         node,
       }),
     );
 
-    // Asserted with a message rather than bare, because the day this stops being true is a good day:
-    // whoever makes the check per-extension aware should read this as "the limit closed, rewrite this
-    // test as a rejection" and not as a regression they caused.
-    expect(
-      success,
-      "packSchema now rejects quotes-in-comments-only when an extension entry omits them, so the " +
-        "documented per-extension limit is closed: replace this test with the rejection it became, " +
-        "and update docs/04-language-packs.md and docs/14-implementation-notes.md, which both still " +
-        "describe the check as a floor.",
-    ).toBe(true);
+    expect(success).toBe(false);
+    // The extension is named, because it is the only thing the pack author can act on.
+    expect(issues).toContain(
+      'node.kindRules.0.maskStrings: maskStrings needs a comment syntax declaring stringQuotes, and ".tsx" resolves to a comment syntax declaring none',
+    );
+  });
+
+  test("rejects a maskStrings rule reading a compound extension whose entry declares no quotes", () => {
+    // The case a check reading `posix.extname` cannot see. `.blade.php` is never in
+    // `match.extensions` (the scanner admits the file through its plain `.php` tail) and `extname`
+    // answers `.php` for `card.blade.php`, so the offending extension exists only as a
+    // `commentsByExtension` key. The masker takes the longest declared suffix, so a blade file really
+    // is masked by the quote-less entry, and the rule really does go on matching inside its strings.
+    const rule = {
+      pattern: "<([A-Z][A-Za-z0-9_]*)\\s*/>",
+      resolve: "short-name",
+      maskStrings: true,
+    };
+
+    const { success, issues } = parse(
+      pack({
+        comments: { line: ["//"], stringQuotes: ["'", '"'] },
+        commentsByExtension: { ".blade.php": { block: [["{{--", "--}}"]] } },
+        edges: { template: [rule] },
+      }),
+    );
+
+    expect(success).toBe(false);
+    expect(issues).toContain(
+      'edges.template.0.maskStrings: maskStrings needs a comment syntax declaring stringQuotes, and ".blade.php" resolves to a comment syntax declaring none',
+    );
+  });
+
+  test("accepts a maskStrings rule whose pathGlob scopes it away from the quote-less extension", () => {
+    // Scoping is the pack author's remedy, so it has to work: the same pack as the rejection above,
+    // with the rule confined to the extension whose syntax does declare quotes. Refusing this would
+    // leave a pack that is honest about what it reads with nowhere to go but dropping the flag.
+    const rule = {
+      pattern: "<([A-Z][A-Za-z0-9_]*)\\s*/>",
+      resolve: "short-name",
+      maskStrings: true,
+      pathGlob: "**/*.ts",
+    };
+
+    const { success, issues } = parse(
+      pack({
+        match: { extensions: [".ts", ".tsx"] },
+        comments: { line: ["//"], stringQuotes: ["'", '"', "`"] },
+        commentsByExtension: { ".tsx": { line: ["//"] } },
+        edges: { template: [rule] },
+      }),
+    );
+
     expect(issues).toBe("");
+    expect(success).toBe(true);
+  });
+
+  test("leaves a pack declaring maskStrings nowhere untouched by the per-extension check", () => {
+    // The check asks its question of declaring rules only. A pack with a quote-less entry and no
+    // `maskStrings` anywhere has asked for nothing and must be told nothing, which is the shape the
+    // shipped php pack has: a `.blade.php` entry with no `stringQuotes` and not one rule that masks.
+    const rule = { pattern: "<x-([a-z0-9-]+)", resolve: "short-name" };
+
+    const { success, issues } = parse(
+      pack({
+        comments: { line: ["//"], stringQuotes: ["'", '"'] },
+        commentsByExtension: { ".blade.php": { block: [["{{--", "--}}"]] } },
+        edges: { template: [rule] },
+      }),
+    );
+
+    expect(issues).toBe("");
+    expect(success).toBe(true);
+  });
+
+  test("still accepts both shipped packs, which is what the per-extension check must not cost", () => {
+    // The typescript pack declares `maskStrings` on two template rules and one kind rule, all scoped
+    // by a glob, and every extension those globs reach declares quotes. The php pack declares the
+    // flag nowhere while carrying a deliberately quote-less `.blade.php` entry. Read from disk
+    // rather than restated here, so this fails when a pack changes and not when a copy drifts.
+    for (const name of ["typescript", "php"]) {
+      const source = readFileSync(new URL(`../../src/packs/${name}/pack.json`, import.meta.url));
+      const { success, issues } = parse(JSON.parse(source.toString()));
+
+      expect(issues).toBe("");
+      expect(success).toBe(true);
+    }
   });
 
   test("rejects targetKinds on a strategy that does not resolve by name", () => {
