@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "roots": [
+    { "path": "apps/api", "lang": "php", "framework": "laravel" },
+    { "path": "apps/mobile", "lang": "typescript", "framework": "react-native" },
+    { "path": "apps/portal", "lang": "typescript", "framework": "inertia" }
+  ],
+  "packs": { "php": { "version": "^1" }, "typescript": { "version": "^1" } },
+  "bridges": [
+    {
+      "kind": "http-route",
+      "produces": "apps/api",
+      "consumes": "apps/mobile",
+      "normalize": { "collapseParams": true }
+    },
+    {
+      "kind": "inertia-page",
+      "produces": "apps/portal",
+      "consumes": "apps/api"
+    }
+  ],
+  "flows": ".empo/flows.json",
+  "spines": ".empo/spines",
+  "ignore": [],
+  "commit": []
+}

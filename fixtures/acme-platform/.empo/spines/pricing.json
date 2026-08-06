@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "name": "pricing",
+  "principle": "Every hop copies the subtotal forward, and nothing between the route and the response asserts the total still holds.",
+
+  "hops": [
+    {
+      "n": 0,
+      "title": "request enters the api",
+      "entry": "routes/api.php",
+      "file": "apps/api/routes/api.php",
+      "line": 6,
+      "anchor": "Route::post('/v1/orders'",
+      "note": "the only route that creates an order, so every total in the platform starts here"
+    },
+    {
+      "n": 1,
+      "title": "controller builds the order",
+      "entry": "OrderController::store",
+      "file": "apps/api/app/Http/Controllers/OrderController.php",
+      "line": 13,
+      "anchor": "$order->subtotal = 1000",
+      "note": "the subtotal enters the chain here and is copied forward untouched from this point on"
+    },
+    {
+      "n": 2,
+      "title": "total resolution",
+      "entry": "PriceCalculator::total",
+      "file": "apps/api/app/Libraries/Price/PriceCalculator.php",
+      "line": 13,
+      "anchor": "return $order->subtotal + $this->tax(",
+      "note": "SOLE FUNNEL. every total the api returns is computed on this line, so it is the highest-leverage line in the chain"
+    },
+    {
+      "n": 3,
+      "title": "tax applied",
+      "entry": "PriceCalculator::tax",
+      "file": "apps/api/app/Libraries/Price/PriceCalculator.php",
+      "line": 18,
+      "anchor": "intdiv($subtotal * self::TAX_RATE_BASIS_POINTS",
+      "note": "the last hop that changes the number, and the only one that can lose a cent"
+    }
+  ],
+
+  "guarded": [
+    "apps/api/app/Libraries/Price/**",
+    "apps/api/app/Models/Order.php",
+    "apps/api/app/Observers"
+  ],
+
+  "assertionTerms": ["assertSame(", "assertEqualsWithDelta("],
+
+  "invariants": [
+    {
+      "id": 1,
+      "statement": "total(order) equals order.subtotal plus tax on that same subtotal, in whole cents",
+      "assertableAtWriteTime": true,
+      "citation": {
+        "file": "apps/api/tests/Feature/OrderTest.php",
+        "line": 15,
+        "anchor": "assertSame(1210,"
+      }
+    },
+    {
+      "id": 2,
+      "statement": "no path writes an order total without going through PriceCalculator::total",
+      "assertableAtWriteTime": false
+    }
+  ],
+
+  "traps": [
+    {
+      "what": "the confirmation mail is queued before the response is built, so a total changed after that line is mailed as the old one",
+      "file": "apps/api/app/Http/Controllers/CheckoutController.php",
+      "line": 15,
+      "anchor": "the confirmation mail is queued here"
+    },
+    {
+      "what": "the observer refreshes a cached order summary on save, so a total written without a model event leaves a stale cache behind",
+      "file": "apps/api/app/Observers/OrderObserver.php",
+      "line": 11,
+      "anchor": "the order summary cache is refreshed here"
+    }
+  ],
+
+  "flows": ["checkout", "orders"],
+  "unguardedFlows": ["checkout"],
+
+  "moneyType": {
+    "class": "int",
+    "note": "whole cents as an integer. never a float on a total, and never a rounded intermediate."
+  }
+}

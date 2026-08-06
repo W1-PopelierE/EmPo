@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "flows": {
+    "admin": {
+      "label": "Review orders in the back office",
+      "paths": ["apps/api/app/Http/Controllers/AdminController.php"]
+    },
+    "checkout": {
+      "label": "Confirm a checkout",
+      "paths": ["apps/api/app/Http/Controllers/CheckoutController.php"]
+    },
+    "orders": {
+      "label": "Place an order",
+      "paths": [
+        "apps/api/app/Http/Controllers/OrderController.php",
+        "apps/api/app/Http/Controllers/OrderPageController.php",
+        "apps/api/app/Libraries/Price",
+        "apps/api/app/Models",
+        "apps/api/app/Observers",
+        "apps/mobile/src/api/client.ts",
+        "apps/mobile/src/screens",
+        "apps/portal/src/Pages"
+      ]
+    }
+  }
+}

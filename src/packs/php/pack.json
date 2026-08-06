@@ -1,0 +1,243 @@
+{
+  "name": "php",
+  "version": "1.5.0",
+
+  "match": {
+    "extensions": [".php"],
+    "manifest": ["composer.json"]
+  },
+
+  "node": {
+    "id": {
+      "strategy": "fqcn",
+      "namespacePattern": "^[ \\t]*namespace\\s+([A-Za-z0-9_\\\\]+)\\s*;",
+      "namePattern": "^[ \\t]*(?:final\\s+|abstract\\s+|readonly\\s+)*(?:class|interface|trait|enum)\\s+([A-Za-z0-9_]+)",
+      "fallback": "path"
+    },
+    "kindRules": [
+      {
+        "kind": "route-file",
+        "pathGlob": "**/routes/*.php",
+        "resolvedBy": "framework",
+        "arrivedBy": "user"
+      },
+      { "kind": "view", "pathGlob": "**/resources/views/**", "resolvedBy": "framework" },
+      { "kind": "migration", "pathGlob": "**/database/migrations/**", "resolvedBy": "framework" },
+      { "kind": "seeder", "pathGlob": "**/database/seeders/**", "resolvedBy": "framework" },
+      { "kind": "factory", "pathGlob": "**/database/factories/**", "resolvedBy": "framework" },
+      { "kind": "config", "pathGlob": "**/config/*.php", "resolvedBy": "framework" },
+      { "kind": "bootstrap", "pathGlob": "**/bootstrap/*.php", "resolvedBy": "framework" },
+      { "kind": "policy", "pathGlob": "**/Policies/**", "resolvedBy": "framework" },
+      {
+        "kind": "command",
+        "pathGlob": "**/Console/Commands/**",
+        "resolvedBy": "framework",
+        "arrivedBy": "user"
+      },
+      {
+        "kind": "livewire",
+        "pathGlob": "**/Livewire/**",
+        "resolvedBy": "framework",
+        "arrivedBy": "user"
+      },
+      { "kind": "model", "pathGlob": "**/Models/**" },
+      { "kind": "job", "contentPattern": "implements\\s+ShouldQueue" },
+      { "kind": "class" }
+    ]
+  },
+
+  "comments": {
+    "line": ["//"],
+    "block": [["/*", "*/"]],
+    "stringQuotes": ["'", "\""],
+    "stringEscape": "\\"
+  },
+
+  "commentsByExtension": {
+    ".blade.php": {
+      "line": [],
+      "block": [["{{--", "--}}"]],
+      "stringQuotes": []
+    }
+  },
+
+  "edges": {
+    "import": [
+      {
+        "pattern": "^[ \\t]*use\\s+([A-Za-z0-9_\\\\]+)(?:\\s+as\\s+[A-Za-z0-9_]+)?\\s*;",
+        "resolve": "fqcn"
+      }
+    ],
+    "fqcn": [
+      {
+        "pattern": "\\\\([A-Z][A-Za-z0-9_]*(?:\\\\[A-Za-z0-9_]+)+)::",
+        "resolve": "fqcn"
+      }
+    ],
+    "string": [
+      {
+        "pattern": "['\"]([A-Z][A-Za-z0-9_]*(?:\\\\{1,2}[A-Za-z0-9_]+)+)['\"]",
+        "resolve": "fqcn-string"
+      }
+    ],
+    "template": [
+      {
+        "pattern": "<x-([a-z0-9][A-Za-z0-9._-]*)",
+        "resolve": "short-name",
+        "normalize": ["last-dot-segment", "pascal-case"]
+      },
+      {
+        "pattern": "<livewire:([a-z0-9][A-Za-z0-9._-]*)",
+        "resolve": "short-name",
+        "normalize": ["last-dot-segment", "pascal-case"]
+      },
+      {
+        "pattern": "@livewire\\(\\s*['\"]([a-z0-9][A-Za-z0-9._-]*)['\"]",
+        "resolve": "short-name",
+        "normalize": ["last-dot-segment", "pascal-case"]
+      }
+    ],
+    "hook": [
+      {
+        "pattern": "([A-Za-z0-9_]+)::observe\\(\\s*([A-Za-z0-9_]+)::class",
+        "resolve": "observer"
+      }
+    ]
+  },
+
+  "produces": [
+    {
+      "symbol": "http-route",
+      "pattern": "Route::(get|post|put|patch|delete)\\(\\s*['\"]([^'\"]+)['\"]",
+      "map": { "method": 1, "path": 2 },
+      "key": "{method} {path}",
+      "normalize": { "method": ["upper"], "path": ["strip-leading-slash"] }
+    }
+  ],
+
+  "consumes": [
+    {
+      "symbol": "http-route",
+      "pattern": "\\$this->(get|post|put|patch|delete)\\(\\s*['\"]([^'\"]+)['\"]",
+      "map": { "method": 1, "path": 2 },
+      "key": "{method} {path}",
+      "normalize": { "method": ["upper"], "path": ["strip-leading-slash"] }
+    },
+    {
+      "symbol": "inertia-page",
+      "pattern": "(?:Inertia::render|inertia)\\(\\s*['\"]([^'\"]+)['\"]",
+      "map": { "page": 1 },
+      "key": "{page}"
+    }
+  ],
+
+  "tests": {
+    "paths": ["tests/"],
+    "importsRule": "import",
+    "assertionTerms": [
+      "assertSame",
+      "assertNotSame(",
+      "assertEquals",
+      "assertNotEquals(",
+      "assertTrue(",
+      "assertFalse(",
+      "assertNull(",
+      "assertNotNull(",
+      "assertCount(",
+      "assertEmpty(",
+      "assertNotEmpty(",
+      "assertContains(",
+      "assertNotContains(",
+      "assertStringContainsString(",
+      "assertStringNotContainsString(",
+      "assertGreaterThan",
+      "assertLessThan",
+      "assertMatchesRegularExpression(",
+      "->toBe(",
+      "->toEqual",
+      "->toContain(",
+      "->toBeTrue(",
+      "->toBeFalse(",
+      "->toBeNull(",
+      "->toBeEmpty(",
+      "->toHaveCount(",
+      "->toHaveLength(",
+      "->toMatch(",
+      "->toMatchArray(",
+      "->toStartWith(",
+      "->toEndWith(",
+      "->toBeGreaterThan",
+      "->toBeLessThan",
+      "->toThrow(",
+      "assertJson(",
+      "assertJsonFragment(",
+      "assertJsonPath(",
+      "assertExactJson(",
+      "assertJsonValidationErrors(",
+      "assertDatabaseHas(",
+      "assertDatabaseMissing(",
+      "assertSessionHasErrors(",
+      "assertHasErrors(",
+      "assertHasFormErrors(",
+      "->assertSet(",
+      "->assertViewHas(",
+      "->assertHeader(",
+      "->assertSee("
+    ],
+    "assertionExcludes": [
+      "assertTrue(method_exists(",
+      "assertTrue(class_exists(",
+      "assertTrue(function_exists(",
+      "assertTrue(property_exists(",
+      "assertTrue(interface_exists(",
+      "assertTrue(trait_exists(",
+      "assertTrue(enum_exists(",
+      "assertTrue(is_callable(",
+      "assertFalse(method_exists(",
+      "assertFalse(class_exists(",
+      "assertFalse(function_exists(",
+      "assertFalse(property_exists(",
+      "assertFalse(interface_exists(",
+      "assertFalse(trait_exists(",
+      "assertFalse(enum_exists(",
+      "assertFalse(is_callable(",
+      "$this->assertJson(",
+      "self::assertJson(",
+      "static::assertJson(",
+      "parent::assertJson(",
+      "Assert::assertJson("
+    ]
+  },
+
+  "hazards": {
+    "transactions": [
+      {
+        "pattern": "(?:DB::|->)transaction\\(\\s*(?:static\\s+)?function\\b",
+        "extent": "balanced",
+        "open": "{",
+        "close": "}"
+      },
+      {
+        "pattern": "(?:DB::|->)beginTransaction\\(\\s*\\)",
+        "extent": "span",
+        "endPattern": "(?:DB::|->)(?:commit|roll[Bb]ack)\\(\\s*\\)"
+      }
+    ],
+    "dispatches": [
+      {
+        "pattern": "(?<![:\\w])dispatch\\(\\s*new\\s+(\\\\?(?:[A-Za-z0-9_]+\\\\)*[A-Za-z0-9_]+)",
+        "job": 1
+      },
+      {
+        "pattern": "\\bBus::dispatch\\(\\s*new\\s+(\\\\?(?:[A-Za-z0-9_]+\\\\)*[A-Za-z0-9_]+)",
+        "job": 1
+      },
+      {
+        "pattern": "(?<!\\w)(?!Bus\\b)((?:[A-Za-z0-9_]+\\\\)*[A-Z][A-Za-z0-9_]*)::dispatch\\(",
+        "job": 1
+      }
+    ],
+    "deferAtSite": ["->\\s*afterCommit\\(\\s*\\)"],
+    "deferAtDeclaration": ["\\bpublic\\s+(?:bool\\s+)?\\$afterCommit\\s*=\\s*true\\b"]
+  }
+}

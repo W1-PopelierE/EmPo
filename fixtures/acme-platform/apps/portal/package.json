@@ -1,0 +1,14 @@
+{
+  "name": "@acme/portal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The acme-platform Inertia pages the api renders",
+  "main": "src/main.ts",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@inertiajs/vue3": "^2.0.0",
+    "vue": "^3.5.0"
+  }
+}

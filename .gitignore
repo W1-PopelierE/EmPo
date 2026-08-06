@@ -1,0 +1,7 @@
+node_modules/
+dist/
+dist-binary/
+*.log
+.DS_Store
+**/.empo/generated/
+.claude/settings.local.json

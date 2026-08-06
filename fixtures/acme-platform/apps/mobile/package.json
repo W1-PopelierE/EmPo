@@ -1,0 +1,14 @@
+{
+  "name": "@acme/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The acme-platform order screens",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-native": "^0.77.0"
+  }
+}

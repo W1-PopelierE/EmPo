@@ -1,0 +1,366 @@
+# Four jobs in one file, chained so that nothing downstream can happen without the check above it: a
+# merge that does not verify does not get a version number, and a version that was not cut gets no
+# binaries. `verify` and `binary` run on every pull request and on every push to main; `release` runs
+# only on the push, only after both are green, and cuts the version that push earned; `binaries`
+# builds the four platform artifacts and attaches them to the release that job created.
+#
+# Nothing here publishes to a package registry, and there is no step that ever will. The single
+# supported install route is `install.sh` plus `empo upgrade`, both of which download the release
+# assets the `binaries` job uploads, so those uploads are the distribution channel rather than a
+# convenience copy of it.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Both versions run to the end, because "22 is red and 24 is unknown" is a worse report than
+      # two answers.
+      fail-fast: false
+      matrix:
+        # The two supported Node lines. 20 is absent because it is end of life and because the
+        # package never ran on it: `commander@15` needs 22.12.0 and `execa@10` needs 22, and
+        # `engines` now says `>=22.12.0` to match. `test/engines.test.ts` fails if a dependency bump
+        # ever moves the real floor above the declared one again. `22` and `24` resolve to the
+        # latest of each line, so the declared floor itself is never the version under test, which
+        # is a limit no matrix can close: only a run pinned to 22.12.0 exactly would.
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `empo index` reads git for the sha and the subject it records in the graph, and
+          # `empo check --base` needs the base commit to be in the history it was handed.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      # The four verifications, in the order CLAUDE.md names them. None substitutes for another:
+      # vitest does not typecheck, tsc does not lint, and none of the three runs the bundle.
+      - name: Tests, serially
+        run: npx vitest run --no-file-parallelism
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx biome check .
+
+      - name: Build
+        run: npm run build
+
+      # The fourth verification. `engine/pack-loader.ts` and `discipline/load.ts` each probe two
+      # roots, one for src and one for the published layout, so a green suite says nothing about
+      # whether the bundle can find a pack or the discipline markdown. These steps run it.
+      - name: The bundle reports a version
+        run: node dist/empo.js --version
+
+      - name: The bundle resolves its packs
+        run: |
+          node dist/empo.js pack test typescript
+          node dist/empo.js pack test php
+
+      # `.empo/generated/` is gitignored, so there is no committed graph for `--check` to compare
+      # against. What the pair asserts here is the other half of what `--check` is for: two builds of
+      # the same tree, byte for byte identical, which is the determinism requirement measured rather
+      # than asserted in a unit test.
+      - name: The graph builds, and builds the same way twice
+        run: |
+          node dist/empo.js index
+          node dist/empo.js index --check
+
+      - name: Spines have not drifted
+        run: node dist/empo.js verify
+
+      # The gate the docs have said "has to hold in CI" since before there was a CI. It guards
+      # nothing in this repository today, because `.empo/spines/` holds only `.gitkeep`, so this step
+      # is a no-op that starts biting on the day somebody curates a spine here.
+      - name: Guarded files carry a value assertion
+        if: github.event_name == 'pull_request'
+        run: node dist/empo.js check --base ${{ github.event.pull_request.base.sha }}
+
+  # The fifth verification, and the only one that can exist. `test/embedded.test.ts` pins the code
+  # paths the binary depends on and says in its own header why it cannot pin the artifact: no spec
+  # builds a 110MB executable or runs it on an interpreter it was not built with. This job is that
+  # measurement, and the last two steps are the whole point of the binary rather than a smoke test.
+  binary:
+    name: binary (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The artifact is a copy of `node` with a blob injected, so it is platform-specific and
+        # neither platform's result predicts the other's. macOS is here because it is the one that
+        # needs a codesign dance around the injection, and Linux because it is the one that does not:
+        # the two runners are the two injection mechanisms rather than two arbitrary machines.
+        #
+        # This matrix stays at two while the `binaries` job below runs four. The question asked here
+        # is whether a SEA binary resolves an interpreter from its environment, and that answer is a
+        # property of the mechanism, not of the word size: darwin-x64 fails or passes it for the same
+        # reason darwin-arm64 does. Four runners would buy a slower answer to a question already
+        # answered.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build the binary
+        run: npm run build:binary
+
+      - name: It runs, indexes and answers
+        run: |
+          ./dist-binary/empo --version
+          ./dist-binary/empo index
+          ./dist-binary/empo index --check
+          ./dist-binary/empo doctor
+
+      # The requirement, measured rather than asserted: "the artifact must resolve no interpreter
+      # from the environment it is invoked in". A PATH with no `node` on it at all is the strongest
+      # form of that question, and the npm bundle cannot pass this step by construction.
+      - name: It runs with no interpreter on PATH at all
+        run: |
+          env -i PATH=/usr/bin:/bin HOME="$HOME" "$PWD/dist-binary/empo" --version
+          env -i PATH=/usr/bin:/bin HOME="$HOME" "$PWD/dist-binary/empo" doctor --repo "$PWD"
+
+      # A measured failure, turned into a gate. A repository pinning Node 21 is
+      # where `empo` used to fail twice: `command not found`, then `TEXT_ENCODINGS.union is not a
+      # function` out of execa. Both are absent here because the interpreter on PATH is never asked.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "21"
+
+      - name: It runs where the target pins a Node below the engines floor
+        run: |
+          node --version
+          test "$(node --version | cut -d. -f1)" = "v21" || { echo "expected Node 21 on PATH"; exit 1; }
+          ./dist-binary/empo --version
+          ./dist-binary/empo index
+          ./dist-binary/empo query src/embedded.ts
+
+  release:
+    name: release
+    needs: [verify, binary]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the bump commit and its tag, and cut the release
+      pull-requests: read # read the merged pull request's bump label
+    concurrency:
+      # Serialized, so two merges landing a minute apart cannot race to push the same branch. The
+      # cost is stated in docs/10-distribution.md: GitHub keeps one pending run per group, so a third
+      # merge arriving while one is queued drops the queued one and that merge shares the next
+      # version rather than getting its own.
+      group: release
+      cancel-in-progress: false
+    outputs:
+      # Empty on a bump:skip run, which is what the `binaries` job below tests before building: no
+      # version was cut, so there is no release to attach anything to.
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The tip of main, not the sha that triggered this run. A release job that checks out its
+          # own trigger sha pushes a non-fast-forward the moment anything else has landed.
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Patch unless the merged pull request says otherwise. The label is the signal rather than the
+      # commit message, because commit messages here are one-line prose with no conventional-commit
+      # prefix to read (CLAUDE.md), and because a label is visible on the pull request while it is
+      # still open, which is when the decision is actually made.
+      #
+      #   bump:major   0.1.1 -> 1.0.0
+      #   bump:minor   0.1.1 -> 0.2.0
+      #   bump:patch   0.1.1 -> 0.1.2   (the default, so this one only makes it explicit)
+      #   bump:skip    no version, no tag, no release
+      #
+      # A push straight to main carries no pull request and therefore no labels, which lands on the
+      # default and bumps patch.
+      - name: Decide the bump
+        id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          labels=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
+            --jq '.[].labels[].name' || true)
+          echo "labels on the merged pull request: ${labels:-none}"
+
+          if grep -qx 'bump:skip' <<<"$labels"; then
+            level=skip
+          elif grep -qx 'bump:major' <<<"$labels"; then
+            level=major
+          elif grep -qx 'bump:minor' <<<"$labels"; then
+            level=minor
+          else
+            level=patch
+          fi
+
+          echo "level=$level" >>"$GITHUB_OUTPUT"
+          echo "bump: $level"
+
+      - name: Say that nothing was released
+        if: steps.bump.outputs.level == 'skip'
+        run: echo "The merged pull request carries bump:skip, so no version was cut."
+
+      # `npm version` writes package.json and package-lock.json and prints the new version with its
+      # leading v, which is the tag name, so the two cannot disagree.
+      - name: Bump, commit and tag
+        id: version
+        if: steps.bump.outputs.level != 'skip'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          tag=$(npm version "${{ steps.bump.outputs.level }}" --no-git-tag-version)
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+
+          # `npm version` is the whole of the version move. It writes the two manifest files and
+          # nothing else needs rewriting after it, because the tree declares no per-platform packages
+          # for a bump to leave one release behind.
+
+          git add package.json package-lock.json
+          # A push made with GITHUB_TOKEN does not trigger a workflow, so this commit cannot loop
+          # back into this file. `[skip ci]` is the belt for the day somebody swaps in a personal
+          # access token, where that rule stops applying and the loop is real.
+          git commit -m "Release $tag [skip ci]"
+          git tag -a "$tag" -m "$tag"
+          git push origin HEAD:main --follow-tags
+
+      - name: Cut the GitHub Release
+        if: steps.bump.outputs.level != 'skip'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --generate-notes
+
+  # The binaries are attached after the release exists, one job per platform, because the artifact is
+  # a copy of the runner's own `node` and no runner can build another platform's.
+  #
+  # The release assets are the install channel and not a copy of one: `install.sh` and `empo upgrade`
+  # both resolve a release and download `empo-<platform>-<arch>` from it. A sha256 goes up beside
+  # each, computed by the build that made the bytes rather than by whoever quotes it later, so the
+  # artifact a user installs is auditable without installing it.
+  #
+  # Additive to the release above rather than a change to it: nothing here touches the version or the
+  # tag.
+  #
+  # `needs: release` plus the tag test is what keeps a bump:skip run green here. `release` succeeds
+  # on skip and leaves `tag` empty, this job's `if` reads empty and the job is skipped, not failed.
+  # On a pull request `release` never runs at all, and a skipped dependency skips this job too.
+  binaries:
+    name: attach binary (${{ matrix.target }})
+    needs: release
+    if: needs.release.outputs.tag != ''
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # upload release assets
+    strategy:
+      fail-fast: false
+      matrix:
+        # This matrix is the single place the supported platform list lives, and the asset names it
+        # produces are what `install.sh` and `empo upgrade` ask a release for.
+        # `test/install-script.test.ts` parses the `target:` values below and checks the installer
+        # agrees on the same four, so the two cannot drift apart silently. Nothing else restates the
+        # four, so there is no second copy to forget, and the shape of these entries is read by that
+        # test rather than only by Actions.
+        #
+        # Four builders and not two. The two extra runners are the cost: `ubuntu-24.04-arm` for
+        # linux-arm64 and the Intel macOS image for darwin-x64. The alternative considered was
+        # leaving this at two, which would mean an Intel Mac or an arm64 Linux box running the
+        # installer, finding no asset for its platform and having nothing to fall back to. A
+        # platform the installer names must be a platform a release carries.
+        #
+        # `target` is `process.platform`-`process.arch` and not a friendly name, because it is what
+        # the installer computes when it picks an asset to download. The build step below asserts the
+        # runner really is that target rather than trusting the label, which is the only way a
+        # renamed or repointed image fails loudly instead of uploading a correctly named asset
+        # holding the wrong architecture.
+        include:
+          - os: macos-latest
+            target: darwin-arm64
+          - os: macos-15-intel
+            target: darwin-x64
+          - os: ubuntu-latest
+            target: linux-x64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The bump commit, not the sha that triggered the run: the binary must report the version
+          # that was just released, and `empo --version` reads it off package.json at build time.
+          ref: ${{ needs.release.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      # The runner is asked what it is rather than told. A matrix entry is a label pointing at an
+      # image somebody else maintains, and a label that quietly starts resolving to another
+      # architecture would otherwise produce a package named darwin-x64 holding an arm64 binary,
+      # which installs without complaint and then cannot run.
+      - name: The runner is the target it claims to be
+        run: |
+          actual=$(node -p 'process.platform + "-" + process.arch')
+          test "$actual" = "$TARGET" || {
+            echo "the matrix says $TARGET, the runner is $actual"
+            exit 1
+          }
+          echo "target $actual"
+        env:
+          TARGET: ${{ matrix.target }}
+
+      - name: Build the binary
+        run: |
+          npm run build:binary
+          test "$(./dist-binary/empo --version)" = "${TAG#v}" || {
+            echo "the binary reports $(./dist-binary/empo --version), the tag says ${TAG#v}"
+            exit 1
+          }
+        env:
+          TAG: ${{ needs.release.outputs.tag }}
+
+      # The rename is what makes the asset addressable: `install.sh` and `empo upgrade` both ask a
+      # release for `empo-<platform>-<arch>` by name, so the matrix target is the filename.
+      - name: Name and checksum the release asset
+        run: |
+          mv dist-binary/empo "empo-${{ matrix.target }}"
+          shasum -a 256 "empo-${{ matrix.target }}" > "empo-${{ matrix.target }}.sha256"
+          cat "empo-${{ matrix.target }}.sha256"
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.release.outputs.tag }}" \
+            "empo-${{ matrix.target }}" "empo-${{ matrix.target }}.sha256" --clobber

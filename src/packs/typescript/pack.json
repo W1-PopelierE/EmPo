@@ -1,0 +1,225 @@
+{
+  "name": "typescript",
+  "version": "1.5.0",
+  "match": {
+    "extensions": [".ts", ".tsx", ".vue", ".js", ".jsx", ".mjs", ".cjs"],
+    "manifest": ["package.json", "tsconfig.json"]
+  },
+  "node": {
+    "id": {
+      "strategy": "module-path",
+      "indexNames": ["index"]
+    },
+    "kindRules": [
+      {
+        "kind": "screen",
+        "pathGlob": "**/screens/**"
+      },
+      {
+        "kind": "component",
+        "pathGlob": "**/components/**"
+      },
+      {
+        "kind": "api-client",
+        "pathGlob": "**/api/**"
+      },
+      {
+        "kind": "component",
+        "pathGlob": "**/*.vue"
+      },
+      {
+        "kind": "component",
+        "pathGlob": "**/*.{tsx,jsx}",
+        "contentPattern": "</[A-Za-z][A-Za-z0-9._-]*\\s*>|<[A-Za-z][A-Za-z0-9._-]*(?:\\s[^<]*?)?/>"
+      },
+      {
+        "kind": "module"
+      }
+    ]
+  },
+  "comments": {
+    "line": ["//"],
+    "block": [["/*", "*/"]],
+    "stringQuotes": ["'", "\"", "`"],
+    "multilineQuotes": ["`"],
+    "stringEscape": "\\"
+  },
+  "commentsByExtension": {
+    ".vue": {
+      "line": ["//"],
+      "block": [["/*", "*/"], ["<!--", "-->"]],
+      "stringQuotes": ["'", "\"", "`"],
+      "multilineQuotes": ["`"],
+      "stringEscape": "\\"
+    }
+  },
+  "edges": {
+    "import": [
+      {
+        "pattern": "^[ \\t]*import[\\s{][A-Za-z0-9_$,{}\\s*]*?from\\s*['\"]([^'\"]+)['\"]",
+        "resolve": "module-path"
+      },
+      {
+        "pattern": "^[ \\t]*export[\\s{][A-Za-z0-9_$,{}\\s*]*?from\\s*['\"]([^'\"]+)['\"]",
+        "resolve": "module-path"
+      },
+      {
+        "pattern": "\\b(?:import|require)\\(\\s*['\"`]([^'\"`]+)['\"`]\\s*\\)",
+        "resolve": "module-path"
+      }
+    ],
+    "template": [
+      {
+        "pattern": "</([A-Z][A-Za-z0-9_]*)(?:\\.[A-Za-z0-9_]+)*\\s*>",
+        "resolve": "short-name",
+        "pathGlob": "**/*.{tsx,jsx,vue}",
+        "targetKinds": ["component", "screen"]
+      },
+      {
+        "pattern": "<([A-Z][A-Za-z0-9_]*)(?:\\.[A-Za-z0-9_]+)*(?:<[^<>]*>)?(?:\\s[^<]*?)?/>",
+        "resolve": "short-name",
+        "pathGlob": "**/*.{tsx,jsx,vue}",
+        "targetKinds": ["component", "screen"]
+      }
+    ]
+  },
+  "produces": [
+    {
+      "symbol": "inertia-page",
+      "pathPattern": "(?:^|/)Pages/(.+)\\.(?:vue|tsx|jsx)$",
+      "map": {
+        "page": 1
+      },
+      "key": "{page}"
+    }
+  ],
+  "consumes": [
+    {
+      "symbol": "http-route",
+      "pattern": "\\bfetch\\(\\s*['\"`]([^'\"`]+)['\"`]\\s*\\)",
+      "map": {
+        "path": 1
+      },
+      "key": "GET {path}",
+      "normalize": {
+        "path": ["strip-leading-slash"]
+      }
+    },
+    {
+      "symbol": "http-route",
+      "pattern": "\\bfetch\\(\\s*['\"`]([^'\"`]+)['\"`]\\s*,\\s*\\{[^}]*?method:\\s*['\"]([A-Za-z]+)['\"]",
+      "map": {
+        "path": 1,
+        "method": 2
+      },
+      "key": "{method} {path}",
+      "normalize": {
+        "method": ["upper"],
+        "path": ["strip-leading-slash"]
+      }
+    },
+    {
+      "symbol": "http-route",
+      "pattern": "\\b(?:axios|apiClient|http)\\.(get|post|put|patch|delete)\\(\\s*['\"`]([^'\"`]+)['\"`]",
+      "map": {
+        "method": 1,
+        "path": 2
+      },
+      "key": "{method} {path}",
+      "normalize": {
+        "method": ["upper"],
+        "path": ["strip-leading-slash"]
+      }
+    }
+  ],
+  "tests": {
+    "paths": [
+      "tests/",
+      "test/",
+      "**/__tests__/**",
+      "**/*.test.ts",
+      "**/*.test.tsx",
+      "**/*.test.js",
+      "**/*.test.jsx",
+      "**/*.test.mjs",
+      "**/*.test.cjs",
+      "**/*.spec.ts",
+      "**/*.spec.tsx",
+      "**/*.spec.js",
+      "**/*.spec.jsx",
+      "**/*.spec.mjs",
+      "**/*.spec.cjs"
+    ],
+    "importsRule": "import",
+    "assertionTerms": [
+      "toBe(",
+      "toEqual(",
+      "toStrictEqual(",
+      "toHaveBeenCalledWith(",
+      "toHaveBeenCalledTimes(",
+      "toContain(",
+      "toContainEqual(",
+      "toMatch(",
+      "toMatchObject(",
+      "toMatchSnapshot(",
+      "toMatchInlineSnapshot(",
+      "toHaveLength(",
+      "toBeCloseTo(",
+      "toBeGreaterThan",
+      "toBeLessThan",
+      "toBeNull(",
+      "toThrow(",
+      "toThrowError(",
+      "strictEqual(",
+      "notStrictEqual(",
+      "deepEqual(",
+      "notDeepEqual(",
+      "deepStrictEqual(",
+      "notDeepStrictEqual(",
+      "assert.notEqual(",
+      "assert.match(",
+      "assert.doesNotMatch(",
+      "assert.throws(",
+      "assert.rejects(",
+      ".equal(",
+      ".eql(",
+      ".include(",
+      ".contain(",
+      ".members(",
+      ".lengthOf(",
+      ".length(",
+      ".closeTo(",
+      ".above(",
+      ".below(",
+      ".throw(",
+      ".be.true",
+      ".be.false",
+      ".be.null",
+      ".to.match(",
+      ".should.match(",
+      ".not.match("
+    ],
+    "assertionExcludes": [
+      "toBe(\"function\")",
+      "toBe('function')",
+      "toBe(`function`)",
+      "toEqual(\"function\")",
+      "toEqual('function')",
+      "toEqual(`function`)"
+    ]
+  },
+  "aliasSources": [
+    {
+      "file": "tsconfig.json",
+      "paths": "compilerOptions.paths",
+      "base": "compilerOptions.baseUrl",
+      "extends": "extends"
+    },
+    {
+      "file": "jsconfig.json",
+      "paths": "compilerOptions.paths",
+      "base": "compilerOptions.baseUrl",
+      "extends": "extends"
+    }
+  ]
+}

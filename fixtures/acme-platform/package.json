@@ -1,0 +1,7 @@
+{
+  "name": "acme-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Workspace container: the packages live under apps/, this file holds no code",
+  "workspaces": ["apps/*"]
+}

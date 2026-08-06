@@ -1,0 +1,1106 @@
+{
+  "nodes": [
+    {
+      "id": "src/App.vue",
+      "file": "src/App.vue",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "App",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/api/orders.ts",
+      "file": "src/api/orders.ts",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "api-client",
+      "name": "orders",
+      "produces": [],
+      "consumes": [
+        {
+          "symbol": "http-route",
+          "key": "DELETE api/v1/orders/${id}",
+          "line": 17
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET api/v1/orders/${id}",
+          "line": 9
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET https://api.acme.test/api/v1/health",
+          "line": 13
+        },
+        {
+          "symbol": "http-route",
+          "key": "POST api/v1/orders",
+          "line": 5
+        }
+      ],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/browser/__tests__/tracker.js",
+      "file": "src/browser/__tests__/tracker.js",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "module",
+      "name": "tracker",
+      "produces": [],
+      "consumes": [],
+      "isTest": true,
+      "assertsValue": true
+    },
+    {
+      "id": "src/browser/analytics.js",
+      "file": "src/browser/analytics.js",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "module",
+      "name": "analytics",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/browser/analytics.test.js",
+      "file": "src/browser/analytics.test.js",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "module",
+      "name": "analytics.test",
+      "produces": [],
+      "consumes": [],
+      "isTest": true,
+      "assertsValue": true
+    },
+    {
+      "id": "src/browser/instrument.mjs",
+      "file": "src/browser/instrument.mjs",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "module",
+      "name": "instrument",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/browser/legacy-bridge.cjs",
+      "file": "src/browser/legacy-bridge.cjs",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "module",
+      "name": "legacy-bridge",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/browser/tracker.js",
+      "file": "src/browser/tracker.js",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "module",
+      "name": "tracker",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/browser/widgets/PriceWidget.jsx",
+      "file": "src/browser/widgets/PriceWidget.jsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "PriceWidget",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/components/CartBadge.vue",
+      "file": "src/components/CartBadge.vue",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "CartBadge",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/components/CartLine.vue",
+      "file": "src/components/CartLine.vue",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "CartLine",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/components/CartPanel.vue",
+      "file": "src/components/CartPanel.vue",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "CartPanel",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/components/OrderBadge.tsx",
+      "file": "src/components/OrderBadge.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "OrderBadge",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/components/PriceRow.tsx",
+      "file": "src/components/PriceRow.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "PriceRow",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/components/index.ts",
+      "file": "src/components/index.ts",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "index",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/legacy/OldOrderScreen.tsx",
+      "file": "src/legacy/OldOrderScreen.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "module",
+      "name": "OldOrderScreen",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/Pages/Orders/Index.tsx",
+      "file": "src/react/Pages/Orders/Index.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "Index",
+      "produces": [
+        {
+          "symbol": "inertia-page",
+          "key": "Orders/Index",
+          "line": 1
+        }
+      ],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/Pages/Orders/Print.jsx",
+      "file": "src/react/Pages/Orders/Print.jsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "Print",
+      "produces": [
+        {
+          "symbol": "inertia-page",
+          "key": "Orders/Print",
+          "line": 1
+        }
+      ],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/cards/Badge.tsx",
+      "file": "src/react/cards/Badge.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "Badge",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/cards/CardHeader.tsx",
+      "file": "src/react/cards/CardHeader.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "CardHeader",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/cards/OrderCard.tsx",
+      "file": "src/react/cards/OrderCard.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "OrderCard",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/cards/OrderList.tsx",
+      "file": "src/react/cards/OrderList.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "OrderList",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/cards/OrderRowList.tsx",
+      "file": "src/react/cards/OrderRowList.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "OrderRowList",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/cards/Total.tsx",
+      "file": "src/react/cards/Total.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "Total",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/registry.ts",
+      "file": "src/react/registry.ts",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "module",
+      "name": "registry",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/types/OrderRow.ts",
+      "file": "src/react/types/OrderRow.ts",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "module",
+      "name": "OrderRow",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/types/Total.ts",
+      "file": "src/react/types/Total.ts",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "module",
+      "name": "Total",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/widgets/Badge.jsx",
+      "file": "src/react/widgets/Badge.jsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "Badge",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/screens/CartScreen.spec.ts",
+      "file": "src/screens/CartScreen.spec.ts",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "screen",
+      "name": "CartScreen.spec",
+      "produces": [],
+      "consumes": [],
+      "isTest": true,
+      "assertsValue": true
+    },
+    {
+      "id": "src/screens/CartScreen.ts",
+      "file": "src/screens/CartScreen.ts",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "screen",
+      "name": "CartScreen",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/screens/OrderScreen.test.tsx",
+      "file": "src/screens/OrderScreen.test.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "screen",
+      "name": "OrderScreen.test",
+      "produces": [],
+      "consumes": [],
+      "isTest": true,
+      "assertsValue": true
+    },
+    {
+      "id": "src/screens/OrderScreen.tsx",
+      "file": "src/screens/OrderScreen.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "screen",
+      "name": "OrderScreen",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/screens/OrderScreenView.tsx",
+      "file": "src/screens/OrderScreenView.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "screen",
+      "name": "OrderScreenView",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/shared/money.ts",
+      "file": "src/shared/money.ts",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "module",
+      "name": "money",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "tests/cart.chai.test.ts",
+      "file": "tests/cart.chai.test.ts",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "module",
+      "name": "cart.chai.test",
+      "produces": [],
+      "consumes": [],
+      "isTest": true,
+      "assertsValue": true
+    },
+    {
+      "id": "tests/exports.test.ts",
+      "file": "tests/exports.test.ts",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "module",
+      "name": "exports.test",
+      "produces": [],
+      "consumes": [],
+      "isTest": true,
+      "assertsValue": false
+    },
+    {
+      "id": "tests/money.node.test.ts",
+      "file": "tests/money.node.test.ts",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "module",
+      "name": "money.node.test",
+      "produces": [],
+      "consumes": [],
+      "isTest": true,
+      "assertsValue": true
+    },
+    {
+      "id": "tests/orders.test.ts",
+      "file": "tests/orders.test.ts",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "module",
+      "name": "orders.test",
+      "produces": [],
+      "consumes": [],
+      "isTest": true,
+      "assertsValue": false
+    }
+  ],
+  "edges": [
+    {
+      "from": "src/App.vue",
+      "to": "src/components/CartPanel.vue",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/App.vue",
+        "line": 2
+      }
+    },
+    {
+      "from": "src/App.vue",
+      "to": "src/components/CartPanel.vue",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/App.vue",
+        "line": 7
+      }
+    },
+    {
+      "from": "src/api/orders.ts",
+      "to": "src/shared/money.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/api/orders.ts",
+        "line": 2
+      }
+    },
+    {
+      "from": "src/browser/__tests__/tracker.js",
+      "to": "src/browser/tracker.js",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/browser/__tests__/tracker.js",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/browser/analytics.js",
+      "to": "src/browser/tracker.js",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/browser/analytics.js",
+        "line": 4
+      }
+    },
+    {
+      "from": "src/browser/analytics.js",
+      "to": "src/shared/money.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/browser/analytics.js",
+        "line": 3
+      }
+    },
+    {
+      "from": "src/browser/analytics.test.js",
+      "to": "src/browser/analytics.js",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/browser/analytics.test.js",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/browser/instrument.mjs",
+      "to": "src/browser/analytics.js",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/browser/instrument.mjs",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/browser/legacy-bridge.cjs",
+      "to": "src/browser/tracker.js",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/browser/legacy-bridge.cjs",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/browser/widgets/PriceWidget.jsx",
+      "to": "src/shared/money.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/browser/widgets/PriceWidget.jsx",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/components/CartBadge.vue",
+      "to": "src/shared/money.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/components/CartBadge.vue",
+        "line": 2
+      }
+    },
+    {
+      "from": "src/components/CartLine.vue",
+      "to": "src/shared/money.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/components/CartLine.vue",
+        "line": 2
+      }
+    },
+    {
+      "from": "src/components/CartPanel.vue",
+      "to": "src/components/CartBadge.vue",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/components/CartPanel.vue",
+        "line": 16
+      }
+    },
+    {
+      "from": "src/components/CartPanel.vue",
+      "to": "src/components/CartLine.vue",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/components/CartPanel.vue",
+        "line": 3
+      }
+    },
+    {
+      "from": "src/components/CartPanel.vue",
+      "to": "src/components/CartLine.vue",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/components/CartPanel.vue",
+        "line": 14
+      }
+    },
+    {
+      "from": "src/components/CartPanel.vue",
+      "to": "src/shared/money.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/components/CartPanel.vue",
+        "line": 2
+      }
+    },
+    {
+      "from": "src/components/OrderBadge.tsx",
+      "to": "src/shared/money.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/components/OrderBadge.tsx",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/components/PriceRow.tsx",
+      "to": "src/shared/money.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/components/PriceRow.tsx",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/components/index.ts",
+      "to": "src/components/OrderBadge.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/components/index.ts",
+        "line": 2
+      }
+    },
+    {
+      "from": "src/components/index.ts",
+      "to": "src/components/PriceRow.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/components/index.ts",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/legacy/OldOrderScreen.tsx",
+      "to": "src/shared/money.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/legacy/OldOrderScreen.tsx",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/react/Pages/Orders/Index.tsx",
+      "to": "src/react/cards/Badge.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/Pages/Orders/Index.tsx",
+        "line": 2
+      }
+    },
+    {
+      "from": "src/react/Pages/Orders/Index.tsx",
+      "to": "src/react/cards/OrderCard.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/Pages/Orders/Index.tsx",
+        "line": 3
+      }
+    },
+    {
+      "from": "src/react/Pages/Orders/Index.tsx",
+      "to": "src/react/cards/OrderCard.tsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/Pages/Orders/Index.tsx",
+        "line": 11
+      }
+    },
+    {
+      "from": "src/react/Pages/Orders/Index.tsx",
+      "to": "src/react/cards/OrderList.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/Pages/Orders/Index.tsx",
+        "line": 4
+      }
+    },
+    {
+      "from": "src/react/Pages/Orders/Index.tsx",
+      "to": "src/react/cards/OrderList.tsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/Pages/Orders/Index.tsx",
+        "line": 18
+      }
+    },
+    {
+      "from": "src/react/Pages/Orders/Index.tsx",
+      "to": "src/react/types/OrderRow.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/Pages/Orders/Index.tsx",
+        "line": 5
+      }
+    },
+    {
+      "from": "src/react/Pages/Orders/Index.tsx",
+      "to": "src/screens/OrderScreenView.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/Pages/Orders/Index.tsx",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/react/Pages/Orders/Index.tsx",
+      "to": "src/screens/OrderScreenView.tsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/Pages/Orders/Index.tsx",
+        "line": 17
+      }
+    },
+    {
+      "from": "src/react/Pages/Orders/Print.jsx",
+      "to": "src/react/cards/OrderList.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/Pages/Orders/Print.jsx",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/react/Pages/Orders/Print.jsx",
+      "to": "src/react/cards/OrderList.tsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/Pages/Orders/Print.jsx",
+        "line": 7
+      }
+    },
+    {
+      "from": "src/react/cards/OrderCard.tsx",
+      "to": "src/browser/widgets/PriceWidget.jsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/OrderCard.tsx",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/react/cards/OrderCard.tsx",
+      "to": "src/browser/widgets/PriceWidget.jsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/OrderCard.tsx",
+        "line": 16
+      }
+    },
+    {
+      "from": "src/react/cards/OrderCard.tsx",
+      "to": "src/react/cards/CardHeader.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/OrderCard.tsx",
+        "line": 4
+      }
+    },
+    {
+      "from": "src/react/cards/OrderCard.tsx",
+      "to": "src/react/cards/CardHeader.tsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/OrderCard.tsx",
+        "line": 15
+      }
+    },
+    {
+      "from": "src/react/cards/OrderCard.tsx",
+      "to": "src/react/types/OrderRow.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/OrderCard.tsx",
+        "line": 3
+      }
+    },
+    {
+      "from": "src/react/cards/OrderCard.tsx",
+      "to": "src/shared/money.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/OrderCard.tsx",
+        "line": 2
+      }
+    },
+    {
+      "from": "src/react/cards/OrderList.tsx",
+      "to": "src/react/cards/CardHeader.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/OrderList.tsx",
+        "line": 2
+      }
+    },
+    {
+      "from": "src/react/cards/OrderList.tsx",
+      "to": "src/react/cards/CardHeader.tsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/OrderList.tsx",
+        "line": 11
+      }
+    },
+    {
+      "from": "src/react/cards/OrderList.tsx",
+      "to": "src/react/types/OrderRow.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/OrderList.tsx",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/react/cards/OrderRowList.tsx",
+      "to": "src/react/cards/CardHeader.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/OrderRowList.tsx",
+        "line": 2
+      }
+    },
+    {
+      "from": "src/react/cards/OrderRowList.tsx",
+      "to": "src/react/cards/CardHeader.tsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/OrderRowList.tsx",
+        "line": 16
+      }
+    },
+    {
+      "from": "src/react/cards/Total.tsx",
+      "to": "src/react/types/Total.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/Total.tsx",
+        "line": 2
+      }
+    },
+    {
+      "from": "src/react/cards/Total.tsx",
+      "to": "src/shared/money.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/Total.tsx",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/react/types/OrderRow.ts",
+      "to": "src/shared/money.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/types/OrderRow.ts",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/react/types/Total.ts",
+      "to": "src/shared/money.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/types/Total.ts",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/react/widgets/Badge.jsx",
+      "to": "src/browser/widgets/PriceWidget.jsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/widgets/Badge.jsx",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/react/widgets/Badge.jsx",
+      "to": "src/browser/widgets/PriceWidget.jsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/widgets/Badge.jsx",
+        "line": 6
+      }
+    },
+    {
+      "from": "src/screens/CartScreen.spec.ts",
+      "to": "src/screens/CartScreen.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/screens/CartScreen.spec.ts",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/screens/CartScreen.ts",
+      "to": "src/api/orders.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/screens/CartScreen.ts",
+        "line": 2
+      }
+    },
+    {
+      "from": "src/screens/CartScreen.ts",
+      "to": "src/components/CartPanel.vue",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/screens/CartScreen.ts",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/screens/OrderScreen.test.tsx",
+      "to": "src/screens/OrderScreen.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/screens/OrderScreen.test.tsx",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/screens/OrderScreen.tsx",
+      "to": "src/api/orders.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/screens/OrderScreen.tsx",
+        "line": 3
+      }
+    },
+    {
+      "from": "src/screens/OrderScreen.tsx",
+      "to": "src/components/OrderBadge.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/screens/OrderScreen.tsx",
+        "line": 6
+      }
+    },
+    {
+      "from": "src/screens/OrderScreen.tsx",
+      "to": "src/components/index.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/screens/OrderScreen.tsx",
+        "line": 2
+      }
+    },
+    {
+      "from": "src/screens/OrderScreenView.tsx",
+      "to": "src/components/PriceRow.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/screens/OrderScreenView.tsx",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/screens/OrderScreenView.tsx",
+      "to": "src/components/PriceRow.tsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/screens/OrderScreenView.tsx",
+        "line": 7
+      }
+    },
+    {
+      "from": "tests/cart.chai.test.ts",
+      "to": "src/shared/money.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "tests/cart.chai.test.ts",
+        "line": 2
+      }
+    },
+    {
+      "from": "tests/exports.test.ts",
+      "to": "src/api/orders.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "tests/exports.test.ts",
+        "line": 1
+      }
+    },
+    {
+      "from": "tests/money.node.test.ts",
+      "to": "src/shared/money.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "tests/money.node.test.ts",
+        "line": 2
+      }
+    },
+    {
+      "from": "tests/orders.test.ts",
+      "to": "src/api/orders.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "tests/orders.test.ts",
+        "line": 1
+      }
+    }
+  ],
+  "hazards": []
+}
