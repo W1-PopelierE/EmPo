@@ -1,5 +1,13 @@
-import type { GraphEdge, GraphNode, Hazard, Pack } from "../schema/types";
+import type {
+  GraphEdge,
+  GraphNode,
+  Hazard,
+  NameOutcome,
+  NameResolution,
+  Pack,
+} from "../schema/types";
 import { compilePack, type ExtractedFile, extractFile } from "./extractor";
+import { tallyNames } from "./names";
 import { byEdgeOrder, byNodeId, compareStrings } from "./order";
 import {
   buildNodeIndex,
@@ -32,6 +40,12 @@ export interface RootGraph {
    */
   files: string[];
   duplicates: DuplicateNode[];
+  /**
+   * What this root's name-resolving rules did with every bare name they read, one record per edge
+   * family. Empty where no rule in the pack resolves by name, which is a different fact from a rule
+   * that read names and resolved none of them, and the counts are what tells them apart.
+   */
+  names: NameResolution[];
 }
 
 /** Two files that claim the same node id. Only the first survives, and the collision is reported. */
@@ -73,7 +87,13 @@ export function buildRoot(options: BuildRootOptions): RootGraph {
     indexNames: options.pack.node.id.indexNames ?? [],
     aliases: compileAliases(options.root.aliases),
   };
-  const edges = extracted.flatMap((file) => resolveEdges(file, index, context));
+  const edges: GraphEdge[] = [];
+  const names: NameOutcome[] = [];
+  for (const file of extracted) {
+    const resolved = resolveEdges(file, index, context);
+    edges.push(...resolved.edges);
+    names.push(...resolved.names);
+  }
   const deduped = dedupeNodes(extracted.map(toNode));
 
   return {
@@ -82,6 +102,10 @@ export function buildRoot(options: BuildRootOptions): RootGraph {
     hazards: resolveHazards(extracted, index),
     files: scanned.map((file) => file.file),
     duplicates: deduped.duplicates,
+    // Tallied before the edges are deduplicated, and deliberately: an edge deduplicated away was a
+    // reference the rules did read and resolve, so counting after would shrink the numerator while
+    // leaving every refusal standing and report a yield lower than the one measured.
+    names: tallyNames(names),
   };
 }
 

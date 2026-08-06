@@ -28,6 +28,7 @@ function graphWithRoots(roots: { path: string; lang: string }[]): Graph {
     coverage: {},
     hazards: [],
     hazardsScanned: [],
+    names: [],
   };
 }
 

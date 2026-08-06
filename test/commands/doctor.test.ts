@@ -228,6 +228,14 @@ describe("doctor prose", () => {
       // file, the service provider, and three components no journey names. Stated as a fact and not
       // as a warning, which is the whole design (engine/health.ts), so the report still closes OK.
       "flows      3 defined, 5 of 15 non-test files claimed by none",
+      // One line per family that read a bare name, and the denominator on both of them though
+      // neither refused anything. That is the point of the block rather than an oversight: a family
+      // reporting "0 of 53 resolved" and one reporting "41 of 41" are opposite results, and the
+      // total is what separates them, so a number that only appeared in the bad case would be a
+      // number nobody had learned to look for by the time it mattered. This fixture is clean, so it
+      // is also the pin on what a clean one looks like: no refusal clauses, no names line under it.
+      "names      hook     2 of 2 resolved",
+      "names      template 1 of 1 resolved",
       "",
       "bridge http-route  2/3 consumed keys matched against 4 produced",
       '       no producer declares "GET v1/loyalty/points"',

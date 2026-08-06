@@ -5,7 +5,7 @@ import { forgeSlug } from "../adapters/forge/types";
 import type { TrackerKind } from "../adapters/tracker/types";
 import { EmpoError } from "../errors";
 import type { EmpoConfig } from "../schema/config.schema";
-import type { Graph } from "../schema/types";
+import type { Graph, NameResolution } from "../schema/types";
 import { type BridgeReport, bridgeRoots } from "./bridger";
 import { loadConfig } from "./config";
 import { type DetectedForge, detectForge, recognizedHost } from "./detect";
@@ -113,6 +113,25 @@ export interface FlowHealth {
  * flows. Written as the weaker question anyway, so the count stays true of the file if that ever
  * stops being true of the nodes.
  */
+/**
+ * The name-resolution tally the graph recorded, or null where no run recorded one.
+ *
+ * A fact in doctor's block and never a HealthFinding, on the argument `FlowHealth` above makes in
+ * full: an ambiguous component name is the normal shape of a React tree with feature directories,
+ * `TextInput` under two namespaces is the normal shape of a Blade component library, and a warning
+ * that fires forever on a deliberate state is a warning somebody turns off. The number is the whole
+ * of the answer and whether it is the right number is the human's judgement.
+ *
+ * `readGraph` casts without checking a key, so a graph written before schema 5 has no `names` at
+ * all and anything that is not an array is treated as no record. Null and not the empty list: the
+ * empty list is a real answer this field can carry, "these packs resolve no names", and handing it
+ * back for a graph nobody counted would be the invented reassurance the whole report refuses.
+ */
+export function nameHealth(graph: Graph | null): NameResolution[] | null {
+  if (graph === null || !Array.isArray(graph.names)) return null;
+  return graph.names;
+}
+
 export function flowHealth(graph: Graph | null): FlowHealth {
   if (graph === null) return { defined: null, files: null, unclaimed: null };
 
@@ -245,6 +264,12 @@ export interface Health {
   graph: GraphHealth;
   /** The flow map against the files it could claim, all null without a readable graph. */
   flows: FlowHealth;
+  /**
+   * What the name-resolving rules did with the names they read, per edge family. Null without a
+   * readable graph, and null again where the graph is readable and predates the count, which are
+   * both "nobody counted" and neither of which is the empty list.
+   */
+  names: NameResolution[] | null;
   spines: SpineHealth;
   findings: HealthFinding[];
   /** No finding of level "error". */
@@ -295,6 +320,7 @@ export function healthReport(
     graph: graph.health,
     // Read off the same graph the bridge rates are, so the two describe one build rather than two.
     flows: flowHealth(graph.graph),
+    names: nameHealth(graph.graph),
     spines: spines.health,
     findings,
     ok: !findings.some((finding) => finding.level === "error"),

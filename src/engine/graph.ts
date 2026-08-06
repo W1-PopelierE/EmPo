@@ -2,12 +2,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configError, EmpoError } from "../errors";
 import type { EmpoConfig } from "../schema/config.schema";
-import type { Graph, GraphEdge, GraphNode, Hazard, Pack } from "../schema/types";
+import type { Graph, GraphEdge, GraphNode, Hazard, NameResolution, Pack } from "../schema/types";
 import { type BridgeReport, bridgeRoots } from "./bridger";
 import { buildRoot, type DuplicateNode, dedupeEdges, dedupeHazards, dedupeNodes } from "./build";
 import { computeCoverage } from "./coverage";
 import { assignFlows, loadFlows } from "./flows";
 import { commitsAhead, gitInfo, shortSha } from "./git";
+import { mergeNames } from "./names";
 import { byEdgeOrder, compareStrings } from "./order";
 import { loadPack, packAvailable } from "./pack-loader";
 
@@ -48,8 +49,15 @@ export const LOCK_PATH = ".empo/generated/packs.lock.json";
  * before it holds numbers computed the other way, and no other signal reaches a repository whose
  * pack did not also move: a php-only checkout would go on serving inflated fan-ins on the same
  * commit with the same pack version, reported healthy.
+ *
+ * 5 added `names`, and it is `hazards`' case rather than the announcing one, for the same reason.
+ * A graph written before it has no `names` key because nobody counted, and a reader that defaulted
+ * the absence to the empty array would turn that into "nothing here read a name",
+ * which is the one answer this field exists to distinguish from the counts. So the absence has to
+ * remain readable, and a graph that predates the count says so rather than reporting a yield no run
+ * ever measured.
  */
-export const GRAPH_SCHEMA = 4;
+export const GRAPH_SCHEMA = 5;
 
 export function graphPath(repoRoot: string): string {
   return join(repoRoot, GRAPH_PATH);
@@ -77,6 +85,7 @@ export function buildGraph(options: BuildGraphOptions): BuiltGraph {
   const edges: GraphEdge[] = [];
   const hazards: Hazard[] = [];
   const duplicates: DuplicateNode[] = [];
+  const names: NameResolution[] = [];
   const files = new Set<string>();
 
   for (const root of roots) {
@@ -97,6 +106,7 @@ export function buildGraph(options: BuildGraphOptions): BuiltGraph {
     edges.push(...built.edges);
     hazards.push(...built.hazards);
     duplicates.push(...built.duplicates);
+    names.push(...built.names);
     for (const file of built.files) files.add(file);
   }
 
@@ -148,6 +158,11 @@ export function buildGraph(options: BuildGraphOptions): BuiltGraph {
         .filter(([, loaded]) => loaded.hazards !== undefined)
         .map(([lang]) => lang)
         .sort(compareStrings),
+      // Merged across roots the way the counts inside one root are merged across files, so a
+      // monorepo and a single root report the same arithmetic. Not deduplicated: two roots that
+      // overlap and scan one file twice do read its names twice, which inflates both the numerator
+      // and the denominator, and `empo index` already names that overlap as the defect it is.
+      names: mergeNames(names),
     },
   };
 }

@@ -102,6 +102,7 @@ empo  (this repo)
       order.ts               # the one string comparator every sort in the engine uses
       extractor.ts           # apply one pack's rules to one file -> raw captures
       resolver.ts            # turn captures into node ids per `resolve` strategy
+      names.ts               # tally what the name strategies resolved and refused, and print it
       build.ts               # one pack over one root: scan, extract, resolve, dedupe, sort
       bridger.ts             # match produce/consume across roots -> bridge edges
       flows.ts               # assign non-test nodes to flows by longest path-prefix, across roots
@@ -386,6 +387,22 @@ export interface Hazard {
   transactionLine: number;                  // the line that opened the enclosing transaction
 }
 
+/** Why a name did or did not become a node id. Three ways to fail, because they want three reactions. */
+export type NameVerdict = "resolved" | "unknown" | "ambiguous" | "wrong-kind";
+
+/** One name more than one node carries, and what the refusal cost. `nodes` is never below 2. */
+export interface AmbiguousName { name: string; nodes: number; references: number }
+
+/** What one family's name-resolving rules did with every name they read, counted per reference. */
+export interface NameResolution {
+  family: Exclude<EdgeKind, "bridge">;   // never "bridge": a bridge resolves keys, not names
+  resolved: number;
+  unknown: number;       // the name is in no node: a vendor component, a Blade built-in
+  ambiguous: number;     // the name is in several nodes, so no edge is emitted to any of them
+  wrongKind: number;     // one node carries it, of a kind the rule's `targetKinds` does not list
+  ambiguousNames: AmbiguousName[];       // so the count names something a reader can go and fix
+}
+
 export interface Graph {
   schema: number;                        // the format read off disk, so a graph older than the code is expressible
   builtAgainst: string;                  // git sha
@@ -400,6 +417,7 @@ export interface Graph {
   coverage: Record<string, CoverageInfo>;
   hazards: Hazard[];                     // empty when no pack declares a hazards block
   hazardsScanned: string[];              // which langs' packs looked, as of this build, sorted
+  names: NameResolution[];               // empty when no rule in these packs resolves by name
 }
 
 /** One extraction rule in an `edges.<family>` list. Capture group 1 is the target. */
@@ -890,18 +908,22 @@ Seven things step 7 decided, recorded the same way:
   root, a single root with `path: "."`, so the `file` and `evidence` paths in the snapshot are
   corpus-relative and identical wherever the repo is checked out.
 - `src/packs/<name>/fixtures/expected.json` is the snapshot of what a pack produces, the `nodes`,
-  `edges` and `hazards` `build.ts` returns, serialized with two-space indent and a trailing newline.
-  A snapshot written before the hazard axis existed carries no `hazards` key and reads as an empty
-  list rather than as a failure, because it was written by a pack that declared no hazard rules and
-  the empty list is what such a pack produces.
+  `edges`, `hazards` and `names` `build.ts` returns, serialized with two-space indent and a trailing
+  newline. A snapshot written before the hazard axis existed carries no `hazards` key and reads as an
+  empty list rather than as a failure, because it was written by a pack that declared no hazard rules
+  and the empty list is what such a pack produces. `names` follows that rule and deliberately not the
+  one `Graph.names` follows, whose absence has to stay readable: a snapshot is regenerated from a
+  corpus this repository owns, so the counts arriving read as a diff somebody reviews rather than as
+  an answer served about a repository.
 
 A mismatch is a gate: exit 1, with the differences printed one per line (missing, unexpected and
-changed nodes, missing, unexpected and moved edges, missing, unexpected and changed hazards) so the
-failure names what to go read. A hazard is keyed on its dispatch site rather than on the whole
-record, so a hazard whose `target` stopped resolving reads as one changed line and not as one
-disappearing and another appearing, which is the difference between "the job resolution rule broke"
-and "a hazard came out of nowhere". A pack
-that does not exist, a fixture tree that does not exist and a missing `expected.json` are config
+changed nodes, missing, unexpected and moved edges, missing, unexpected and changed hazards, and the
+same three for a family's name counts, keyed on the family because that is the unit the tally has one
+record of) so the failure names what to go read. A hazard is keyed on its dispatch site rather than
+on the whole record, so a hazard whose `target` stopped resolving reads as one changed line and not
+as one disappearing and another appearing, which is the difference between "the job resolution rule
+broke" and "a hazard came out of nowhere". A pack that does not exist, a fixture tree that does not
+exist and a missing `expected.json` are config
 errors and exit 2, because none of them is a claim about the pack's behaviour.
 
 `empo pack test <name> --update` rewrites the snapshot instead of diffing it. Run it only after
@@ -946,10 +968,10 @@ no edge that was ever real was lost.
 1.7.0 closes it). `maskStrings` was an edge-rule field only, `kindRules.contentPattern` read the
 comment-masked source and no other view, and so a `.tsx` whose only tag-shaped text sat inside a
 string was kinded `component` though it rendered nothing. That is not cosmetic, which is the part
-worth writing down: `uniqueId` in `engine/resolver.ts` gates every `short-name` resolution on the
-target's kind, so `targetKinds`, the clause that exists to refuse a tag landing on a same-named
-non-component, reads the one field the defect corrupted. The over-promoted file became an eligible
-tag target and the refusal stopped working with nothing said.
+worth writing down: `resolveName` in `engine/resolver.ts` (`uniqueId` when this was written) gates
+every `short-name` resolution on the target's kind, so `targetKinds`, the clause that exists to
+refuse a tag landing on a same-named non-component, reads the one field the defect corrupted. The
+over-promoted file became an eligible tag target and the refusal stopped working with nothing said.
 
 The fix is the same field on the other rule kind. `maskStrings?: boolean` is now on `PackKindRule`
 in `schema/types.ts` as well as on an extract rule, and `kindOf` in `engine/extractor.ts` takes both
@@ -990,6 +1012,78 @@ the coupling instead. `targetKinds` narrows what a name may land on, and the ord
 was itself the second defect: filtering the candidates before asking whether the name is unique turns
 a refusal into a confident wrong answer, so uniqueness is asked first and the kind filters the
 survivor. Before reusing a strategy in a second language, ask what its namespace is there.
+
+## The name tally, and the silence it ends
+
+This is the next chapter of the paragraph above, and it is a separate lesson because the refusal it
+is about was never wrong. `resolveName` in `engine/resolver.ts` (it was `uniqueId`) returns nothing
+for a short name carried by more than one node, which is the right answer: it drops rather than
+invents, and the alternative is a confident wrong edge. What it did on top of that was say nothing.
+The call sites simply skipped pushing the edge, and nothing in `engine/health.ts` or
+`commands/doctor.ts` counted the skip or printed it.
+
+**The refusal is per name and not per reference**, which is what makes the silence expensive. One
+duplicate basename anywhere in a root removes every edge to that name, including the ones written in
+a file whose own import is unambiguous and whose author could not have known any of this happened.
+Measured on a synthetic 16-file React tree: a second `OrderTable.tsx` under another feature directory
+took it from 12 template edges to 7, in silence, no hazard, `empo doctor` OK. On a 640-file copy
+where every component name was 40-way ambiguous, zero template edges resolved at all. `targetKinds`
+does not change that arithmetic, and it is worth stating because the paragraph above can be misread
+as saying it does: the ambiguity test runs first, and the kind filter applies to whatever survives
+it.
+
+**Two directions were on the table and only one shipped, so say plainly which.** The first was to
+narrow the refusal, by letting an ambiguous name resolve against the imports the same file already
+declares. The second was to count the refusals and print them. The second shipped. The narrowness is
+untouched: a family whose yield is zero still yields zero, edge for edge, and the only thing that
+changed is that it now says so. Read the counts as a measurement and never as a repair. What they
+buy is that the first direction is now decidable from a number instead of from an argument, and that
+"found nothing" and "there was nothing to find" have stopped printing the same way.
+
+The mechanism, and why each piece is where it is:
+
+- **`resolveName` returns `{ id, outcome, candidates }` instead of a bare `string | null`**, so the
+  three ways to answer null stay three answers: a name in no node is a vendor component and costs
+  this repository nothing, a name of the wrong kind is a rule's own `targetKinds` doing what it was
+  declared for, and a name in several nodes is a coupling that exists and is not in the graph. As a
+  bare null they were indistinguishable downstream, which is exactly how a collapsed family looked
+  like a family with nothing to find.
+- **`resolveEdges` returns `ResolvedFile { edges, names }` rather than `GraphEdge[]`.** The names
+  travel with the edges rather than through a second pass, because a second pass would be a second
+  place deciding whether a name is ambiguous, and two answers to that would be a defect invisible
+  from either one. It is the argument that already makes `observer` and `short-name` share one
+  helper, applied one layer out.
+- **Both of an `observer` capture's names are read unconditionally.** `&&` would have short-circuited
+  and hidden the second name's verdict behind the first one's refusal, so a registration whose
+  observed class is ambiguous would have gone on under-reporting the listener.
+- **`src/engine/names.ts` is new: `tallyNames`, `mergeNames`, `nameLines`.** The renderer lives beside
+  the arithmetic because `empo index` and `empo doctor` both print this block and two copies of the
+  sentence would drift, which is the rule `bridgeLines` and `driftLines` already follow.
+- **The tally happens before `dedupeEdges`, deliberately.** An edge deduplicated away was a reference
+  the rules did read and did resolve, so counting after would shrink the numerator while leaving
+  every refusal standing, and report a yield lower than the one that was measured.
+- **Across roots, counts sum but candidate counts take the max.** Ambiguity is decided against one
+  root's index, so the number a reader will actually find when they go and look is the larger of the
+  two, and summing them would report more files than any single refusal ever weighed.
+- **`Graph.names`, schema 4 → 5, with absent-versus-empty handled the way `hazards` is** and for a
+  sharper reason. The empty list is a real answer this field carries, "no rule in these packs
+  resolves a name", so a reader that defaulted a missing key to it would recreate, inside the field
+  built to end the silence, exactly the silence it ends. A graph written before the count says so.
+- **`Health.names` is a fact block and never a `HealthFinding`**, on `flowHealth`'s argument: the
+  SessionStart hook prints every finding every session, and ambiguous component names are the normal
+  shape of a React tree with feature directories. A warning that fires forever on a deliberate state
+  is a warning somebody turns off. The number is the whole of the answer; whether it is the right
+  number is the human's judgement.
+
+**`FixtureSnapshot` gained `names`, and that is the only possible gate on a silent refusal.** No edge
+disappears from a diff that was never there, so a corpus whose yield went to zero produces a snapshot
+that looks exactly like a corpus with nothing to find, and `empo pack test` was structurally unable
+to notice. Pinning the counts puts the refusal itself under the gate: a rule that stops resolving, or
+a fixture that quietly makes a name ambiguous, now fails here rather than in somebody's repository.
+The typescript corpus gained a `<Spinner />` in `react/cards/OrderCard.tsx` for the reason the
+fixture lesson above already states, that a snapshot catches only what its corpus contains: `unknown`
+was the one verdict of the four that corpus never reached, so the separation between "in no node" and
+"in several nodes" was ungated until a tag naming nothing at all existed.
 
 ## Coding conventions
 

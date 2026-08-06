@@ -98,6 +98,7 @@ function ambiguousGraph(): Graph {
     coverage: {},
     hazards: [],
     hazardsScanned: [],
+    names: [],
   };
 }
 
@@ -142,6 +143,7 @@ function renderedComponentGraph(): Graph {
     coverage: {},
     hazards: [],
     hazardsScanned: [],
+    names: [],
   };
 }
 
@@ -195,6 +197,7 @@ function frameworkGraph(): Graph {
     coverage: {},
     hazards: [],
     hazardsScanned: [],
+    names: [],
   };
 }
 
@@ -237,6 +240,7 @@ function manyGodsGraph(count: number): Graph {
     coverage: {},
     hazards: [],
     hazardsScanned: [],
+    names: [],
   };
 }
 
@@ -283,6 +287,7 @@ function hazardGraph(rows: Hazard[], scanned: string[] = ["php"], langs = ["php"
     coverage: {},
     hazards: rows,
     hazardsScanned: scanned,
+    names: [],
   };
 }
 

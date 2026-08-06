@@ -212,6 +212,23 @@ Rebuilds the graph. Deterministic, seconds, no network. Prints node/edge/bridge 
 it built against. Run it whenever the codebase moved. Flags: `--repo <path>`, and `--check` to exit
 non-zero if the graph would change (a CI staleness gate).
 
+**A names block prints between the flows line and the built line**, one line per edge family whose
+rules resolve a bare name. On this repository's fixture:
+
+```
+names      hook     2 of 2 resolved
+names      template 1 of 1 resolved
+```
+
+It is the yield of the `short-name` and `observer` strategies
+([04-language-packs](04-language-packs.md)): how many of the names those rules read became an edge,
+out of how many they read. It sits beside the counts rather than among the warnings below because a
+family that refuses is not a defect the way a duplicated node id is — a vendor component resolving to
+nothing is the strategy working — and what a reader needs is the ratio on every run, so the run where
+it collapses reads as a change rather than as the first time anybody looked. `empo doctor` prints the same block off the same graph, and the
+refusal clauses, the two sentences that replace the numbers, and why the block raises no finding are
+all set out there.
+
 **Not built yet: `--root <path>` to reindex one root.** A partial rebuild is only safe while no edge
 crosses a root, and bridges made that untrue: a bridge edge has one end in each root, so rebuilding
 one root alone would drop or invent cross-language edges and would have to merge into an existing
@@ -728,6 +745,65 @@ would claim it ([05-graph-model](05-graph-model.md)), so counting them would pri
 never reach zero. Without a readable graph every field is `null` and the line reads
 `flows      unknown until the graph is built`, never a zero, because "no file is unclaimed" and
 "nothing was counted" are opposite answers and only one of them is good news.
+
+**A names block prints under the flows line**, one line per edge family whose rules resolve a bare
+name, and it is a count of the same kind. On this repository's fixture:
+
+```
+names      hook     2 of 2 resolved
+names      template 1 of 1 resolved
+```
+
+Only the `short-name` and `observer` strategies resolve a bare name
+([04-language-packs](04-language-packs.md)), and both refuse a name carried by more than one node.
+Until this landed they refused it **silently**: one duplicate basename anywhere in a root removes
+every edge to that name, including the ones written in a file whose own import says which is meant,
+and nothing counted or printed that, so a family whose yield had gone to zero read exactly like a
+family with nothing to find. The block counts that refusal. **It does not narrow it** — the same
+names are refused as before, and the change is that the ratio is now on the record.
+
+A family that refused something adds a clause per refusal it made: `, N ambiguous` for a name several
+nodes carry, `, N in no node` for a name no node carries (a vendor component, a Blade built-in like
+`<x-slot>`), and `, N of the wrong kind` for a name in exactly one node of a kind the rule's
+`targetKinds` does not list. A clause for a refusal that did not happen is left out, because the
+denominator has already stated that zero and three `0 ...` clauses on every healthy family is what
+gets a line skimmed. Where a family has ambiguous names, an indented second line names them,
+`"OrderTable" (2 files, 5 references)`, most references first and then most files, five at most with
+`, and N more` for the rest. That second line is what makes the count actionable: the number says the
+family is losing edges, and the names say which rename would give them back.
+
+**The denominator prints even when nothing was refused**, which is why the fixture's two clean
+families still print `2 of 2` and `1 of 1` rather than nothing at all. A family reporting
+`41 of 41 resolved` and one reporting `0 of 53 resolved` are opposite results and the total is the
+only thing that separates them, so a number appearing only once something had gone wrong would be a
+number nobody had a baseline for at the moment they needed one. It is the argument `--blind` makes
+for `flowsConsidered` above.
+
+Two states get a sentence instead of numbers, and they are not the same state.
+`names      unknown, no run has counted them (run empo index)` is no readable graph, or a graph
+written before the count existed, both of which are "nobody counted". It names the repair rather
+than the state, because those two are one repair and the graph and drift lines above have already
+said which one it is: the flows line beside it can say "unknown until the graph is built" only
+because nothing but a missing graph reaches its null, and saying that here would tell the reader of
+a perfectly readable graph to go and build the graph they are looking at.
+`names      no name-resolving rule read a name here` is counted, and nothing read a bare name — a
+different fact, and precisely the one this block exists to tell apart from a family that read names
+and resolved none of them. Collapsing them would recreate the silence inside the field built to end
+it.
+
+It says no rule **read** a name rather than that no rule resolves by name, because those are two
+causes of one empty list and this repository is the second. EmPo's own root is typescript, whose
+pack declares two `short-name` template rules, and both carry `pathGlob: "**/*.{tsx,jsx,vue}"`,
+which matches no file in a repository with no components in it. The rules exist, they resolve by
+name, and they read nothing. Which of the two causes it is, is a question about the pack rather than
+about the graph, so the line states the fact it has and claims neither.
+
+Like the flows line it is a **fact and never a HealthFinding**, on the rule this section already
+gave: the SessionStart hook prints every finding doctor produces on every session, ambiguous
+component names are the normal shape of a React tree with feature directories and a `TextInput` under
+two namespaces is the normal shape of a Blade component library, and a warning that fires forever on
+a deliberate state is a warning somebody uninstalls. The number is the whole of the answer, and
+whether it is the right number is the human's judgement.
 
 The `commit` check asks git with `git check-ignore` rather than parsing `.empo/.gitignore`, so a
 rule in the repo's root `.gitignore` counts too. It reports both directions: `commit` records

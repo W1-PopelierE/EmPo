@@ -100,7 +100,7 @@ describe("resolveEdges", () => {
     );
     const index = buildNodeIndex([controller]);
 
-    expect(resolveEdges(controller, index, PHP)).toEqual([]);
+    expect(resolveEdges(controller, index, PHP).edges).toEqual([]);
   });
 
   test("does not create an edge from a node to itself", () => {
@@ -109,7 +109,7 @@ describe("resolveEdges", () => {
     ]);
     const index = buildNodeIndex([order]);
 
-    expect(resolveEdges(order, index, PHP)).toEqual([]);
+    expect(resolveEdges(order, index, PHP).edges).toEqual([]);
   });
 
   test("runs a hook edge from the observed node to its listener, evidence on the registrar", () => {
@@ -127,7 +127,7 @@ describe("resolveEdges", () => {
     );
     const index = buildNodeIndex([order, observer, provider]);
 
-    expect(resolveEdges(provider, index, PHP)).toEqual([
+    expect(resolveEdges(provider, index, PHP).edges).toEqual([
       {
         from: "Acme\\Models\\Order",
         to: "Acme\\Observers\\OrderObserver",
@@ -154,7 +154,7 @@ describe("resolveEdges", () => {
     );
     const index = buildNodeIndex([order, otherOrder, observer, provider]);
 
-    expect(resolveEdges(provider, index, PHP)).toEqual([]);
+    expect(resolveEdges(provider, index, PHP).edges).toEqual([]);
   });
 
   test("runs a template edge from the file that wrote the tag to the class it names", () => {
@@ -174,7 +174,7 @@ describe("resolveEdges", () => {
     );
     const index = buildNodeIndex([badge, view]);
 
-    expect(resolveEdges(view, index, PHP)).toEqual([
+    expect(resolveEdges(view, index, PHP).edges).toEqual([
       {
         from: "resources/views/orders/show.blade.php",
         to: "Acme\\View\\Components\\PriceBadge",
@@ -208,7 +208,7 @@ describe("resolveEdges", () => {
     );
     const index = buildNodeIndex([forms, fields, view]);
 
-    expect(resolveEdges(view, index, PHP)).toEqual([]);
+    expect(resolveEdges(view, index, PHP).edges).toEqual([]);
   });
 
   test("creates no template edge when the short name is in no node", () => {
@@ -221,7 +221,7 @@ describe("resolveEdges", () => {
       [shortNameCapture("Slot", 4)],
     );
 
-    expect(resolveEdges(view, buildNodeIndex([view]), PHP)).toEqual([]);
+    expect(resolveEdges(view, buildNodeIndex([view]), PHP).edges).toEqual([]);
   });
 
   test("creates no template edge from a file to itself", () => {
@@ -229,7 +229,7 @@ describe("resolveEdges", () => {
       shortNameCapture("Card", 9),
     ]);
 
-    expect(resolveEdges(view, buildNodeIndex([view]), PHP)).toEqual([]);
+    expect(resolveEdges(view, buildNodeIndex([view]), PHP).edges).toEqual([]);
   });
 
   test("fails with exit code 2 on a resolve strategy the engine has not implemented", () => {
@@ -271,7 +271,7 @@ describe("resolveEdges, module-path", () => {
       "apps/mobile/src/shared/money.ts",
     );
 
-    expect(resolveEdges(importer, index, TS)).toEqual([
+    expect(resolveEdges(importer, index, TS).edges).toEqual([
       {
         from: screen,
         to: "apps/mobile/src/shared/money.ts",
@@ -288,7 +288,9 @@ describe("resolveEdges, module-path", () => {
       "apps/mobile/src/components/index.ts",
     );
 
-    expect(resolveEdges(importer, index, TS)[0]?.to).toBe("apps/mobile/src/components/index.ts");
+    expect(resolveEdges(importer, index, TS).edges[0]?.to).toBe(
+      "apps/mobile/src/components/index.ts",
+    );
   });
 
   test("does not resolve a directory when the pack declares no indexNames", () => {
@@ -297,9 +299,9 @@ describe("resolveEdges, module-path", () => {
       "apps/mobile/src/components/index.ts",
     );
 
-    expect(resolveEdges(importer, index, { extensions: [".ts", ".tsx"], indexNames: [] })).toEqual(
-      [],
-    );
+    expect(
+      resolveEdges(importer, index, { extensions: [".ts", ".tsx"], indexNames: [] }).edges,
+    ).toEqual([]);
   });
 
   test("prefers the pack's extensions in declared order", () => {
@@ -309,7 +311,9 @@ describe("resolveEdges, module-path", () => {
       "apps/mobile/src/components/PriceRow.tsx",
     );
 
-    expect(resolveEdges(importer, index, TS)[0]?.to).toBe("apps/mobile/src/components/PriceRow.ts");
+    expect(resolveEdges(importer, index, TS).edges[0]?.to).toBe(
+      "apps/mobile/src/components/PriceRow.ts",
+    );
   });
 
   test("resolves a specifier that already names the file", () => {
@@ -318,7 +322,7 @@ describe("resolveEdges, module-path", () => {
       "apps/mobile/src/screens/OrderScreen.styles.ts",
     );
 
-    expect(resolveEdges(importer, index, TS)[0]?.to).toBe(
+    expect(resolveEdges(importer, index, TS).edges[0]?.to).toBe(
       "apps/mobile/src/screens/OrderScreen.styles.ts",
     );
   });
@@ -331,7 +335,7 @@ describe("resolveEdges, module-path", () => {
       "packages/ui/src/Button.tsx",
     );
 
-    expect(resolveEdges(importer, index, TS)[0]?.to).toBe("packages/ui/src/Button.tsx");
+    expect(resolveEdges(importer, index, TS).edges[0]?.to).toBe("packages/ui/src/Button.tsx");
   });
 
   test("drops a bare specifier, which names a package and not a file here", () => {
@@ -340,7 +344,7 @@ describe("resolveEdges, module-path", () => {
       "apps/mobile/src/shared/money.ts",
     );
 
-    expect(resolveEdges(importer, index, TS)).toEqual([]);
+    expect(resolveEdges(importer, index, TS).edges).toEqual([]);
   });
 
   test("drops a specifier that climbs above the repository root", () => {
@@ -349,13 +353,13 @@ describe("resolveEdges, module-path", () => {
       "src/shared/money.ts",
     );
 
-    expect(resolveEdges(importer, index, TS)).toEqual([]);
+    expect(resolveEdges(importer, index, TS).edges).toEqual([]);
   });
 
   test("drops a specifier that resolves to no file in the graph", () => {
     const { importer, index } = graph(module_(screen, [specifierCapture("./Missing", 1)]));
 
-    expect(resolveEdges(importer, index, TS)).toEqual([]);
+    expect(resolveEdges(importer, index, TS).edges).toEqual([]);
   });
 });
 
@@ -390,7 +394,7 @@ describe("resolveEdges, module-path through a root's aliases", () => {
       "src/lib/money.ts",
     );
 
-    expect(resolveEdges(importer, index, withAliases({ "@/*": ["src/*"] }))).toEqual([
+    expect(resolveEdges(importer, index, withAliases({ "@/*": ["src/*"] })).edges).toEqual([
       {
         from: screen,
         to: "src/lib/money.ts",
@@ -412,8 +416,8 @@ describe("resolveEdges, module-path through a root's aliases", () => {
       "src/lib/money.ts",
     );
 
-    expect(resolveEdges(importer, index, TS)).toEqual([]);
-    expect(resolveEdges(importer, index, withAliases({}))).toEqual([]);
+    expect(resolveEdges(importer, index, TS).edges).toEqual([]);
+    expect(resolveEdges(importer, index, withAliases({})).edges).toEqual([]);
     // The absent field compiles to no rules at all rather than to something a `find` could match.
     expect(compileAliases(undefined)).toEqual([]);
   });
@@ -428,7 +432,7 @@ describe("resolveEdges, module-path through a root's aliases", () => {
     );
 
     expect(
-      resolveEdges(importer, index, withAliases({ "@/*": ["src/*"] })).map((e) => e.to),
+      resolveEdges(importer, index, withAliases({ "@/*": ["src/*"] })).edges.map((e) => e.to),
     ).toEqual(["src/lib/index.ts", "src/money.ts"]);
   });
 
@@ -441,7 +445,9 @@ describe("resolveEdges, module-path through a root's aliases", () => {
     // Only the first capture resolves: an exact pattern is not a prefix, so `@config/dev` is a
     // package specifier again and gets the answer every unmapped specifier gets.
     expect(
-      resolveEdges(importer, index, withAliases({ "@config": ["src/config"] })).map((e) => e.to),
+      resolveEdges(importer, index, withAliases({ "@config": ["src/config"] })).edges.map(
+        (e) => e.to,
+      ),
     ).toEqual(["src/config/index.ts"]);
   });
 
@@ -482,9 +488,9 @@ describe("resolveEdges, module-path through a root's aliases", () => {
       "src/wide/lib/money.ts",
     );
 
-    expect(resolveEdges(importer, index, { ...TS, aliases: rules }).map((edge) => edge.to)).toEqual(
-      ["src/exact/money.ts", "src/lib/format.ts", "src/wide/banner.ts"],
-    );
+    expect(
+      resolveEdges(importer, index, { ...TS, aliases: rules }).edges.map((edge) => edge.to),
+    ).toEqual(["src/exact/money.ts", "src/lib/format.ts", "src/wide/banner.ts"]);
   });
 
   test("tries only the best-matching pattern, and never falls through to a less specific one", () => {
@@ -502,12 +508,12 @@ describe("resolveEdges, module-path through a root's aliases", () => {
         importer,
         index,
         withAliases({ "@/lib/*": ["packages/lib/*"], "@/*": ["src/*"] }),
-      ),
+      ).edges,
     ).toEqual([]);
     // The less specific pattern really would have resolved, so the empty answer above is a refusal
     // and not a miss. Without this line the test would pass against a resolver that had simply
     // stopped resolving aliases at all.
-    expect(resolveEdges(importer, index, withAliases({ "@/*": ["src/*"] }))[0]?.to).toBe(
+    expect(resolveEdges(importer, index, withAliases({ "@/*": ["src/*"] })).edges[0]?.to).toBe(
       "src/lib/money.ts",
     );
   });
@@ -520,16 +526,18 @@ describe("resolveEdges, module-path through a root's aliases", () => {
     );
 
     expect(
-      resolveEdges(importer, index, withAliases({ "@/*": ["packages/ui/*", "src/*"] }))[0]?.to,
+      resolveEdges(importer, index, withAliases({ "@/*": ["packages/ui/*", "src/*"] })).edges[0]
+        ?.to,
     ).toBe("packages/ui/Button.tsx");
     // Reversed the other one wins, so the winner is the config's order and not the index's.
     expect(
-      resolveEdges(importer, index, withAliases({ "@/*": ["src/*", "packages/ui/*"] }))[0]?.to,
+      resolveEdges(importer, index, withAliases({ "@/*": ["src/*", "packages/ui/*"] })).edges[0]
+        ?.to,
     ).toBe("src/Button.tsx");
     // First *hit*, not first target: a candidate that names no node is skipped within the pattern,
     // which is the one place falling onward is right, because a tsconfig list means exactly that.
     expect(
-      resolveEdges(importer, index, withAliases({ "@/*": ["nowhere/*", "src/*"] }))[0]?.to,
+      resolveEdges(importer, index, withAliases({ "@/*": ["nowhere/*", "src/*"] })).edges[0]?.to,
     ).toBe("src/Button.tsx");
   });
 
@@ -543,9 +551,13 @@ describe("resolveEdges, module-path through a root's aliases", () => {
       "src/money.ts",
     );
 
-    expect(resolveEdges(importer, index, withAliases({ "@/*": ["../outside/*"] }))).toEqual([]);
+    expect(resolveEdges(importer, index, withAliases({ "@/*": ["../outside/*"] })).edges).toEqual(
+      [],
+    );
     // The same target spelled so that it only climbs out once normalized.
-    expect(resolveEdges(importer, index, withAliases({ "@/*": ["src/../../out/*"] }))).toEqual([]);
+    expect(
+      resolveEdges(importer, index, withAliases({ "@/*": ["src/../../out/*"] })).edges,
+    ).toEqual([]);
   });
 
   test("does not claim the specifier that is exactly the wildcard's prefix", () => {
@@ -553,7 +565,7 @@ describe("resolveEdges, module-path through a root's aliases", () => {
     // probe would then hand back src/index.ts for an import that named no path at all.
     const { importer, index } = graph(module_(screen, [specifierCapture("@/", 1)]), "src/index.ts");
 
-    expect(resolveEdges(importer, index, withAliases({ "@/*": ["src/*"] }))).toEqual([]);
+    expect(resolveEdges(importer, index, withAliases({ "@/*": ["src/*"] })).edges).toEqual([]);
   });
 
   test("compiles the same order whatever order the config's keys were written in", () => {
@@ -570,6 +582,216 @@ describe("resolveEdges, module-path through a root's aliases", () => {
     expect(compileAliases({ "@z": ["z.ts"], "@a": ["a.ts"] }).map((rule) => rule.prefix)).toEqual([
       "@a",
       "@z",
+    ]);
+  });
+});
+
+/**
+ * The second half of what `resolveEdges` returns: every bare name a name-resolving strategy read,
+ * with the verdict the index gave it.
+ *
+ * The edge assertions above can only ever hold what came out. A strategy whose yield has quietly
+ * gone to zero — a pack whose `normalize` chain stopped matching, a repository that grew a second
+ * `TextInput` — produces exactly the same empty edge list as a repository with nothing to find, and
+ * every test above passes either way. These pin the denominator, so the two stop looking alike.
+ *
+ * A name is counted **per reference read**, not per distinct name and not per edge, which is why the
+ * counts below are asserted as whole arrays rather than by `toContainEqual`: a duplicated or a
+ * dropped entry is the defect this channel exists to make visible.
+ */
+describe("resolveEdges, the names it declined", () => {
+  /** A node whose kind is something other than the `node` factory's "class", for `targetKinds`. */
+  function kinded(id: string, name: string, filePath: string, kind: string): ExtractedFile {
+    return { ...node(id, name, filePath), kind };
+  }
+
+  /** A `<x-...>` capture whose rule declares `targetKinds`, as a real template rule's does. */
+  function kindedCapture(name: string, line: number, targetKinds: string[]): Capture {
+    return { ...shortNameCapture(name, line), targetKinds };
+  }
+
+  test("records a resolved name alongside the edge it produced", () => {
+    // The success case is recorded too, and that is the whole point: a refusal count with no
+    // denominator beside it says nothing about whether a strategy is working. `resolved` here is the
+    // number the three failures below are read against.
+    const badge = node(
+      "Acme\\View\\Components\\PriceBadge",
+      "PriceBadge",
+      "app/View/Components/PriceBadge.php",
+    );
+    const view = node(
+      "resources/views/orders/show.blade.php",
+      "show.blade",
+      "resources/views/orders/show.blade.php",
+      [shortNameCapture("PriceBadge", 11)],
+    );
+
+    const resolved = resolveEdges(view, buildNodeIndex([badge, view]), PHP);
+
+    expect(resolved.edges).toHaveLength(1);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "PriceBadge", outcome: "resolved", candidates: 1 },
+    ]);
+  });
+
+  test("records a name carried by two nodes as ambiguous, with the count of nodes carrying it", () => {
+    // The one verdict of the three that hides a coupling this repository really has: `TextInput` is
+    // rendered, one of these two files is really coupled to the view, and no edge is emitted. The
+    // candidate count is what tells a reader that, rather than a vendor tag, is what happened.
+    const forms = node(
+      "Acme\\View\\Components\\Forms\\TextInput",
+      "TextInput",
+      "app/View/Components/Forms/TextInput.php",
+    );
+    const fields = node(
+      "Acme\\View\\Components\\Fields\\TextInput",
+      "TextInput",
+      "app/View/Components/Fields/TextInput.php",
+    );
+    const view = node(
+      "resources/views/form.blade.php",
+      "form.blade",
+      "resources/views/form.blade.php",
+      [shortNameCapture("TextInput", 4)],
+    );
+
+    const resolved = resolveEdges(view, buildNodeIndex([forms, fields, view]), PHP);
+
+    expect(resolved.edges).toEqual([]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "TextInput", outcome: "ambiguous", candidates: 2 },
+    ]);
+  });
+
+  test("records a name carried by no node as unknown, with no candidates", () => {
+    // A vendor component or a Blade built-in like `<x-slot>`. Distinguished from `ambiguous` because
+    // it costs this repository nothing: a high `unknown` count is the normal price of reading a
+    // language whose vendor tags are spelled exactly like local ones, and is not a bug to chase.
+    const view = node(
+      "resources/views/form.blade.php",
+      "form.blade",
+      "resources/views/form.blade.php",
+      [shortNameCapture("Slot", 4)],
+    );
+
+    const resolved = resolveEdges(view, buildNodeIndex([view]), PHP);
+
+    expect(resolved.edges).toEqual([]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "Slot", outcome: "unknown", candidates: 0 },
+    ]);
+  });
+
+  test("records the one node of a kind targetKinds does not list as wrong-kind", () => {
+    // The rule's own filter doing what it was declared for, and the third verdict rather than a
+    // second flavour of `unknown`: the name was found, in exactly one place, and the rule chose not
+    // to point at it. Nothing is wrong with the pack or the repository, so nobody should be paged.
+    const type = kinded("src/types/Badge.ts", "Badge", "src/types/Badge.ts", "module");
+    const view = node(
+      "resources/views/badge.blade.php",
+      "badge.blade",
+      "resources/views/badge.blade.php",
+      [kindedCapture("Badge", 3, ["component"])],
+    );
+
+    const resolved = resolveEdges(view, buildNodeIndex([type, view]), PHP);
+
+    expect(resolved.edges).toEqual([]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "Badge", outcome: "wrong-kind", candidates: 1 },
+    ]);
+  });
+
+  test("calls two nodes of which one is a legal kind ambiguous, never wrong-kind", () => {
+    // Uniqueness is asked before the kind filter, and this is where that order is visible. Exactly
+    // one of these two `Badge`s is a "component", so a filter-first resolver would narrow the field
+    // to one candidate, resolve, and report `resolved`. It would also be guessing: a name shared by
+    // two files is a name this strategy cannot read, and narrowing the field only hides that behind
+    // a plausible pick. The verdict has to stay `ambiguous`, or the record would launder the guess.
+    const component = kinded(
+      "Acme\\View\\Components\\Badge",
+      "Badge",
+      "app/View/Components/Badge.php",
+      "component",
+    );
+    const type = kinded("src/types/Badge.ts", "Badge", "src/types/Badge.ts", "module");
+    const view = node(
+      "resources/views/badge.blade.php",
+      "badge.blade",
+      "resources/views/badge.blade.php",
+      [kindedCapture("Badge", 3, ["component"])],
+    );
+
+    const resolved = resolveEdges(view, buildNodeIndex([component, type, view]), PHP);
+
+    expect(resolved.edges).toEqual([]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "Badge", outcome: "ambiguous", candidates: 2 },
+    ]);
+  });
+
+  test("records both names of an observer capture even when the first one already refused", () => {
+    // The `&&`-short-circuit trap the production code carries a comment about. `Order` is ambiguous,
+    // and a resolver that read the listener only when the observed name resolved would leave
+    // `OrderObserver`'s verdict uncounted — so a provider registering fifty observers on one
+    // ambiguous model would report half the references it actually read, and the denominator this
+    // whole channel exists to give would be wrong in exactly the case it matters most.
+    const order = node("Acme\\Models\\Order", "Order", "app/Models/Order.php");
+    const otherOrder = node("Acme\\Support\\Order", "Order", "app/Support/Order.php");
+    const observer = node(
+      "Acme\\Observers\\OrderObserver",
+      "OrderObserver",
+      "app/Observers/OrderObserver.php",
+    );
+    const provider = node(
+      "Acme\\Providers\\AppServiceProvider",
+      "AppServiceProvider",
+      "app/Providers/AppServiceProvider.php",
+      [observerCapture("Order", "OrderObserver", 12)],
+    );
+
+    const resolved = resolveEdges(
+      provider,
+      buildNodeIndex([order, otherOrder, observer, provider]),
+      PHP,
+    );
+
+    expect(resolved.edges).toEqual([]);
+    expect(resolved.names).toEqual([
+      { family: "hook", name: "Order", outcome: "ambiguous", candidates: 2 },
+      { family: "hook", name: "OrderObserver", outcome: "resolved", candidates: 1 },
+    ]);
+  });
+
+  test("counts no name for a module-path capture, however little it resolved", () => {
+    // Only the two bare-name strategies are counted. A specifier that resolves to nothing is a
+    // vendor import or a file outside the graph, and nobody can act on that refusal, so folding it
+    // in would bury the refusals somebody can act on under a number dominated by node_modules.
+    const importer = module_("apps/mobile/src/screens/OrderScreen.tsx", [
+      specifierCapture("./Missing", 1),
+      specifierCapture("react", 2),
+    ]);
+
+    const resolved = resolveEdges(importer, buildNodeIndex([importer]), TS);
+
+    expect(resolved.edges).toEqual([]);
+    expect(resolved.names).toEqual([]);
+  });
+
+  test("counts a name that resolved to the file itself as resolved, though its edge is dropped", () => {
+    // The self-edge is dropped downstream of the lookup, and the record is of the lookup. A
+    // component whose own file renders its name read a name and found it, and counting that as a
+    // refusal would make a healthy pack look like a failing one in proportion to how often it
+    // happens — which is a property of the repository, not of the strategy.
+    const card = node("Acme\\View\\Components\\Card", "Card", "app/View/Components/Card.php", [
+      shortNameCapture("Card", 9),
+    ]);
+
+    const resolved = resolveEdges(card, buildNodeIndex([card]), PHP);
+
+    expect(resolved.edges).toEqual([]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "Card", outcome: "resolved", candidates: 1 },
     ]);
   });
 });

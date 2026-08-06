@@ -266,8 +266,9 @@ goes back to `component` while every other line of the snapshot stays as it was.
 the rule declines to read prose without declining to read the tag beside it.
 
 **It was a wrong label and not a wrong edge, and the reason to close it anyway is `targetKinds`.**
-`uniqueId` in `src/engine/resolver.ts` gates every `short-name` resolution on the target node's
-kind, so `targetKinds`, the clause that exists to refuse a tag landing on a same-named
+`resolveName` in `src/engine/resolver.ts` (`uniqueId` when this was written) gates every
+`short-name` resolution on the target node's kind, so `targetKinds`, the clause that exists to
+refuse a tag landing on a same-named
 non-component, reads exactly the field this defect corrupted. A file over-promoted to `component`
 was a file a tag was allowed to land on, and the refusal stopped working with nothing said. It cost
 a wrong edge only where such a file was also the lone carrier of a name somebody renders, which is
@@ -445,8 +446,9 @@ per-pack flag would have to pick one of those two and be wrong about the other.
 
 **It is a field on a kind rule too**, where it does the same thing to `contentPattern` (section 2).
 The reason for the second half is not the label's own display but `targetKinds` above it: a kind is
-read like an edge, because `uniqueId` in `engine/resolver.ts` checks a tag's target against exactly
-that label, so a file over-promoted off tag-shaped text in a string becomes an eligible target and
+read like an edge, because `resolveName` in `engine/resolver.ts` checks a tag's target against
+exactly that label, so a file over-promoted off tag-shaped text in a string becomes an eligible
+target and
 the refusal goes quiet. Declared per rule there for the same reason as here, and it is the same
 reason twice rather than a coincidence: a pattern describing code asks for the blanked view, a
 pattern keying off a string the framework itself reads must not.
@@ -528,23 +530,39 @@ unambiguous" differently would be a defect invisible from either pack. So a name
 nothing (a vendor component, or a Blade built-in like `<x-slot>`), and so does a name in several. The
 ambiguity bites harder here than it does for observers: `forms.text-input` and `fields.text-input`
 both fold to `TextInput`, and a component library with namespaced folders is the normal case rather
-than the odd one. Resolved against skipped-ambiguous is a rate worth counting on whatever
-repository a pack is pointed at rather than assuming.
-Where the rule declares `targetKinds`, this question is asked first and the
+than the odd one. **Resolved against refused is counted rather than assumed**, on whatever repository
+the pack is pointed at. Every name these two strategies read reaches one of four verdicts:
+`resolved`, `unknown` (the name is in no node at all — a vendor component, a Blade built-in like
+`<x-slot>`), `ambiguous` (the name is in several nodes, so no edge is emitted to any of them) and
+`wrong-kind` (the name is in exactly one node, of a kind the rule's `targetKinds` does not list). The
+tally is recorded on the graph as `names`, one record per edge family, counted per **reference read**
+and not per distinct name, and both `empo index` and `empo doctor` print it
+([06-cli](06-cli.md)).
+Where the rule declares `targetKinds`, the uniqueness question is asked first and the
 filter is applied to whatever survived it, so a name carried by two nodes is ambiguous even where
-only one of the two is a legal target: `uniqueId` in `engine/resolver.ts` refuses on the count before
-it looks at a kind, and its docstring records why.
+only one of the two is a legal target: `resolveName` in `engine/resolver.ts` refuses on the count
+before it looks at a kind, and its docstring records why. That order is also why the two refusals are
+counted apart: `ambiguous` is the only one of the three that hides a coupling this repository really
+has.
 
 **It bites harder again in React, and now with a number.** The refusal is per name and not per
 reference, so one duplicate basename anywhere in the repository removes every edge to that name,
 including the ones written in a file whose own import says which is meant. **Measured**
 on a synthetic 16-file React tree: adding a second `OrderTable.tsx` under another feature directory
 took it from 12 template edges to 7, in silence, and on a 640-file copy where every component name
-was 40-way ambiguous no template edge resolved at all. It fails safe, which is the right direction,
-but a strategy whose yield can be zero without saying so is not a strategy anybody can call proven.
+was 40-way ambiguous no template edge resolved at all. It fails safe, which is the right direction.
 `targetKinds` does not soften that measurement at all, because the collapse is decided before any
 kind is consulted: the count is what refuses, and it refuses whether the duplicate is a component, a
 type module or a test.
+
+**What the count changed is the silence, and not one of those two measurements.** Stated plainly,
+because the distinction is easy to lose: counting the refusal is not narrowing it. The second
+`OrderTable.tsx` still takes the 16-file tree from 12 template edges to 7, the 640-file copy still
+resolves no template edge at all, and every name refused before is refused now. What is different is
+that both runs say so, so "this family found nothing" and "this family had nothing to find" stop
+reading alike — that was the whole of the defect, and a strategy whose yield can be zero without
+saying so was not one anybody could call proven. Narrowing the refusal is a separate and larger
+change, and nothing here should be read as having made it.
 
 The alternative for the namespace, declaring a root prefix such as `App\View\Components\` in the
 pack, was rejected: that is a property of the repository rather than of the language, composer and
@@ -1216,10 +1234,29 @@ the shapes in it before any rule is written.
 ## Testing a pack
 
 Every pack ships with a fixture corpus: a tiny synthetic source tree and an expected snapshot of the
-three axes a pack produces, nodes, edges and hazards. `empo pack test <name>` runs the pack against
-its fixtures and diffs the result. Hazards are held to the same snapshot as the other two, because
-hazard rules are regexes like every other rule in a pack and a pattern that stops matching should
+four axes a pack produces, nodes, edges, hazards and names. `empo pack test <name>` runs the pack
+against its fixtures and diffs the result. Hazards are held to the same snapshot as the first two,
+because hazard rules are regexes like every other rule in a pack and a pattern that stops matching
+should
 come back red from the pack's own corpus rather than from a repository that changed. A pack declaring
 no hazard rules snapshots an empty list, which is the same statement its absent block makes. This is
 how a pull request that adds a language proves it works without any private
 codebase, and it is the gate for accepting a new pack.
+
+**`expected.json` gained a `names` block**, and it is the axis a snapshot is the only possible gate
+for. A pack's name-resolving rules refuse silently by design (section 4), so a corpus whose yield
+went to zero produces no diff at all: no edge disappears from the snapshot that was never in it, and
+every other axis reads exactly as it did the day before. Pinning the counts is what makes the refusal
+itself gate-able, so a rule that stops resolving, or a fixture edit that quietly makes a name
+ambiguous, comes back red from the pack's own corpus rather than from somebody's repository. A pack
+with no name-resolving rule snapshots an empty array, which is the same statement the hazard axis
+makes with its own. The diff is keyed on the edge family and reports `changed names <family>` with
+the expected and the actual record both printed under it, because the whole record is what says which
+of the four counts moved.
+
+**The typescript corpus grew a `<Spinner />` in `react/cards/OrderCard.tsx`** to close the one hole
+in it. `unknown`, a name carried by no node at all, was the one verdict of the four that corpus never
+reached, so the separation between "in no node" and "ambiguous" — the separation the two counts exist
+to keep — was ungated. `Spinner` is imported from `@acme/ui` and is defined nowhere in the tree, so
+the tag is refused before ambiguity or `targetKinds` is consulted, which is the ordinary cost of
+reading a language whose vendor components are spelled exactly like local ones.

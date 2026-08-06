@@ -11,6 +11,7 @@ import {
   type SpineHealth,
   type TrackerHealth,
 } from "../engine/health";
+import { nameLines } from "../engine/names";
 import { configError } from "../errors";
 
 /**
@@ -78,6 +79,10 @@ function renderProse(health: Health): void {
   // count is read off the graph and says so by falling to "unknown" exactly where that line has
   // already named the state and the remedy. Above it, the unknown would arrive before its reason.
   console.log(flowLine(health.flows));
+  // Under the flow line, which is the other count read off the graph and the other one that falls
+  // to "unknown" when there is none. The renderer lives in engine/names.ts so `empo index` prints
+  // the same sentence over the same numbers, which is the rule `driftLines` above already follows.
+  for (const line of nameLines(health.names)) console.log(line);
   console.log("");
 
   // Empty unless there are bridges and a readable graph to measure them against, which is the
