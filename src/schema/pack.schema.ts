@@ -437,7 +437,7 @@ export const packSchema = z
                * The same request an edge rule makes, made by a kind rule: blank string contents before
                * `contentPattern` runs. A kind is not an edge, so getting it wrong puts no coupling in
                * the graph — but it is read like one. `targetKinds` exists so a tag lands on a component
-               * and never on a same-named type module, and `uniqueId` (src/engine/resolver.ts) checks it
+               * and never on a same-named type module, and `resolveName` (src/engine/resolver.ts) checks it
                * against exactly this label. A file over-promoted to `component` off tag-shaped text in a
                * string becomes an eligible target, and the refusal stops working silently. So the label
                * gets the same defence the edge got, declared per rule for the same reason: a pattern

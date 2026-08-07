@@ -286,7 +286,7 @@ describe("typescript pack", () => {
     // this goes red with "component", which is what it did before the fix.
     //
     // CardDocs is asserted here beside it because a rule that stopped matching altogether would buy
-    // the module answer too, and would be a worse defect: `uniqueId` in engine/resolver.ts filters
+    // the module answer too, and would be a worse defect: `resolveName` in engine/resolver.ts filters
     // candidates on kind, so a component miskinded module stops being reachable as a tag target.
     expect(node("src/react/cards/CardTemplates.tsx")?.kind).toBe("module");
     expect(node("src/react/cards/CardDocs.tsx")?.kind).toBe("component");
@@ -375,7 +375,7 @@ describe("typescript pack", () => {
       (edge) => edge.kind === "template" && edge.to.endsWith("PriceWidget.jsx"),
     );
 
-    expect(rendered?.evidence.line).toBe(16);
+    expect(rendered?.evidence.line).toBe(17);
   });
 
   test("resolves a dotted tag and a generic tag to the component that owns them", () => {
@@ -386,7 +386,7 @@ describe("typescript pack", () => {
       from("src/react/cards/OrderCard.tsx")
         .filter((edge) => edge.kind === "template")
         .map((edge) => `${edge.to}:${edge.evidence.line}`),
-    ).toEqual(["src/browser/widgets/PriceWidget.jsx:16", "src/react/cards/CardHeader.tsx:15"]);
+    ).toEqual(["src/browser/widgets/PriceWidget.jsx:17", "src/react/cards/CardHeader.tsx:16"]);
     expect(
       from("src/react/cards/OrderList.tsx")
         .filter((edge) => edge.kind === "template")
@@ -416,6 +416,32 @@ describe("typescript pack", () => {
         .filter((edge) => edge.to.endsWith("cards/Badge.tsx"))
         .map((edge) => edge.kind),
     ).toEqual(["import"]);
+  });
+
+  test("counts every verdict a name-resolving rule can reach, refusals included", () => {
+    // This corpus is the only place all four verdicts are exercised at once, which is why the tally
+    // is pinned here rather than left to the snapshot. `Badge` and `Total` are ambiguous by
+    // construction, each carried by two files; `OrderRow` is the `targetKinds` refusal, a name in
+    // exactly one node of a kind no tag may name; and `Spinner` is the vendor component in no node
+    // at all, so it lands in `unknown` and must never be counted with the ambiguous ones.
+    //
+    // Pinning the counts is what makes a silent refusal gate-able at all. Every other test here
+    // asserts an edge that is present or a list an edge is absent from, and no edge disappears from
+    // a diff that was never there: a rule that quietly stopped resolving, or started refusing a
+    // name it used to read, moves these numbers and nothing else.
+    expect(actual.names).toEqual([
+      {
+        family: "template",
+        resolved: 14,
+        unknown: 1,
+        ambiguous: 2,
+        wrongKind: 1,
+        ambiguousNames: [
+          { name: "Badge", nodes: 2, references: 1 },
+          { name: "Total", nodes: 2, references: 1 },
+        ],
+      },
+    ]);
   });
 
   test("reads no tag out of a comment, and none out of a lowercase element", () => {

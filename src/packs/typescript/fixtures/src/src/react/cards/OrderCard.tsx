@@ -1,3 +1,4 @@
+import { Spinner } from "@acme/ui";
 import { PriceWidget } from "../../browser/widgets/PriceWidget";
 import { formatMoney } from "../../shared/money";
 import type { OrderRow } from "../types/OrderRow";
@@ -14,6 +15,12 @@ export function OrderCard({ order }: { order: OrderRow }) {
     <article className="order-card" data-rows={rows.length}>
       <CardHeader.Title>Order {order.id}</CardHeader.Title>
       <PriceWidget order={order} onSelect={() => rows.push(order)} />
+      {/* The fourth verdict, and the only one the rest of this corpus never reached: `Spinner` is
+          carried by no node at all, so the tag is refused before ambiguity or `targetKinds` is
+          consulted. It is the ordinary cost of reading a language whose vendor components are
+          spelled exactly like local ones, it must stay separate from the ambiguous count in the
+          name tally, and a corpus that never produced one left that separation ungated. */}
+      <Spinner />
       <p>{formatMoney(order.total)}</p>
     </article>
   );

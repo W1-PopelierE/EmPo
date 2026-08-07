@@ -9,7 +9,7 @@
 // `<OrderList>rows</OrderList>` inside a string, and called this file a component. It is a module:
 // a codegen template and an error message are prose about components, not a component.
 //
-// Not only cosmetic. `uniqueId` in engine/resolver.ts filters candidates on kind, so a module
+// Not only cosmetic. `resolveName` in engine/resolver.ts filters candidates on kind, so a module
 // miskinded `component` competes to be the target of every `<CardTemplates ... />` written
 // anywhere in the corpus, and coverage would travel down an edge nobody wrote.
 export const templates = {

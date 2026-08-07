@@ -852,7 +852,7 @@
       "symbol": null,
       "evidence": {
         "file": "src/react/cards/OrderCard.tsx",
-        "line": 1
+        "line": 2
       }
     },
     {
@@ -862,7 +862,7 @@
       "symbol": null,
       "evidence": {
         "file": "src/react/cards/OrderCard.tsx",
-        "line": 16
+        "line": 17
       }
     },
     {
@@ -872,7 +872,7 @@
       "symbol": null,
       "evidence": {
         "file": "src/react/cards/OrderCard.tsx",
-        "line": 4
+        "line": 5
       }
     },
     {
@@ -882,7 +882,7 @@
       "symbol": null,
       "evidence": {
         "file": "src/react/cards/OrderCard.tsx",
-        "line": 15
+        "line": 16
       }
     },
     {
@@ -892,7 +892,7 @@
       "symbol": null,
       "evidence": {
         "file": "src/react/cards/OrderCard.tsx",
-        "line": 3
+        "line": 4
       }
     },
     {
@@ -902,7 +902,7 @@
       "symbol": null,
       "evidence": {
         "file": "src/react/cards/OrderCard.tsx",
-        "line": 2
+        "line": 3
       }
     },
     {
@@ -1146,5 +1146,26 @@
       }
     }
   ],
-  "hazards": []
+  "hazards": [],
+  "names": [
+    {
+      "family": "template",
+      "resolved": 14,
+      "unknown": 1,
+      "ambiguous": 2,
+      "wrongKind": 1,
+      "ambiguousNames": [
+        {
+          "name": "Badge",
+          "nodes": 2,
+          "references": 1
+        },
+        {
+          "name": "Total",
+          "nodes": 2,
+          "references": 1
+        }
+      ]
+    }
+  ]
 }

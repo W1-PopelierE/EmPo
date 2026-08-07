@@ -13,6 +13,7 @@ import {
   flowHealth,
   type HealthProbes,
   healthReport,
+  nameHealth,
 } from "../../src/engine/health";
 import { loadPack } from "../../src/engine/pack-loader";
 import { configError, EmpoError } from "../../src/errors";
@@ -342,6 +343,7 @@ function graphOf(
     coverage: {},
     hazards: [],
     hazardsScanned: [],
+    names: [],
   };
 }
 
@@ -434,6 +436,149 @@ describe("healthReport unclaimed files", () => {
     // A fact and never a finding: commands/hook.ts prints every finding on every session, and the
     // files a repository leaves out of its flows are usually left out on purpose. A warning that
     // fires forever on a deliberate state is a warning somebody turns off.
+    expect(health.findings).toEqual([]);
+    expect(health.ok).toBe(true);
+  });
+});
+
+/**
+ * The name tally, and the one distinction it cannot afford to lose: absent and empty are different
+ * claims. A graph written before schema 5 carries no `names` key at all, which is "nobody counted",
+ * and `readGraph` casts what it parsed without checking a key, so the field is whatever the file
+ * holds. The empty array is a real answer — "counted, and no name-resolving rule read a name" —
+ * and handing it back for a graph nobody counted would recreate the exact silence this field exists
+ * to end: a family that resolved nothing looking identical to a family with nothing to find.
+ *
+ * The last case is the other half, and it is the rule flowHealth's docblock states: an ambiguous
+ * component name is the normal shape of a React tree, commands/hook.ts prints every finding on every
+ * session, and a warning that fires forever on a deliberate state is a warning somebody turns off.
+ * So the tally is a fact in doctor's block and never a HealthFinding.
+ */
+describe("healthReport name resolution", () => {
+  test("a graph that counted hands the tally back verbatim", () => {
+    const repo = copyFixture();
+    const graph = graphOnDisk(repo);
+
+    // The fixture really does resolve names, so the case below is about a graph with something to
+    // report rather than one whose emptiness would pass either way.
+    expect(graph.names.length).toBeGreaterThan(0);
+    expect(nameHealth(graph)).toEqual(graph.names);
+  });
+
+  test("a graph with no names key at all is null, because nobody counted", () => {
+    // Exactly the shape of every graph written before schema 5: the key is missing, not empty.
+    // `readGraph` casts without checking it, so the absence survives the read and has to be answered
+    // here. Defaulting it to the empty list would report "these packs resolve no names" about a run
+    // that never looked.
+    const repo = copyFixture();
+    rewriteGraph(repo, (graph) => {
+      delete (graph as Partial<Graph>).names;
+    });
+
+    expect(nameHealth(graphOnDisk(repo))).toBeNull();
+    expect(healthReport(repo).names).toBeNull();
+  });
+
+  test("a names key that is not an array is null, because the file can hold anything", () => {
+    // `readGraph` parses JSON and casts, so nothing between the disk and here checks this key. A
+    // hand-edited or half-written graph reaches the report as whatever it says, and treating an
+    // object as a tally would put a shape no renderer can read into doctor's --json.
+    const repo = copyFixture();
+    rewriteGraph(repo, (graph) => {
+      (graph as unknown as Record<string, unknown>).names = { hook: 2 };
+    });
+
+    expect(nameHealth(graphOnDisk(repo))).toBeNull();
+    expect(healthReport(repo).names).toBeNull();
+  });
+
+  test("an array of the wrong records is null, because the container was never the claim", () => {
+    // The same argument one line up, carried one level down: an array checked only as an array puts
+    // whatever it holds into `Health.names`, and `nameLines` adds four numbers off each record, so a
+    // `null` entry is a TypeError out of `empo doctor` rather than the shrug the object above gets.
+    for (const names of [
+      [null],
+      [{ family: "template" }],
+      [{ family: "hook", resolved: 1, unknown: 0, ambiguous: 0, wrongKind: 0 }],
+      [
+        {
+          family: "hook",
+          resolved: "1",
+          unknown: 0,
+          ambiguous: 0,
+          wrongKind: 0,
+          ambiguousNames: [],
+        },
+      ],
+    ]) {
+      const repo = copyFixture();
+      rewriteGraph(repo, (graph) => {
+        (graph as unknown as Record<string, unknown>).names = names;
+      });
+
+      expect(nameHealth(graphOnDisk(repo))).toBeNull();
+      expect(healthReport(repo).names).toBeNull();
+    }
+  });
+
+  test("one malformed ambiguousNames entry refuses the whole tally", () => {
+    // A partial tally read as a complete one is a denominator that is quietly wrong, which is the
+    // failure this block exists to end rather than a milder version of it. So the record goes with
+    // its names: `nodes` missing is a line that would print "undefined files".
+    const repo = copyFixture();
+    rewriteGraph(repo, (graph) => {
+      (graph as unknown as Record<string, unknown>).names = [
+        {
+          family: "template",
+          resolved: 1,
+          unknown: 0,
+          ambiguous: 1,
+          wrongKind: 0,
+          ambiguousNames: [{ name: "StatusPill", references: 2 }],
+        },
+      ];
+    });
+
+    expect(nameHealth(graphOnDisk(repo))).toBeNull();
+    expect(healthReport(repo).names).toBeNull();
+  });
+
+  test("no graph: null, for the reason every other count is null", () => {
+    // Missing or unreadable, both arrive here as null, and neither one counted anything.
+    expect(nameHealth(null)).toBeNull();
+
+    const repo = copyFixture();
+    rmSync(join(repo, GENERATED_DIR), { recursive: true, force: true });
+    expect(healthReport(repo).names).toBeNull();
+
+    mkdirSync(join(repo, GENERATED_DIR), { recursive: true });
+    writeFileSync(join(repo, GRAPH_PATH), "{ this is not a graph\n");
+    expect(healthReport(repo).names).toBeNull();
+  });
+
+  test("an empty tally comes back empty and never as null", () => {
+    // The case the whole null/empty split is for. A build whose packs declare no name-resolving rule
+    // counted, and found nothing, and that is a statement a reader can act on: it is the answer
+    // "these packs resolve no names", not "this graph is too old to say". Collapsing it into null
+    // would throw away the only difference the field was added to carry.
+    const empty = nameHealth(graphOf([{ file: "src/a.ts" }], {}));
+
+    expect(empty).not.toBeNull();
+    expect(empty).toEqual([]);
+  });
+
+  test("the fixture's own tally reaches Health, and it raises no finding", () => {
+    const repo = copyFixture();
+    const graph = graphOnDisk(repo);
+
+    const health = healthReport(repo);
+
+    expect(health.names).not.toBeNull();
+    expect(health.names).toEqual(graph.names);
+    // A fact in doctor's block and never a HealthFinding, the same call flowHealth's docblock makes:
+    // commands/hook.ts prints every finding on every session, and unresolved and ambiguous names are
+    // the normal steady state of a React tree or a Blade component library. Asserted as the whole
+    // list rather than "no error", because a warning nobody can act on is the failure here.
     expect(health.findings).toEqual([]);
     expect(health.ok).toBe(true);
   });

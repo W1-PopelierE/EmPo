@@ -1,12 +1,19 @@
 import { posix } from "node:path";
 import { configError } from "../errors";
-import type { GraphEdge } from "../schema/types";
-import type { ExtractedFile } from "./extractor";
+import type { GraphEdge, NameOutcome, NameVerdict } from "../schema/types";
+import type { Capture, ExtractedFile } from "./extractor";
 import { compareStrings } from "./order";
 
 /**
  * Turns raw captures into edges between known nodes. An edge whose target is not a node in the
  * graph is dropped: a vendor import is not a coupling this repository can break.
+ *
+ * Dropped and **counted**, for the two strategies that read a bare name. Everything else this file
+ * refuses is a refusal about a vendor tree, and nobody can act on those; a short name carried by
+ * two nodes is a refusal about this repository, and it takes every edge to that name with it,
+ * including the ones written in a file whose own import says which one is meant. It fails safe,
+ * which is the right direction, but a strategy whose yield can be zero without saying so is not one
+ * anybody can call proven, so `resolveEdges` returns what it declined alongside what it emitted.
  */
 
 export interface NodeIndex {
@@ -109,12 +116,45 @@ export function normalizeFqcn(raw: string): string {
     .replace(/\\+$/, "");
 }
 
+/**
+ * What one file's captures came to: the edges, and every bare name a name-resolving strategy read
+ * with the verdict the index gave it.
+ *
+ * The two travel together rather than through a second pass, because a second pass would be a second
+ * place that decides whether a name is ambiguous, and two answers to that question would be a defect
+ * invisible from either one. It is the same argument that makes `observer` and `short-name` share
+ * `resolveName` below.
+ */
+export interface ResolvedFile {
+  edges: GraphEdge[];
+  /** One entry per reference read, not per distinct name: the denominator is the point. */
+  names: NameOutcome[];
+}
+
 export function resolveEdges(
   file: ExtractedFile,
   index: NodeIndex,
   context: ResolveContext,
-): GraphEdge[] {
+): ResolvedFile {
   const edges: GraphEdge[] = [];
+  const names: NameOutcome[] = [];
+
+  /** Look one name up, record the verdict, and hand back the id for the caller to use or not. */
+  const read = (raw: string | undefined, capture: Capture): string | null => {
+    const found = resolveName(index, raw, capture.targetKinds);
+    // A capture whose group did not participate has no name to record. It is not a refusal about a
+    // name, it is a rule that matched without capturing one, and counting it as `unknown` would put
+    // a pack's own bug into a number that is read as a fact about the repository.
+    if (raw !== undefined) {
+      names.push({
+        family: capture.family,
+        name: raw,
+        outcome: found.outcome,
+        candidates: found.candidates,
+      });
+    }
+    return found.id;
+  };
 
   for (const capture of file.captures) {
     const evidence = { file: file.file, line: capture.line };
@@ -140,8 +180,11 @@ export function resolveEdges(
       // The registration site coupled two other files: the edge runs from the observed node to
       // its listener, and the evidence stays on the file that registered it.
       case "observer": {
-        const from = uniqueId(index, capture.groups[1], capture.targetKinds);
-        const to = uniqueId(index, capture.groups[2], capture.targetKinds);
+        // Both names are read, and both unconditionally: `&&` would stop at the first refusal and
+        // the second name would go uncounted, so a registration whose observed class is ambiguous
+        // would hide the listener's verdict behind it.
+        const from = read(capture.groups[1], capture);
+        const to = read(capture.groups[2], capture);
         if (from !== null && to !== null && from !== to) {
           edges.push({ from, to, kind: capture.family, symbol: null, evidence });
         }
@@ -152,11 +195,11 @@ export function resolveEdges(
       // carries no namespace, and where its class lives is a property of the repository (a composer
       // autoload prefix, a package's own view namespace) rather than of the language. So the name
       // is looked up in the same index `observer` uses, and the same refusal applies: a name that
-      // maps to no node or to several yields no edge. Sharing `uniqueId` is deliberate, because two
+      // maps to no node or to several yields no edge. Sharing `resolveName` is deliberate, because two
       // strategies that answer "is this name unambiguous" differently would be a defect nobody
       // could see from either pack.
       case "short-name": {
-        const target = uniqueId(index, capture.groups[1], capture.targetKinds);
+        const target = read(capture.groups[1], capture);
         if (target !== null && target !== file.id) {
           edges.push({ from: file.id, to: target, kind: capture.family, symbol: null, evidence });
         }
@@ -170,7 +213,7 @@ export function resolveEdges(
     }
   }
 
-  return edges;
+  return { edges, names };
 }
 
 /**
@@ -282,18 +325,31 @@ function* candidatePaths(base: string, context: ResolveContext): Generator<strin
  * and to nothing under this one, while the tag names neither. A name shared by two files is a name
  * this strategy cannot read, whatever the kinds are, and narrowing the field of candidates does not
  * change that: it only hides it behind a plausible pick.
+ *
+ * **The verdict comes back with the id**, so the three ways to answer null stay three answers. They
+ * are not one fact: a name in no node is a vendor component and costs this repository nothing, a
+ * name of the wrong kind is a rule's own `targetKinds` doing what it was declared for, and a name in
+ * several nodes is a coupling that exists and is not in the graph. Returned as a bare null they were
+ * indistinguishable downstream, which is how a family whose yield had gone to zero went on reporting
+ * the same silence as a family with nothing to find.
  */
-function uniqueId(
+function resolveName(
   index: NodeIndex,
   shortName: string | undefined,
   targetKinds: string[] | undefined,
-): string | null {
-  if (shortName === undefined) return null;
-  const candidates = index.byShortName.get(shortName);
-  if (candidates === undefined || candidates.length !== 1) return null;
+): { id: string | null; outcome: NameVerdict; candidates: number } {
+  if (shortName === undefined) return { id: null, outcome: "unknown", candidates: 0 };
+
+  const candidates = index.byShortName.get(shortName) ?? [];
+  if (candidates.length === 0) return { id: null, outcome: "unknown", candidates: 0 };
+  if (candidates.length > 1) {
+    return { id: null, outcome: "ambiguous", candidates: candidates.length };
+  }
 
   const id = candidates[0];
-  if (id === undefined) return null;
-  if (targetKinds !== undefined && !targetKinds.includes(index.kindById.get(id) ?? "")) return null;
-  return id;
+  if (id === undefined) return { id: null, outcome: "unknown", candidates: 0 };
+  if (targetKinds !== undefined && !targetKinds.includes(index.kindById.get(id) ?? "")) {
+    return { id: null, outcome: "wrong-kind", candidates: 1 };
+  }
+  return { id, outcome: "resolved", candidates: 1 };
 }

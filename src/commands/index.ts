@@ -5,6 +5,7 @@ import type { DuplicateNode } from "../engine/build";
 import { loadConfig } from "../engine/config";
 import { shortSha } from "../engine/git";
 import { buildGraph, graphPath, LOCK_PATH, serializeGraph } from "../engine/graph";
+import { nameLines } from "../engine/names";
 import { loadPack } from "../engine/pack-loader";
 import { gateFailure } from "../errors";
 import type { Graph } from "../schema/types";
@@ -48,6 +49,11 @@ export function indexCommand(repoRoot: string, options: IndexOptions = {}): void
       `${blind.length} blind` +
       (blind.length > 0 ? `: ${blind.map((entry) => entry.flow).join(", ")}` : ""),
   );
+  // Beside the flow line rather than among the warnings below, because a family that refuses is not
+  // a defect the way a duplicated node id is: a vendor component resolving to nothing is the
+  // strategy working. What the reader needs is the ratio, on every run, so the run where it collapses
+  // reads as a change rather than as the first time anybody looked.
+  for (const line of nameLines(graph.names)) console.log(line);
   console.log(`built      ${describeBuild(graph)}`);
   console.log("");
 

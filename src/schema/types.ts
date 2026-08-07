@@ -78,6 +78,66 @@ export interface Hazard {
   transactionLine: number; // the line that opened the enclosing transaction
 }
 
+/**
+ * One short name a name-resolving strategy read, and what the node index made of it.
+ *
+ * Only `observer` and `short-name` produce these, because they are the two strategies whose whole
+ * input is a bare name: a `module-path` that resolves to nothing named a package, and a `fqcn` that
+ * does named a class in a vendor tree, and neither of those is a refusal a repository can repair.
+ * An ambiguous short name is, which is why it is counted apart from the rest.
+ */
+export interface NameOutcome {
+  /** The family the edge would have carried. Never "bridge": a bridge resolves keys, not names. */
+  family: Exclude<EdgeKind, "bridge">;
+  /** The name as the rule's `normalize` chain left it, which is the spelling the index is keyed by. */
+  name: string;
+  outcome: NameVerdict;
+  /** Nodes carrying the name: 0 for `unknown`, 1 for `resolved` and `wrong-kind`, 2+ for `ambiguous`. */
+  candidates: number;
+}
+
+/**
+ * Why a name did or did not become a node id. Three ways to fail rather than one, because they call
+ * for three different reactions: `unknown` is the normal cost of reading a language whose vendor
+ * components are spelled exactly like local ones, `wrong-kind` is a rule's own `targetKinds` doing
+ * what it was declared for, and `ambiguous` is the only one of the three that hides a coupling this
+ * repository really has.
+ */
+export type NameVerdict = "resolved" | "unknown" | "ambiguous" | "wrong-kind";
+
+/**
+ * What one edge family's name-resolving rules did with every name they read, counted per **reference
+ * and not per edge**: two files rendering `<OrderCard />` are two resolved references and, after
+ * `dedupeEdges`, may be one or two edges. The denominator is the point of the record, so the
+ * arithmetic has to be over the thing that was read.
+ */
+export interface NameResolution {
+  family: Exclude<EdgeKind, "bridge">;
+  resolved: number;
+  /** The name is in no node: a vendor component, a Blade built-in like `<x-slot>`. */
+  unknown: number;
+  /** The name is in several nodes, so no edge is emitted to any of them. */
+  ambiguous: number;
+  /** The name is in exactly one node, of a kind the rule does not list in `targetKinds`. */
+  wrongKind: number;
+  /** The distinct names behind `ambiguous`, so the count names something a reader can go and fix. */
+  ambiguousNames: AmbiguousName[];
+}
+
+/** One name more than one node carries, and how much it cost. */
+export interface AmbiguousName {
+  name: string;
+  /**
+   * Nodes carrying it, never fewer than two. Ambiguity is decided against one root's index, so a
+   * name ambiguous under two roots is reported with the larger candidate count: that is the index
+   * the reader will find the most files in, and summing two roots' candidates would report more
+   * files than any single refusal ever weighed.
+   */
+  nodes: number;
+  /** References that named it and got nothing. */
+  references: number;
+}
+
 export interface Graph {
   /**
    * The graph format this file was written in, not the one this binary writes. A version read off
@@ -117,6 +177,17 @@ export interface Graph {
    * is true, and `empo index` fixes it.
    */
   hazardsScanned: string[];
+  /**
+   * What the name-resolving strategies did with every bare name they read, one record per edge
+   * family, empty when no rule in these packs resolves by name.
+   *
+   * Absent and empty are not the same claim, on the `hazards` rule above and for a sharper reason:
+   * this whole field exists because a family that resolved nothing looked exactly like a family
+   * with nothing to find. A reader that defaulted the missing key to the empty list would recreate
+   * that silence inside the field built to end it, so `readGraph` leaves it exactly as parsed and
+   * every surface prints the absence as an unknown that `empo index` repairs.
+   */
+  names: NameResolution[];
 }
 
 /** One extraction rule in an `edges.<family>` list. Capture group 1 is the target. */

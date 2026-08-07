@@ -785,5 +785,29 @@
       "target": "Acme\\Jobs\\PostLedgerEntry",
       "transactionLine": 15
     }
+  ],
+  "names": [
+    {
+      "family": "hook",
+      "resolved": 2,
+      "unknown": 0,
+      "ambiguous": 0,
+      "wrongKind": 0,
+      "ambiguousNames": []
+    },
+    {
+      "family": "template",
+      "resolved": 4,
+      "unknown": 0,
+      "ambiguous": 1,
+      "wrongKind": 0,
+      "ambiguousNames": [
+        {
+          "name": "TextInput",
+          "nodes": 2,
+          "references": 1
+        }
+      ]
+    }
   ]
 }

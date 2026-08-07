@@ -86,6 +86,7 @@ function graphBuiltAgainst(sha: string): Graph {
     // Graph is the shape on disk, and a literal that omits half of it would compile against a
     // partial type nothing ever produces.
     hazardsScanned: [],
+    names: [],
   };
 }
 
@@ -577,10 +578,12 @@ describe("hazards on the built graph", () => {
     const keys = Object.keys(buildGraph({ repoRoot: dir, config }).graph);
 
     // Field order is part of the bytes, and `schema` staying first is what lets every reader of a
-    // graph.json find out which empo wrote it without parsing the whole document.
+    // graph.json find out which empo wrote it without parsing the whole document. A field added
+    // since goes on the end, which is why the tail is `names` and not `hazardsScanned`: appending
+    // is what keeps every key above it at the offset the previous schema left it at.
     expect(keys[0]).toBe("schema");
     expect(keys.indexOf("hazards")).toBeGreaterThan(keys.indexOf("coverage"));
-    expect(keys.slice(-2)).toEqual(["hazards", "hazardsScanned"]);
+    expect(keys.slice(-3)).toEqual(["hazards", "hazardsScanned", "names"]);
   });
 
   test("a repository whose pack looked and found nothing says so, in the graph", () => {

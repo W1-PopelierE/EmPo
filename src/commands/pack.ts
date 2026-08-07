@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { buildRoot } from "../engine/build";
 import { fixturesDir, loadPack } from "../engine/pack-loader";
 import { configError, gateFailure } from "../errors";
-import type { GraphEdge, GraphNode, Hazard, Pack } from "../schema/types";
+import type { GraphEdge, GraphNode, Hazard, NameResolution, Pack } from "../schema/types";
 
 /**
  * `empo pack test <name>`: run a pack against its synthetic fixtures and diff the result against
@@ -22,6 +22,15 @@ export interface FixtureSnapshot {
    * shape a pack with rules and a corpus that trips none writes.
    */
   hazards: Hazard[];
+  /**
+   * The fourth axis, and the one a snapshot is the only possible gate for. A pack's name-resolving
+   * rules refuse silently by design, so nothing about a corpus whose yield went to zero looks
+   * different from a corpus with nothing to find: no edge disappears from a diff that was never
+   * there. Pinning the counts makes the refusal itself the thing under the gate, so a rule that
+   * stops resolving, or a fixture that quietly makes a name ambiguous, fails here rather than in
+   * somebody's repository. A pack with no name-resolving rule snapshots an empty array.
+   */
+  names: NameResolution[];
 }
 
 /** The fixture corpus is a convention: <pack>/fixtures/src is the tree, expected.json the snapshot. */
@@ -41,7 +50,15 @@ export function runPackFixtures(name: string): { pack: Pack; actual: FixtureSnap
     pack,
   });
 
-  return { pack, actual: { nodes: built.nodes, edges: built.edges, hazards: built.hazards } };
+  return {
+    pack,
+    actual: {
+      nodes: built.nodes,
+      edges: built.edges,
+      hazards: built.hazards,
+      names: built.names,
+    },
+  };
 }
 
 export function packTestCommand(name: string, options: { update?: boolean } = {}): void {
@@ -85,10 +102,18 @@ export function packTestCommand(name: string, options: { update?: boolean } = {}
 function parseSnapshot(path: string): FixtureSnapshot {
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8"));
-    // A snapshot written before the hazard axis existed carries no key, and it reads as an empty
-    // list rather than as a failure: it was written by a pack that declared no hazard rules, so
-    // there is nothing it could have recorded and nothing for the diff below to find.
-    return { nodes: parsed.nodes ?? [], edges: parsed.edges ?? [], hazards: parsed.hazards ?? [] };
+    // A snapshot written before an axis existed carries no key, and it reads as an empty list
+    // rather than as a failure: it was written by a pack that declared no hazard rules, so there is
+    // nothing it could have recorded and nothing for the diff below to find. `names` follows it,
+    // and this is deliberately not the rule `Graph.names` follows, whose absence has to stay
+    // readable: a snapshot is regenerated from a corpus this repository owns, so the counts
+    // arriving read as a diff somebody reviews, not as an answer served about a repository.
+    return {
+      nodes: parsed.nodes ?? [],
+      edges: parsed.edges ?? [],
+      hazards: parsed.hazards ?? [],
+      names: parsed.names ?? [],
+    };
   } catch (error) {
     throw configError(`${path} is not valid JSON`, [(error as Error).message]);
   }
@@ -150,6 +175,28 @@ function differences(expected: FixtureSnapshot, actual: FixtureSnapshot): string
       lines.push(`changed hazard   ${key}`);
       lines.push(`  expected  ${JSON.stringify(counterpart)}`);
       lines.push(`  actual    ${JSON.stringify(hazard)}`);
+    }
+  }
+
+  // Keyed on the family, because that is the unit the tally has one record of and the unit a reader
+  // repairs: the whole record printed on both sides is what says which of the four numbers moved,
+  // and a count that moved is the only thing a corpus can report about a refusal.
+  const expectedNames = new Map(expected.names.map((report) => [report.family, report]));
+  const actualNames = new Map(actual.names.map((report) => [report.family, report]));
+
+  for (const [family, report] of expectedNames) {
+    if (!actualNames.has(family)) {
+      lines.push(`missing names    ${family}: ${JSON.stringify(report)}`);
+    }
+  }
+  for (const [family, report] of actualNames) {
+    const counterpart = expectedNames.get(family);
+    if (counterpart === undefined) {
+      lines.push(`unexpected names ${family}: ${JSON.stringify(report)}`);
+    } else if (JSON.stringify(counterpart) !== JSON.stringify(report)) {
+      lines.push(`changed names    ${family}`);
+      lines.push(`  expected  ${JSON.stringify(counterpart)}`);
+      lines.push(`  actual    ${JSON.stringify(report)}`);
     }
   }
 

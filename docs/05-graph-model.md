@@ -7,7 +7,7 @@ specifies its schema. It is written only by `empo index`, never by hand, never b
 
 ```jsonc
 {
-  "schema": 4,                          // the format this file was written in, not the one empo writes
+  "schema": 5,                          // the format this file was written in, not the one empo writes
   "builtAgainst": "9cd9b6278…",         // git sha graph was built from
   "builtAtCommitSubject": "…",          // for human sanity when reading the file
   "roots": [ { "path": "apps/api", "lang": "php" }, … ],
@@ -20,7 +20,8 @@ specifies its schema. It is written only by `empo index`, never by hand, never b
   "fanin":  { "<node-id>": 340, … },           // derived: distinct referencing nodes per node
   "coverage": { "orders": CoverageInfo, … },
   "hazards": [ Hazard, … ],                    // a second axis: dispatches inside a transaction
-  "hazardsScanned": [ "php" ]                  // the langs whose pack looked, as of this build
+  "hazardsScanned": [ "php" ],                 // the langs whose pack looked, as of this build
+  "names": [ NameResolution, … ]               // what the name-resolving rules did with what they read
 }
 ```
 
@@ -376,6 +377,124 @@ old arithmetic while looking healthy. It is also the only signal a php-only chec
 since its pack version did not move either. `empo doctor` reports the drift and `empo index` is the
 repair, the same as above.
 
+## Name resolution
+
+```jsonc
+{
+  "family": "template",        // the edge family whose rules read the name; never "bridge"
+  "resolved": 41,              // the name is in exactly one node, of a kind the rule accepts
+  "unknown": 12,               // the name is in no node: a vendor component, a Blade `<x-slot>`
+  "ambiguous": 7,              // the name is in several nodes, so no edge is emitted to any of them
+  "wrongKind": 3,              // one node carries it, of a kind the rule's `targetKinds` excludes
+  "ambiguousNames": [ { "name": "OrderTable", "nodes": 2, "references": 5 }, … ]
+}
+```
+
+`names` holds one of these per edge family, sorted by family name. Only the `short-name` and
+`observer` resolve strategies contribute, because they are the two whose entire input is a bare name
+([04-language-packs](04-language-packs.md)). A `module-path` that resolves to nothing named a
+package and a `fqcn` that does named a class in a vendor tree, and neither of those is a refusal a
+repository can repair, so neither is worth a denominator. An ambiguous short name is.
+
+**The field exists because the refusal was silent, and the silence was measured.** Both strategies
+already declined a bare name carried by more than one node, and declined it without counting or
+printing anything. On a synthetic 16-file React tree, adding a second `OrderTable.tsx` under a
+second feature directory took the build from 12 template edges to 7, with no warning and with `empo
+doctor` reporting OK; on a 640-file copy where every component name was 40-way ambiguous, not one
+template edge resolved and the run looked exactly like a run against a repository that renders no
+components. This field does not narrow the refusal, which is a separate and larger change: a family
+that resolves nothing still resolves nothing. It now says so, which is what lets a reader tell
+"found nothing" from "there was nothing to find".
+
+**The counts are per reference, not per edge.** Two files rendering `<OrderCard />` are two resolved
+references and, after `dedupeEdges`, two edges; one file rendering it twice is also two resolved
+references and exactly one edge, because the dedupe key is `(from, to, kind)` and a second reference
+between the same pair through the same family is the same coupling. So the two numbers are not the
+same number and the record keeps the one that was read. The question it answers is what a family's
+rules did with what they found, so the arithmetic has to be over what they found rather than over
+what survived: a name written forty times that resolves is forty couplings the graph can carry, and
+a name written once that does not is one missing edge.
+
+**Tallied before edge deduplication, and deliberately.** An edge deduplicated away was still a
+reference the rules read and resolved. Counting afterwards would shrink the numerator while leaving
+every refusal standing, so a family with a heavy overlap between its imports and its renders would
+report a yield lower than the one that was measured, and the ratio would fall for a reason that has
+nothing to do with resolution. The same reasoning is why the counts are not deduplicated across
+roots either: two overlapping roots that scan one file twice do read its names twice, which moves
+numerator and denominator together, and `empo index` already names root overlap as the defect it is.
+
+**Four verdicts and not one, because they call for four different reactions.** `unknown` is the
+ordinary cost of reading a language whose vendor components are spelled exactly like local ones: a
+JSX tag naming a package's component, a Blade built-in like `<x-slot>`. Nobody can act on it, and a
+healthy typescript repository carries a lot of it. `wrongKind` is a rule's own `targetKinds` doing
+precisely what it was declared for, refusing to land a tag on the one local `.ts` module that
+happens to share a basename with a package (the Edge section above, and
+[04-language-packs](04-language-packs.md) section 4, carry why that filter runs on the survivor of
+the uniqueness test rather than before it). `ambiguous` is the only one of the three that hides a
+coupling this repository really has: the name is in the graph, more than once, and the edge is
+dropped in both directions rather than guessed at. `resolved` is the fourth because the other three
+are unreadable without it: it is the numerator, and added to them it is the denominator, which is
+why every surface prints the ratio on every run including the run where nothing was refused.
+`41 of 41 resolved` and `0 of 53 resolved` are opposite results, and the total is the only thing
+that separates them. A denominator that appears only in the bad case is one nobody learns to look
+for.
+Returned as a bare null downstream, as they were, all three failures were one fact, which is how a
+family whose yield had gone to zero went on producing the same silence as a family with nothing to
+find.
+
+**`ambiguousNames` is what makes the count actionable**, and it is the one place the record cuts by
+name instead of by reference. A number alone says the family is losing edges; this says which rename
+would give them back. `nodes` is how many nodes carry the name, never fewer than two, and
+`references` is how many reads named it and got nothing. The list is sorted by `references`
+descending, then `nodes` descending, then the name, so the entry a reader saves the most edges by
+repairing is the one they read first, and the name is a tiebreak rather than a preference: two
+entries that cost the same have to order the same on every machine or `graph.json` stops being
+byte-comparable.
+
+**Merging across roots sums the counts and takes the MAX of the candidate counts.** Two references
+read under two roots are two references, so `resolved`, `unknown`, `ambiguous` and `wrongKind` add.
+`nodes` does not, and the asymmetry is not an oversight. Ambiguity is decided against one root's
+node index: a name refused under `apps/portal` was weighed against `apps/portal`'s three files and a
+name refused under `apps/admin` against that root's two, and no single refusal ever looked at five.
+Summing them would print `5 files` for a name a reader will never find five of anywhere, and would
+send them hunting for two files that do not exist. The larger of the two is the index they will
+actually find the most copies in, and it is the number the worst refusal weighed.
+
+**Absent and empty are different claims, and the distinction is sharper here than it is for
+`hazards`.** An empty list means a build counted and nothing read a bare name, which has two causes
+and the record does not separate them: the configured roots' packs declare no `short-name` and no
+`observer` family at all, or they declare some and none of them matched a file. EmPo's own
+repository is the second — its typescript pack's two `short-name` template rules carry
+`pathGlob: "**/*.{tsx,jsx,vue}"`, which matches nothing in a repository with no components in it —
+and a surface that reported "these packs resolve no names" over it would be inventing a fact about
+the pack out of a fact about the tree. So the empty list is a real answer this field can carry, and
+the sentence printed over it claims only what was counted. An absent key means nobody counted: the
+graph was written before schema 5. `readGraph` therefore leaves the key exactly as parsed, missing included, the same way it
+leaves `hazards` and unlike `hazardsScanned`, which it does coerce because absent and empty are one
+claim there. What makes it sharper: `hazards`' third state is a reader being told "found none" about
+files nothing examined, which is one wrong answer among the axis's answers. Here the wrong answer is
+the exact silence the field was built to end. A reader that defaulted the missing key to `[]` would
+print "no name-resolving rule read a name here" over a repository whose template family may have
+collapsed to zero, which is the pre-schema-5 behaviour reproduced inside the field that exists to
+prevent it. So every surface prints the absence as unknown, and `empo index` is the repair. Pack
+fixture snapshots deliberately do not follow this rule and do default a missing `names` to `[]`: a
+snapshot is regenerated from a corpus this repository owns, so the counts arriving read as a diff
+somebody reviews rather than as an answer served about somebody's code.
+
+**`schema` goes from 4 to 5 with this field**, and it is 3's case rather than 4's. 4 was a key that
+kept its name and changed what it counts, which no reader can detect; 3 was a field that arrived,
+and a field that arrives announces itself only where its absence and its emptiness mean the same
+thing. Here they do not, so the bump carries the whole of the announcement: without it a graph
+written by an earlier binary would parse, look well formed, and answer the one question the field
+was added to answer with a fact no run ever established. `empo doctor` reports the schema drift
+against the binary reading it, and `empo index` is the repair, the same as above.
+
+`names` is not a health finding and never becomes one. An ambiguous component name is the normal
+shape of a React tree with feature directories, and a `TextInput` under two namespaces is the normal
+shape of a Blade component library, so a warning on it would fire forever on a deliberate state and
+be turned off. The number is the whole of the answer; whether it is the right number is the reader's
+judgement.
+
 ## What the graph deliberately does not contain
 
 Documented so nobody mistakes absence for safety:
@@ -404,7 +523,8 @@ graph says, grep and confirm.
 `empo index` is deterministic: same source plus same pack versions produce a byte-identical
 `graph.json` (nodes sorted by id, edges sorted by `(from, to, kind, evidence.line)` with the
 evidence file breaking the last tie, since an edge has no id to sort on, hazards sorted by
-`(file, line, job, target)` for the same reason, and no timestamps except
+`(file, line, job, target)` for the same reason, `names` sorted by family with each
+`ambiguousNames` sorted by cost and tie-broken on the name, and no timestamps except
 `builtAgainst` which is a content-derived git sha). This makes the file diffable and makes "did the
 graph actually change" answerable. For very large repos the file can be sharded
 (`generated/graph/*.json` with a manifest) without changing the logical schema; that is an

@@ -240,8 +240,11 @@ describe("indexCommand", () => {
     // Literal rather than read off GRAPH_SCHEMA, so a bump goes red here and stays a decision
     // somebody makes rather than one that rides along. 3 was the hazards axis; 4 is `fanin`
     // counting the nodes that reference one node rather than the edges that do (docs/05), which is
-    // the shape this number exists for: a field whose name stayed and whose meaning moved.
-    expect(graph.schema).toBe(4);
+    // the shape this number exists for: a field whose name stayed and whose meaning moved. 5 is
+    // `names`, and it is 3's case rather than 4's: an added field announces itself only where its
+    // absence and its emptiness mean the same thing, and those are the two answers this one exists
+    // to tell apart.
+    expect(graph.schema).toBe(5);
     expect(graph.roots).toEqual([
       { path: "apps/api", lang: "php" },
       { path: "apps/mobile", lang: "typescript" },
@@ -363,6 +366,41 @@ describe("indexCommand", () => {
     // Cross-checked against the graph, so the literal above cannot drift away from the fixture
     // without one of the two going red and naming which.
     expect(Object.values(coverage).filter((entry) => entry.reaches)).toHaveLength(2);
+  });
+
+  test("the header states what the name-resolving rules read, and their denominator", () => {
+    // The defect this closes: `short-name` and `observer` refuse a name carried by more than one
+    // node, and refused it in silence. One duplicate basename anywhere in a root takes every edge
+    // to that name with it, including the ones written in a file whose own import says which is
+    // meant, and nothing counted or printed that. Measured on a 16-file React tree, a second
+    // `OrderTable.tsx` under another feature directory took it from 12 template edges to 7 with no
+    // warning and doctor OK; on a 640-file copy where every component name was 40-way ambiguous,
+    // no template edge resolved at all. This line is what makes that visible from the outside.
+    //
+    // The fixture refuses nothing, so this is also the pin on the clean shape: the ratio prints
+    // anyway. A number that appeared only once something had gone wrong would be a number nobody
+    // had a baseline for at the moment they needed one.
+    const lines = printedLines(() => {
+      indexCommand(repo);
+    });
+
+    expect(lines).toContain("names      hook     2 of 2 resolved");
+    expect(lines).toContain("names      template 1 of 1 resolved");
+    // Cross-checked against the graph, so the two literals above cannot drift away from the fixture
+    // without one of them going red and naming which. The tally is on the graph rather than beside
+    // it, because `empo doctor` reads the graph and nothing else, and a count that lived only in
+    // this command's output would have left doctor exactly as silent as it was.
+    expect(graphOnDisk().names).toEqual([
+      { family: "hook", resolved: 2, unknown: 0, ambiguous: 0, wrongKind: 0, ambiguousNames: [] },
+      {
+        family: "template",
+        resolved: 1,
+        unknown: 0,
+        ambiguous: 0,
+        wrongKind: 0,
+        ambiguousNames: [],
+      },
+    ]);
   });
 
   test("a repository no test reaches says so, instead of reading as one with no blind flows", () => {
