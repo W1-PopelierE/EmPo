@@ -492,6 +492,57 @@ describe("healthReport name resolution", () => {
     expect(healthReport(repo).names).toBeNull();
   });
 
+  test("an array of the wrong records is null, because the container was never the claim", () => {
+    // The same argument one line up, carried one level down: an array checked only as an array puts
+    // whatever it holds into `Health.names`, and `nameLines` adds four numbers off each record, so a
+    // `null` entry is a TypeError out of `empo doctor` rather than the shrug the object above gets.
+    for (const names of [
+      [null],
+      [{ family: "template" }],
+      [{ family: "hook", resolved: 1, unknown: 0, ambiguous: 0, wrongKind: 0 }],
+      [
+        {
+          family: "hook",
+          resolved: "1",
+          unknown: 0,
+          ambiguous: 0,
+          wrongKind: 0,
+          ambiguousNames: [],
+        },
+      ],
+    ]) {
+      const repo = copyFixture();
+      rewriteGraph(repo, (graph) => {
+        (graph as unknown as Record<string, unknown>).names = names;
+      });
+
+      expect(nameHealth(graphOnDisk(repo))).toBeNull();
+      expect(healthReport(repo).names).toBeNull();
+    }
+  });
+
+  test("one malformed ambiguousNames entry refuses the whole tally", () => {
+    // A partial tally read as a complete one is a denominator that is quietly wrong, which is the
+    // failure this block exists to end rather than a milder version of it. So the record goes with
+    // its names: `nodes` missing is a line that would print "undefined files".
+    const repo = copyFixture();
+    rewriteGraph(repo, (graph) => {
+      (graph as unknown as Record<string, unknown>).names = [
+        {
+          family: "template",
+          resolved: 1,
+          unknown: 0,
+          ambiguous: 1,
+          wrongKind: 0,
+          ambiguousNames: [{ name: "StatusPill", references: 2 }],
+        },
+      ];
+    });
+
+    expect(nameHealth(graphOnDisk(repo))).toBeNull();
+    expect(healthReport(repo).names).toBeNull();
+  });
+
   test("no graph: null, for the reason every other count is null", () => {
     // Missing or unreadable, both arrive here as null, and neither one counted anything.
     expect(nameHealth(null)).toBeNull();

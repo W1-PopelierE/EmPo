@@ -126,10 +126,46 @@ export interface FlowHealth {
  * all and anything that is not an array is treated as no record. Null and not the empty list: the
  * empty list is a real answer this field can carry, "these packs resolve no names", and handing it
  * back for a graph nobody counted would be the invented reassurance the whole report refuses.
+ *
+ * The array is checked entry by entry and not only as a container, because the cast is the only
+ * thing standing between the file and every reader of this field: `nameLines` adds four numbers off
+ * each record, so one `null` in a hand-edited or half-written graph is a TypeError out of `empo
+ * doctor` rather than the shrug the non-array case already gets. One bad record refuses the whole
+ * tally, on the same argument the container check makes — a partial tally read as a complete one is
+ * a denominator that is quietly wrong, which is worse than no denominator at all.
  */
 export function nameHealth(graph: Graph | null): NameResolution[] | null {
   if (graph === null || !Array.isArray(graph.names)) return null;
-  return graph.names;
+  return graph.names.every(isNameResolution) ? graph.names : null;
+}
+
+/** Every field `nameLines` and doctor's `--json` read, and nothing beyond them. */
+function isNameResolution(value: unknown): value is NameResolution {
+  if (typeof value !== "object" || value === null) return false;
+  const report = value as Record<string, unknown>;
+  return (
+    typeof report.family === "string" &&
+    isCount(report.resolved) &&
+    isCount(report.unknown) &&
+    isCount(report.ambiguous) &&
+    isCount(report.wrongKind) &&
+    Array.isArray(report.ambiguousNames) &&
+    report.ambiguousNames.every(isAmbiguousName)
+  );
+}
+
+function isAmbiguousName(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const name = value as Record<string, unknown>;
+  return typeof name.name === "string" && isCount(name.nodes) && isCount(name.references);
+}
+
+/**
+ * Finite rather than merely a number, because `NaN` and `Infinity` both survive `typeof` and both
+ * reach the reader as a total that arithmetic cannot repair.
+ */
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 export function flowHealth(graph: Graph | null): FlowHealth {
