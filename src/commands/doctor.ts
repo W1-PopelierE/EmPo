@@ -1,5 +1,5 @@
 import { bridgeLines } from "../engine/bridger";
-import { driftLines, stalenessLineFrom } from "../engine/graph";
+import { driftLines, installedPackVersion, stalenessLineFrom } from "../engine/graph";
 import {
   type FlowHealth,
   type ForgeHealth,
@@ -7,9 +7,11 @@ import {
   type Health,
   type HookHealth,
   healthReport,
+  quietProbes,
   type RequiredCommand,
   remoteLabel,
   type SpineHealth,
+  systemProbes,
   type TrackerHealth,
 } from "../engine/health";
 import { nameLines } from "../engine/names";
@@ -33,10 +35,35 @@ import { configError } from "../errors";
 
 export interface DoctorOptions {
   json?: boolean;
+  /**
+   * Report on the wired hooks without running them.
+   *
+   * Doctor is documented as a health check that changes nothing, and for every other line that is
+   * true of the machine as well: they are file reads. The hook line is not. It hands each wired
+   * `command` string from `.claude/settings.json` to a shell (engine/git.ts on `runShell`), and
+   * ownership of an entry is decided by the shape of that string and never by a signature, so a
+   * command that still contains `empo hook ` is ours as far as `wiredHooks` is concerned however it
+   * continues. The host would run the very same string during a session, so this is no new
+   * capability on the machine, but doctor is the command somebody runs *before* opening a session
+   * and against a clone they have not read, which is the one place that ordering matters.
+   *
+   * So the flag is the answer for a checkout that is not trusted yet, and it buys the honest half of
+   * the report: which hooks are wired is still a file read, and only the running of them is skipped.
+   * It is the caller's choice and never a default, because a doctor that stopped probing by default
+   * would restore exactly the silence the hook probe was built to end (engine/health.ts).
+   */
+  skipHooks?: boolean;
 }
 
 export function doctorCommand(repoRoot: string, options: DoctorOptions = {}): void {
-  const health = healthReport(repoRoot);
+  // Routed through `quietProbes`, the seam `commands/hook.ts` already uses, rather than a second way
+  // of not running a hook: two mechanisms for one state is how the two surfaces come to disagree
+  // about what "not run" means.
+  const health = healthReport(
+    repoRoot,
+    installedPackVersion,
+    options.skipHooks === true ? quietProbes : systemProbes,
+  );
   const json = options.json === true;
 
   if (json) console.log(JSON.stringify(health, null, 2));
@@ -172,10 +199,12 @@ export function hookLine(hooks: HookHealth): string {
   // The list is real and worth its number even here: which hooks exist is a file read, and only the
   // running of them was skipped (engine/health.ts on `quietProbes` says by whom, and why).
   //
-  // No command is named, and the branch is unreachable from here on purpose. `doctorCommand` always
-  // probes, so the only producer of this state is the session hook, which renders no prose at all.
-  // Naming a command would mean telling a reader to run the one command that would have probed, and
-  // the only reader who could ever see this line got here from something else entirely.
+  // Two callers reach this state and only one of them reads prose. The session hook renders none at
+  // all, so the reader of this line is always somebody who passed `--skip-hooks`, which is a person
+  // who decided not to hand this checkout's `command` strings to a shell (DoctorOptions above says
+  // why anybody would). No command is named for that reason and not for want of one: the command
+  // that would have probed is the one they just declined, and printing it back would answer a
+  // question the reader has already answered. The line states what the report is missing and stops.
   if (hooks.state === "unprobed") return `hooks      ${wired}, not run`;
 
   const broken = hooks.hooks.filter((hook) => hook.state !== "ok").length;

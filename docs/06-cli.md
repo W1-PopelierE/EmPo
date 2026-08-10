@@ -682,7 +682,9 @@ are no assets to resolve, and both become live on the first release
 
 ## `empo doctor`
 
-Health check, no changes. Reports: graph staleness vs HEAD, config validity (bad roots, unknown
+Health check, and it writes nothing. It does execute one thing, and only one: each hook the host is
+wired to run, through a shell, which is a checkout-supplied command line and is why `--skip-hooks`
+exists (the hooks block below states that boundary in full). Reports: graph staleness vs HEAD, config validity (bad roots, unknown
 pack, malformed bridge, uncompilable `keyPattern`, an `aliases` target pointing at a directory that
 is not there), directories under no root, per-bridge match
 rate (a low rate usually means a mis-tuned `normalize`), any pack-version or graph-schema drift
@@ -740,7 +742,7 @@ answer there is no origin clause at all, because an unread remote may not be rep
 **A hooks line prints after the forge and tracker lines**, closing the wiring group, and it is the
 one line in the report that had to run something to know what it says. It takes one of three shapes:
 
-```
+```text
 hooks      none wired, so no session runs empo
 hooks      3 wired, all ran clean
 hooks      3 wired, 2 ran clean, 1 broken (named below)
@@ -785,6 +787,33 @@ a teammate who never runs `empo doctor` at all.
 same health report with the probe left off, because a hook that ran the hooks would recurse into
 itself, and because the work does not fit the ten seconds the host allows a session to start in. So
 a healthy session still opens in silence and still spawns nothing.
+
+**Running a hook means running what the checkout says.** Every other line in this report is a file
+read, and this one is not: each wired `command` string is handed to a shell whole, so pointing
+`empo doctor` at a repository executes whatever that repository's `.claude/settings.json` puts in
+those strings, shell syntax and all. Ownership is decided by the **shape** of the command and never
+by a signature: an entry is EmPo's because it contains `empo hook `, which is what lets `empo
+update` merge without trampling a hand-edited entry, and it is also what makes a modified entry
+still ours. `empo hook session-start; <anything>` matches the ownership rule, is listed as a wired
+EmPo hook, and is run. A checkout can therefore choose what `empo doctor` executes on the machine
+that runs it.
+
+The honest mitigation is that this is not a new capability on that machine. The same string is what
+the Claude Code host would run at the next SessionStart, off the same file, through the same shell,
+so anybody who opens a session in that checkout has already granted it. What moves is the
+**ordering**, and that is the part worth naming: doctor is documented as a health check that makes
+no changes, and it is exactly the command somebody runs *before* opening a session, against a fresh
+clone or a branch they have not read, to decide whether the repository is in a state worth working
+in. A command reached for at that moment should not be the first thing to execute the repository's
+own instructions.
+
+So `--skip-hooks` is the answer for a checkout you do not trust yet: it reports on the wired hooks
+without running any of them. The hooks line becomes `hooks      N wired, not run`, which is the same
+state the SessionStart hook reaches, and no hook findings are raised, because nothing was observed
+and a clean report about an unexecuted command would be the verified-looking answer this whole block
+exists to prevent. Which hooks are wired is still printed, since that half is a file read and costs
+nothing, and every other line of the report is unchanged. Read it, read `.claude/settings.json`, and
+run doctor again without the flag once you are willing to open a session there.
 
 Hooks are a Claude Code concept. Codex gets the skills and `AGENTS.md` and no hooks at all, so a
 Codex-only repository reports none wired, which is a fact about that host and never a fault.
@@ -876,7 +905,9 @@ that has never been indexed is never reported), and when there is no git checkou
 still changes no behaviour: it adds and removes no ignore rule, and `.empo/.gitignore` is what git
 obeys. This is the first thing to run when an answer looks wrong.
 
-Flags: `--repo <path>`, `--json`. The JSON form exists because the SessionStart hook needs a health
+Flags: `--repo <path>`, `--json`, `--skip-hooks`. The last one is the trust boundary above and not
+an output choice: it is what to pass at a checkout whose `.claude/settings.json` you have not read.
+The JSON form exists because the SessionStart hook needs a health
 answer it does not have to parse out of prose, and a hook that reads sentences breaks the first time
 one is reworded. Both surfaces render one computed object and neither calculates anything of its own,
 so they cannot disagree about whether the graph is stale, which is the failure that would matter: a

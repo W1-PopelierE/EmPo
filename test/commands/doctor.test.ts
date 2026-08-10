@@ -1,4 +1,12 @@
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +21,7 @@ import {
 import { hookAnswer } from "../../src/commands/hook";
 import { run } from "../../src/engine/git";
 import { GRAPH_SCHEMA } from "../../src/engine/graph";
-import type { ForgeHealth, HookReport, TrackerHealth } from "../../src/engine/health";
+import type { ForgeHealth, Health, HookReport, TrackerHealth } from "../../src/engine/health";
 import { healthReport } from "../../src/engine/health";
 import { loadPack } from "../../src/engine/pack-loader";
 import { EmpoError } from "../../src/errors";
@@ -197,19 +205,24 @@ function rewriteConfig(repo: string, change: (config: Record<string, unknown>) =
  */
 const MISSING_HOOK_COMMAND = "/empo-no-such-directory-4f21c/bin/empo hook session-start";
 
-/** The fixture with one real, wired, unrunnable hook: what a broken installation looks like. */
-function wireMissingHook(repo: string): void {
+/**
+ * One SessionStart entry wired the way `empo update` writes them, with the command the caller wants
+ * probed. The timeout is short on purpose, so a machine that somehow does resolve a path meant to be
+ * unresolvable still fails this fast rather than holding the suite for the host's ten second default.
+ */
+function wireHook(repo: string, command: string): void {
   mkdirSync(join(repo, ".claude"), { recursive: true });
   const settings = {
     hooks: {
-      SessionStart: [
-        // A short timeout, so a machine that somehow does resolve the path still fails this fast
-        // rather than holding the suite for the host's ten second default.
-        { hooks: [{ type: "command", command: MISSING_HOOK_COMMAND, timeout: 5 }] },
-      ],
+      SessionStart: [{ hooks: [{ type: "command", command, timeout: 5 }] }],
     },
   };
   writeFileSync(join(repo, ".claude/settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
+}
+
+/** The fixture with one real, wired, unrunnable hook: what a broken installation looks like. */
+function wireMissingHook(repo: string): void {
+  wireHook(repo, MISSING_HOOK_COMMAND);
 }
 
 /** Destroy hop 0's anchor, which drifts the fixture spine by one hard citation. */
@@ -804,6 +817,88 @@ describe("doctor hook line", () => {
 
     expect(printed.some((line) => line.startsWith("warn   hook SessionStart"))).toBe(true);
     expect(printed.some((line) => line.startsWith("ERROR"))).toBe(false);
+  });
+});
+
+/**
+ * `--skip-hooks`, which is the one flag on this command that is about trust rather than output.
+ *
+ * Every other line doctor prints is a file read. The hook line is not: it hands each wired `command`
+ * string to a shell, and ownership of an entry is its shape (`empo hook `) rather than a signature,
+ * so a checkout decides what `empo doctor` executes on the machine that runs it. That is documented
+ * behaviour and the host would run the same string at the next SessionStart, so the flag is not a
+ * fix for it; what the flag buys is the ordering, because doctor is the command reached for *before*
+ * a session and against a clone nobody has read.
+ *
+ * So the marker case below pins the executing half as deliberately as the skipping half. A test that
+ * only asserted the flag works would leave the surprising fact unpinned, and the surprising fact is
+ * the whole reason the flag exists.
+ */
+describe("doctor --skip-hooks", () => {
+  test("the wired hooks are listed and not run, with no finding and no failure", () => {
+    // The same repository that prints "1 wired, 0 ran clean, 1 broken (named below)" and a warn line
+    // without the flag, so the two cases differ in exactly one thing.
+    const repo = copyFixture();
+    wireMissingHook(repo);
+
+    const printed = capture(() => {
+      doctorCommand(repo, { skipHooks: true });
+    });
+
+    expect(printed).toContain("hooks      1 wired, not run");
+    // Nothing was observed, so nothing may be reported about it in either direction: no warning
+    // about a hook nobody ran, and no "ran clean" either.
+    expect(printed.some((line) => line.includes("hook SessionStart"))).toBe(false);
+    expect(printed.some((line) => line.startsWith("warn "))).toBe(false);
+    expect(printed.some((line) => line.includes("OK  config is valid"))).toBe(true);
+  });
+
+  test("a wired hook that appends a side effect runs it, and only --skip-hooks stops it", () => {
+    // The security case, end to end, and the reason the flag was added.
+    //
+    // The command starts with an absolute path under a directory that does not exist, so its first
+    // half is 127 on every machine and no local install can answer for it, and then `;` continues to
+    // a `touch` in the throwaway directory. It still begins with `empo hook `, which is the whole of
+    // the ownership test in src/host/claude.ts, so `wiredHooks` reports it as one of ours and doctor
+    // hands the entire line to a shell.
+    //
+    // The first assertion pins behaviour nobody should be surprised by later: doctor really does
+    // execute what the checkout says, and the marker is the proof. The second is the flag.
+    const repo = copyFixture();
+    const marker = join(repo, "doctor-executed-this.marker");
+    wireHook(repo, `${MISSING_HOOK_COMMAND}; touch ${JSON.stringify(marker)}`);
+
+    capture(() => {
+      doctorCommand(repo);
+    });
+    expect(existsSync(marker), "doctor did not run the wired hook command").toBe(true);
+
+    rmSync(marker);
+    const printed = capture(() => {
+      doctorCommand(repo, { skipHooks: true });
+    });
+
+    expect(existsSync(marker), "--skip-hooks ran the wired hook command anyway").toBe(false);
+    expect(printed).toContain("hooks      1 wired, not run");
+  });
+
+  test("--skip-hooks under --json is still one document, and it says unprobed", () => {
+    // The rule the whole `--json` surface has: exactly one document on stdout. A flag that changed
+    // which probes run must not change that, and the state a machine reader parses is the same
+    // "unprobed" the SessionStart hook already produces, not a new word for it.
+    const repo = copyFixture();
+    wireMissingHook(repo);
+
+    const { lines, thrown } = record(() => {
+      doctorCommand(repo, { json: true, skipHooks: true });
+    });
+
+    expect(thrown).toBeUndefined();
+    expect(lines).toHaveLength(1);
+    const health = JSON.parse(lines[0] ?? "") as Health;
+    expect(health.hooks.state).toBe("unprobed");
+    expect(health.hooks.hooks.map((hook) => hook.state)).toEqual(["unprobed"]);
+    expect(health.findings).toEqual([]);
   });
 });
 

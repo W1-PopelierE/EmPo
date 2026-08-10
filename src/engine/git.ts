@@ -165,6 +165,15 @@ export interface ShellResult {
  * says "command not found" and exits **127**, a number. 127 must survive as a number here, because
  * that is how the caller tells "the hook is wired to something that is not installed" from "no
  * process could be started at all", which is the only case that reports null.
+ *
+ * **The command line comes out of the repository under report, and it reaches a shell whole.** A
+ * wired hook is a `command` string somebody wrote into `.claude/settings.json`, and shell syntax in
+ * it is honoured here exactly as the host would honour it, which is the point of the probe and also
+ * its whole cost: nothing on this path validates, escapes or narrows that string, and the ownership
+ * test that selected it reads its shape rather than a signature (src/host/claude.ts). So the one
+ * decision this function cannot make is the caller's, and it is not a detail: whether the checkout
+ * the string was read from is a checkout whose commands may run at all. `empo doctor` states that
+ * boundary out loud and offers `--skip-hooks` for the answer "not yet" (docs/06-cli.md).
  */
 export function runShell(
   cwd: string,
