@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { loadConfig } from "../engine/config";
 import { writeAgents } from "../host/agents";
 import { type ClaudeFile, writeClaude } from "../host/claude";
+import { writeCodex } from "../host/codex";
 
 /**
  * `empo update`: regenerate the host instruction files from the shipped discipline plus this
@@ -20,12 +21,13 @@ import { type ClaudeFile, writeClaude } from "../host/claude";
 export function updateCommand(repoRoot: string): void {
   const { config, path } = loadConfig(repoRoot);
 
-  // The Claude target first, because it is the one that can refuse: an unreadable settings.json
-  // throws, and throwing before AGENTS.md is rewritten leaves the repository exactly as it was
-  // rather than half regenerated.
+  // Claude first, because it is the one target that can refuse: an unreadable settings.json throws.
+  // Do that before any generated file changes, then write the two skill targets and the shared
+  // instruction block from the same config.
   const claude = writeClaude(repoRoot, config);
+  const codex = writeCodex(repoRoot, config);
   const agents = writeAgents(repoRoot, config);
-  const files = [{ path: agents.path, state: agents.state }, ...claude];
+  const files = [{ path: agents.path, state: agents.state }, ...claude, ...codex];
 
   console.log("");
   console.log(`config     ${path}`);
@@ -42,8 +44,8 @@ export function updateCommand(repoRoot: string): void {
   }
 
   console.log("OK  host instructions regenerated from this config");
-  console.log("    In AGENTS.md only the block between the empo markers changed, and in");
-  console.log("    settings.json only the hook entries empo wrote. The rest of both is yours.");
+  console.log("    In AGENTS.md only the block between the empo markers changed; settings.json");
+  console.log("    keeps every non-EmPo entry; and the skill files are regenerated whole.");
 }
 
 /**

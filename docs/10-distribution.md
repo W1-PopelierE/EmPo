@@ -39,7 +39,7 @@ empo/
       tracker/       mcp, github-issues, none
       host-input.ts  the gate: read an agent-fetched payload, check it against git
     discipline/      the shipped review and map markdown + the gate over what comes back
-    host/            the AGENTS.md and .claude/ generators, one module per target
+    host/            the AGENTS.md, .claude/ and .codex/ generators, one module per target
     schema/          JSON Schema for config.json, flows.json, spines/*.json, graph.json
   fixtures/          synthetic corpora for pack tests (NO real target code, ever)
 ```
@@ -335,9 +335,9 @@ integration each.
 
 ## The `.claude/` configuration
 
-The second host target, and the one an instruction file cannot replace: an instruction is advice, a
+The Claude host target, and the one an instruction file cannot replace: an instruction is advice, a
 hook is a gate. `empo init` writes it, `empo update` regenerates it, and `--no-host` skips it exactly
-as it skips `AGENTS.md`.
+as it skips the other host artifacts.
 
 **It is not a plugin, and that is a correction to this document.** An earlier version of this section
 specified a Claude Code plugin with `/empo:query` and `/empo:review`. The colon is a *plugin*
@@ -499,13 +499,35 @@ reads `AGENTS.md` gets the instructions above. What it adds is the manual steps 
 hooks that turn a rule stated in a file into something that fires while an agent works. It holds no
 knowledge of its own.
 
+## The `.codex/` configuration
+
+Codex receives the same repository-local workflows without a plugin or marketplace installation.
+`empo init` writes the skill files for a new project and `empo update` regenerates them from that
+project's config:
+
+```
+.codex/
+  skills/
+    empo-query/SKILL.md     generated whole, EmPo owns the file
+    empo-review/SKILL.md    generated whole, EmPo owns the file
+    empo-map/SKILL.md       generated whole, EmPo owns the file
+```
+
+Like their Claude counterparts, these files are generated from `discipline/` plus the project config
+and must not be hand-edited. `AGENTS.md` provides the shared repository instructions for both hosts.
+Codex has no generated equivalent of Claude's `settings.json` hooks: it receives the skills and
+instructions, while `empo check` in CI remains the enforcement mechanism that applies to every host.
+`--no-host` skips this tree together with the `AGENTS.md` and Claude targets.
+
 ## Host integration is generated, not hand-written per host
 
 `empo update` regenerates every host artifact from one source (`discipline/` + config). Today that is
-two targets, `AGENTS.md` and `.claude/`. Supporting a new agent host is a new generator target, not a
-rewrite of the discipline, and not a branch inside an existing generator either: the second target
-landed as a second module under `src/host/`. This is exactly why OpenSpec can claim many supported
-tools: the instructions are generated, so breadth is cheap.
+three targets: `AGENTS.md`, `.claude/` and `.codex/`. The shared instruction file and both host skill
+trees carry the same EmPo workflows. Claude additionally has automatic hooks through
+`.claude/settings.json`; Codex has no generated hook configuration. Supporting a new agent host is a
+new generator target, not a rewrite of the discipline, and not a branch inside an existing generator.
+This is exactly why OpenSpec can claim many supported tools: the instructions are generated, so
+breadth is cheap.
 
 ## CI usage
 

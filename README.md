@@ -49,13 +49,18 @@ modesty: reflection and dynamic dispatch add reach no static graph can see.
 ## Quick start
 
 ```sh
-empo init      # detect languages, scaffold .empo/, wire the host
+empo init      # detect languages, scaffold .empo/, generate agent-host wiring
 empo index     # build .empo/generated/graph.json from source
 empo query PriceCalculator
 ```
 
 `empo index` is the only command that writes the graph, and nothing under `.empo/generated/` is
 meant to be hand-edited. Everything else in `.empo/` is yours.
+
+`empo init` and `empo update` generate repository-local agent support. Both Claude Code and Codex
+receive the shared `AGENTS.md` instructions and the three `empo-*` skills. Claude additionally
+receives its automatic hooks through `.claude/settings.json`; Codex has no equivalent generated hook
+configuration, so `empo check` in CI remains the enforcement gate.
 
 ## Install
 

@@ -16,6 +16,7 @@ import { loadConfig } from "../../src/engine/config";
 import { EmpoError } from "../../src/errors";
 import { AGENTS_PATH, EMPO_BEGIN, EMPO_END, renderAgentsBlock } from "../../src/host/agents";
 import { SETTINGS_PATH, SKILL_NAMES, skillPath } from "../../src/host/claude";
+import { codexSkillPath } from "../../src/host/codex";
 
 /**
  * `empo update` over the acme fixture: regenerate the host instructions from the shipped discipline
@@ -144,6 +145,8 @@ describe("the managed block", () => {
     for (const name of SKILL_NAMES) {
       expect(printed).toContain(`host       created   ${skillPath(name)}`);
       expect(existsSync(join(repo, skillPath(name)))).toBe(true);
+      expect(printed).toContain(`host       created   ${codexSkillPath(name)}`);
+      expect(existsSync(join(repo, codexSkillPath(name)))).toBe(true);
     }
     expect(existsSync(join(repo, SETTINGS_PATH))).toBe(true);
 
@@ -176,10 +179,11 @@ describe("the managed block", () => {
 
     const written = agents(repo);
     expect(printed).toContain(`host       updated   ${AGENTS_PATH}`);
-    // Two host targets now, so the closing line can no longer speak of "the file". It names what
-    // empo owns in each: the marker block in one, the hook entries it wrote in the other.
+    // The closing line names the three ownership boundaries: the marker block, merged settings,
+    // and skill files regenerated whole.
     expect(printed).toContain("only the block between the empo markers changed");
-    expect(printed).toContain("The rest of both is yours");
+    expect(printed).toContain("settings.json");
+    expect(printed).toContain("skill files are regenerated whole");
 
     expect(written.startsWith(HUMAN_ABOVE)).toBe(true);
     expect(written.endsWith(HUMAN_BELOW)).toBe(true);
