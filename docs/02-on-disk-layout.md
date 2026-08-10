@@ -7,7 +7,7 @@ generated ones.
 
 ## The `.empo/` directory
 
-```
+```text
 <target-repo>/
   .empo/
     config.json          layer 4. adapters, roots, bridges, pack selection. Human-owned.
@@ -67,7 +67,7 @@ a machine with no `empo` installed, where every hook fails open; that is deliber
 
 Recommended default, and what `empo init` writes into `.empo/.gitignore`:
 
-```
+```text
 # .empo/.gitignore
 generated/
 ```

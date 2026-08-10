@@ -23,7 +23,7 @@ Both are enforced regardless of language or forge.
 
 ## The pipeline
 
-```
+```text
 0. ticket first          find the tracker ticket BEFORE reading the diff, extract acceptance criteria
 1. fetch + isolate       PR metadata via forge adapter; branch into a detached worktree
 2. blast radius          empo query every changed symbol; name every flow and every spine it touches
