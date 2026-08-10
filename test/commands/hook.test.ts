@@ -352,6 +352,53 @@ describe("empo hook session-start", () => {
     expect(hookAnswer("session-start", { cwd: repo }, { repo })).toBeNull();
   });
 
+  test("stays silent over hooks that could never run, because it runs none of them", () => {
+    // The recursion guard, asserted from the outside. `healthReport` executes every wired hook to
+    // prove the command resolves, and this function is one of those hooks: with the default probes
+    // `empo hook session-start` would spawn `empo hook session-start`, and three subprocesses do
+    // not fit the 10 second budget the host kills this event at either. So the session asks for the
+    // quiet probes and the hook block contributes no finding at all.
+    //
+    // The command below is wired to a path that exists nowhere, which is the exact state doctor
+    // reports as an error: run, it exits 127 and the report stops being ok. If this call ever runs
+    // it, this assertion turns red, and it is red for the state a healthy repository is in.
+    mkdirSync(join(repo, ".claude"), { recursive: true });
+    writeFileSync(
+      join(repo, ".claude/settings.json"),
+      `${JSON.stringify(
+        {
+          hooks: {
+            SessionStart: [
+              {
+                hooks: [
+                  {
+                    type: "command",
+                    command: `/no/such/place/empo hook session-start --repo "\${CLAUDE_PROJECT_DIR}"`,
+                  },
+                ],
+              },
+            ],
+            PreToolUse: [
+              {
+                matcher: "Edit|Write",
+                hooks: [
+                  {
+                    type: "command",
+                    command: `/no/such/place/empo hook pre-edit --repo "\${CLAUDE_PROJECT_DIR}"`,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    expect(hookAnswer("session-start", { cwd: repo }, { repo })).toBeNull();
+  });
+
   test("says nothing in a repository that was never indexed", () => {
     const fresh = repoWithConfigOnly();
 

@@ -417,6 +417,91 @@ function refuse(what: string, details: string[]): EmpoError {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Reading back what is wired
+// ---------------------------------------------------------------------------------------------
+
+export interface WiredHook {
+  /** The host event name the entry sits under, e.g. "SessionStart" or "PreToolUse". */
+  event: string;
+  /** The group's tool-name matcher, or null when the group has none. */
+  matcher: string | null;
+  /** The command string exactly as settings.json spells it, unexpanded. */
+  command: string;
+  /** The configured timeout in seconds, or null when the entry does not set one. */
+  timeout: number | null;
+}
+
+/**
+ * Every EmPo-owned hook currently wired in this repository's settings.json, in file order.
+ *
+ * The read-only counterpart of the merge above, and the only way to learn what is really wired
+ * without rewriting anything. `empo doctor` executes each of these to prove the command resolves and
+ * runs, because a hook whose binary is missing fails open (127, which the host treats as "other")
+ * and a repository with three broken hooks is indistinguishable from a clean one.
+ *
+ * **Every unreadable state is an empty list, and nothing throws.** No `.claude/`, no file, a file
+ * that cannot be read, JSON that does not parse, no `hooks` key, a `hooks` that is not an object:
+ * all of it means "no EmPo hook is wired here", which is the fact doctor renders. Refusing is
+ * `mergeSettings`'s job, because it is the one that rewrites the file and must never write over what
+ * it could not read; a section that only reports has nothing to protect by stopping the run, and a
+ * doctor that dies on a stray comma tells you nothing about the other twenty checks it never got to.
+ * Ownership is `isEmpoHook` and only `isEmpoHook`, so this list and what the merge would remove can
+ * never disagree.
+ */
+export function wiredHooks(repoRoot: string): WiredHook[] {
+  const hooks = settingsHooks(repoRoot);
+  if (!isRecord(hooks)) return [];
+
+  const found: WiredHook[] = [];
+  // Object key order, then array order, twice over: what comes back reads in the order somebody
+  // scrolling the file would meet it, which is what makes a doctor line findable by eye.
+  for (const [event, groups] of Object.entries(hooks)) {
+    if (!Array.isArray(groups)) continue;
+
+    for (const group of groups) {
+      if (!isRecord(group) || !Array.isArray(group.hooks)) continue;
+      // Shape-checked rather than trusted: this is hand-editable JSON, so a `matcher` that is a
+      // number and a `timeout` that is a string are both things a real file holds.
+      const matcher: HookGroup["matcher"] =
+        typeof group.matcher === "string" ? group.matcher : undefined;
+
+      for (const entry of group.hooks) {
+        if (!isEmpoHook(entry)) continue;
+        // `isEmpoHook` has already established `type` and a string `command`; `timeout` is optional
+        // in the type and unconstrained in the file, so it is the one field still worth checking.
+        const { command, timeout } = entry as HookCommand;
+        found.push({
+          event,
+          matcher: matcher ?? null,
+          command,
+          timeout: typeof timeout === "number" ? timeout : null,
+        });
+      }
+    }
+  }
+  return found;
+}
+
+/** The parsed `hooks` value, or undefined for every state this function refuses to make a fuss of. */
+function settingsHooks(repoRoot: string): unknown {
+  let text: string;
+  try {
+    // Not `read` above: that one asks `existsSync` first, which still leaves the race and the
+    // unreadable-file case to handle. One try/catch covers absent, unreadable and a directory.
+    text = readFileSync(join(repoRoot, SETTINGS_PATH), "utf8");
+  } catch {
+    return undefined;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return isRecord(parsed) ? parsed.hooks : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // The three skills
 // ---------------------------------------------------------------------------------------------
 

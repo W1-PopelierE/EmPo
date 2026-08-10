@@ -98,8 +98,13 @@ export function buildProgram(): Command {
     .description("Health check: config validity, unmapped directories, graph staleness")
     .option("--repo <path>", "repository root", process.cwd())
     .option("--json", "machine-readable output", false)
-    .action((options: { repo: string; json: boolean }) => {
-      doctorCommand(options.repo, { json: options.json });
+    // The one flag here that is about trust rather than output. Doctor runs each wired hook command
+    // through a shell to prove it resolves, so pointing it at a checkout runs what that checkout's
+    // .claude/settings.json says; this is the way to read the rest of the report first
+    // (commands/doctor.ts on `skipHooks` argues the whole of it).
+    .option("--skip-hooks", "report the wired hooks without running them", false)
+    .action((options: { repo: string; json: boolean; skipHooks: boolean }) => {
+      doctorCommand(options.repo, { json: options.json, skipHooks: options.skipHooks });
     });
 
   // The one command whose caller is a host rather than a person, so it is the one command that

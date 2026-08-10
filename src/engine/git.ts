@@ -141,6 +141,83 @@ export function run(cwd: string, command: string, args: string[]): CommandResult
   }
 }
 
+export interface ShellResult {
+  /** True only on exit code 0. */
+  ok: boolean;
+  /** The process exit code, or null when no process could be started at all. */
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+}
+
+/**
+ * One shell command, never throwing. Used to run a host hook command string the way the host
+ * itself does: through a shell, because the string contains shell syntax the host expands.
+ *
+ * `stdin: "ignore"` is what makes this safe to run unattended, and it is also what makes the probe
+ * meaningful. A hook binary reads its payload from stdin, so an ignored stdin hands it EOF: it
+ * exits immediately having done nothing, which is exactly what `empo doctor` wants. The run proves
+ * the command resolves and starts without letting it act on the repository.
+ *
+ * The distinction this returns is the whole reason the caller exists. Under `shell: true` there is
+ * always a shell to start, so a command that is not on PATH is not a spawn failure: the shell runs,
+ * says "command not found" and exits **127**, a number. 127 must survive as a number here, because
+ * that is how the caller tells "the hook is wired to something that is not installed" from "no
+ * process could be started at all", which is the only case that reports null.
+ *
+ * **The command line comes out of the repository under report, and it reaches a shell whole.** A
+ * wired hook is a `command` string somebody wrote into `.claude/settings.json`, and shell syntax in
+ * it is honoured here exactly as the host would honour it, which is the point of the probe and also
+ * its whole cost: nothing on this path validates, escapes or narrows that string, and the ownership
+ * test that selected it reads its shape rather than a signature (src/host/claude.ts). So the one
+ * decision this function cannot make is the caller's, and it is not a detail: whether the checkout
+ * the string was read from is a checkout whose commands may run at all. `empo doctor` states that
+ * boundary out loud and offers `--skip-hooks` for the answer "not yet" (docs/06-cli.md).
+ */
+export function runShell(
+  cwd: string,
+  commandLine: string,
+  env: Record<string, string>,
+  timeoutMs: number,
+): ShellResult {
+  try {
+    // No extendEnv: false. The hook must see the environment the host would have given it, with
+    // these entries laid on top, not a bare environment that fails for a reason the host never has.
+    const result = execaSync(commandLine, {
+      cwd,
+      env,
+      shell: true,
+      stdin: "ignore",
+      timeout: timeoutMs,
+    });
+    return {
+      ok: true,
+      exitCode: result.exitCode ?? 0,
+      stdout: result.stdout.trim(),
+      stderr: result.stderr.trim(),
+      timedOut: false,
+    };
+  } catch (error) {
+    const failure = error as {
+      exitCode?: number;
+      stdout?: string;
+      stderr?: string;
+      message?: string;
+      timedOut?: boolean;
+    };
+    return {
+      ok: false,
+      // Killed on timeout leaves no exit code, and neither does a shell that never started; both
+      // are the honest "no number to report" that null stands for.
+      exitCode: typeof failure.exitCode === "number" ? failure.exitCode : null,
+      stdout: (failure.stdout ?? "").trim(),
+      stderr: (failure.stderr ?? failure.message ?? "").trim(),
+      timedOut: failure.timedOut === true,
+    };
+  }
+}
+
 function git(cwd: string, args: string[]): string | null {
   const result = run(cwd, "git", args);
   return result.ok ? result.stdout : null;

@@ -29,7 +29,7 @@ tool, and adding the call quietly later would be the way that happens.
 | `empo review [<pr>]` | Run the review discipline over a PR or local diff | yes | only via `gh`; an `mcp` forge makes none |
 | `empo update` | Regenerate the host wiring, `AGENTS.md`, `.claude/` and `.codex/`, from this config | no | no |
 | `empo upgrade` | Replace this standalone binary with the latest GitHub Release | no | **yes**, and it is the only one |
-| `empo doctor` | Health: staleness, config validity, unmapped dirs, bridge match rates, unclaimed files, `commit` vs git | no | no |
+| `empo doctor` | Health: staleness, config validity, unmapped dirs, bridge match rates, unclaimed files, wired hooks that do not run, `commit` vs git | no | no |
 | `empo hook <event>` | Answer one host hook: payload on stdin, JSON on stdout, silence when all is well | no | no |
 | `empo pack test <name>` | Run a language pack against its fixtures | no | no |
 
@@ -682,15 +682,18 @@ are no assets to resolve, and both become live on the first release
 
 ## `empo doctor`
 
-Health check, no changes. Reports: graph staleness vs HEAD, config validity (bad roots, unknown
+Health check, and it writes nothing. It does execute one thing, and only one: each hook the host is
+wired to run, through a shell, which is a checkout-supplied command line and is why `--skip-hooks`
+exists (the hooks block below states that boundary in full). Reports: graph staleness vs HEAD, config validity (bad roots, unknown
 pack, malformed bridge, uncompilable `keyPattern`, an `aliases` target pointing at a directory that
 is not there), directories under no root, per-bridge match
 rate (a low rate usually means a mis-tuned `normalize`), any pack-version or graph-schema drift
 against the binary that would make the graph on disk answer differently from a rebuild, what the
-`adapters` block declares and whether this machine and this checkout can honour it, and whether
-the config's `commit` list still describes what git does with `.empo/generated`. It says nothing
-about test coverage: which flows nothing asserts on is `empo query --blind`, and doctor computes no
-coverage of its own. It also prints a spines line: how many spines there are, how
+`adapters` block declares and whether this machine and this checkout can honour it, whether every
+hook the host is wired to run actually runs, and whether the config's `commit` list still describes
+what git does with `.empo/generated`. It says nothing about test coverage: which flows nothing
+asserts on is `empo query --blind`, and doctor computes no coverage of its own. It also prints a
+spines line: how many spines there are, how
 many citations they state, and whether every anchor still resolves. Spine drift is a warning here and
 never an error, because `empo verify` is the command that exits 1 on it and a rotted spine still
 answers, loudly and in one place; a spine file that will not parse is a config error like any other.
@@ -709,10 +712,12 @@ choice.
 Nearly all of that is a fact rather than a finding, and the split is the SessionStart hook's doing:
 the hook prints every finding doctor produces, on every session, so a finding raised on a steady
 state is a hook somebody uninstalls. A finding is raised only where the config asks for something
-this machine or this checkout cannot give it, which is three things. Two are the adapters' and print
-in this block: a `github` forge or a `github-issues` tracker whose `gh` is not on PATH, each stating
-its own consequence, and an `origin` whose **kind** disagrees with the configured forge kind on a
-host detection knows by name, which is github.com, bitbucket.org, gitlab.com and their
+this machine or this checkout cannot give it, which is three things, plus the hooks block below,
+where what asks for something is the host's wiring rather than the config. Every one of them is a
+warning, so nothing doctor finds moves its exit code. Two are the adapters' and
+print in this block: a `github` forge or a `github-issues` tracker whose `gh` is not on PATH, each
+stating its own consequence, and an `origin` whose **kind** disagrees with the configured forge
+kind on a host detection knows by name, which is github.com, bitbucket.org, gitlab.com and their
 subdomains. On a host it does not know,
 `github.acme.com` and every other Enterprise install, mirror or ssh host alias, the same
 disagreement is printed as a fact and raises nothing, because each of those is a working setup
@@ -733,6 +738,85 @@ with `origin` is printed beside it and never warned about, because a fork workfl
 the fork and the config on the upstream and the human is the one who can tell that from a mistake.
 `host` is free text the engine may not branch on, so it is never compared at all. Where git cannot
 answer there is no origin clause at all, because an unread remote may not be reported as agreement.
+
+**A hooks line prints after the forge and tracker lines**, closing the wiring group, and it is the
+one line in the report that had to run something to know what it says. It takes one of three shapes:
+
+```text
+hooks      none wired, so no session runs empo
+hooks      3 wired, all ran clean
+hooks      3 wired, 2 ran clean, 1 broken (named below)
+```
+
+Doctor executes each wired hook the way the host runs it, because the hooks fail open by design
+([10-distribution](10-distribution.md)), and a hook whose command cannot be found is therefore
+silently indistinguishable from a clean repository: nothing is printed, no session complains, and
+the first person to find out is whoever expected a denial that never came. `empo --version` is not
+the check it looks like either. It is typed in an interactive shell, and an interactive shell is the
+one environment where a PATH problem never appears.
+
+It reads the EmPo-owned entries out of the repository's `.claude/settings.json` through the same
+ownership rule `empo update` merges by, the one on the `command` string described under that command
+above, so what doctor probes cannot disagree with what a regeneration would strip. Every unreadable
+state is `none wired` rather than an error: no file, JSON that will not parse, no `hooks` key.
+
+Each command is run through a shell, because a shell is what the host runs it through, with
+`CLAUDE_PROJECT_DIR` set to the repository root, because that is the variable the host expands
+inside the command string, and with stdin closed, so the hook reads EOF instead of an event and has
+nothing to answer while the run still proves that its command resolves and starts. The hook's own
+configured timeout, in seconds in `settings.json`, is the budget, since that is exactly when the
+host would kill it. Exit 0 is healthy. Exit 127 is the shell's own answer for a command it cannot
+find, so it is reported as not found rather than as a failure, because those are two different
+repairs. Any other non-zero is a failure, and a run past the budget is a timeout.
+
+**Every broken hook is a warning**, exactly as the adapter findings above are, and doctor still
+exits 0. What was broken here was the silence and never the exit code: doctor naming each broken
+hook out loud, and saying which failure it hit, is the whole of the repair. Exiting non-zero would
+break every environment where the hooks are irrelevant but doctor is legitimately run, and CI is
+the plain case: no agent session ever runs there, this repository's own hooks are wired to the bare
+`empo` spelling CI never installs, and CI additionally runs doctor under a deliberately stripped
+PATH to prove the binary needs no Node. A check that is permanently red in those places is the same
+false gate this feature exists to remove, only inverted. It is the precedent too: a hook command the
+shell cannot find is the same kind of fact about this machine's PATH as a `gh` that is not on it.
+The line itself only counts, because each broken hook is named on its own below the fact block, with
+its event, its command and the repair its particular failure asks for. A hook that ran clean says
+nothing. And what the whole block reports on is the machine that ran it, so it is no mitigation for
+a teammate who never runs `empo doctor` at all.
+
+**`empo doctor` is the only thing that ever executes a hook.** The SessionStart hook reaches the
+same health report with the probe left off, because a hook that ran the hooks would recurse into
+itself, and because the work does not fit the ten seconds the host allows a session to start in. So
+a healthy session still opens in silence and still spawns nothing.
+
+**Running a hook means running what the checkout says.** Every other line in this report is a file
+read, and this one is not: each wired `command` string is handed to a shell whole, so pointing
+`empo doctor` at a repository executes whatever that repository's `.claude/settings.json` puts in
+those strings, shell syntax and all. Ownership is decided by the **shape** of the command and never
+by a signature: an entry is EmPo's because it contains `empo hook `, which is what lets `empo
+update` merge without trampling a hand-edited entry, and it is also what makes a modified entry
+still ours. `empo hook session-start; <anything>` matches the ownership rule, is listed as a wired
+EmPo hook, and is run. A checkout can therefore choose what `empo doctor` executes on the machine
+that runs it.
+
+The honest mitigation is that this is not a new capability on that machine. The same string is what
+the Claude Code host would run at the next SessionStart, off the same file, through the same shell,
+so anybody who opens a session in that checkout has already granted it. What moves is the
+**ordering**, and that is the part worth naming: doctor is documented as a health check that makes
+no changes, and it is exactly the command somebody runs *before* opening a session, against a fresh
+clone or a branch they have not read, to decide whether the repository is in a state worth working
+in. A command reached for at that moment should not be the first thing to execute the repository's
+own instructions.
+
+So `--skip-hooks` is the answer for a checkout you do not trust yet: it reports on the wired hooks
+without running any of them. The hooks line becomes `hooks      N wired, not run`, which is the same
+state the SessionStart hook reaches, and no hook findings are raised, because nothing was observed
+and a clean report about an unexecuted command would be the verified-looking answer this whole block
+exists to prevent. Which hooks are wired is still printed, since that half is a file read and costs
+nothing, and every other line of the report is unchanged. Read it, read `.claude/settings.json`, and
+run doctor again without the flag once you are willing to open a session there.
+
+Hooks are a Claude Code concept. Codex gets the skills and `AGENTS.md` and no hooks at all, so a
+Codex-only repository reports none wired, which is a fact about that host and never a fault.
 
 **A flows line prints under the graph line**, and it is a count rather than a verdict: how many flows
 the graph was built with, and how many of the non-test files in that graph no flow claims
@@ -821,7 +905,9 @@ that has never been indexed is never reported), and when there is no git checkou
 still changes no behaviour: it adds and removes no ignore rule, and `.empo/.gitignore` is what git
 obeys. This is the first thing to run when an answer looks wrong.
 
-Flags: `--repo <path>`, `--json`. The JSON form exists because the SessionStart hook needs a health
+Flags: `--repo <path>`, `--json`, `--skip-hooks`. The last one is the trust boundary above and not
+an output choice: it is what to pass at a checkout whose `.claude/settings.json` you have not read.
+The JSON form exists because the SessionStart hook needs a health
 answer it does not have to parse out of prose, and a hook that reads sentences breaks the first time
 one is reworded. Both surfaces render one computed object and neither calculates anything of its own,
 so they cannot disagree about whether the graph is stale, which is the failure that would matter: a
@@ -844,7 +930,10 @@ empo hook pre-commit       run the commit gate over the staged diff and deny a c
 
 It reads the hook payload as JSON on **stdin** and writes its answer as JSON on **stdout**. The one
 flag is `--repo <path>`, which the generated `settings.json` fills from `${CLAUDE_PROJECT_DIR}`; the
-payload's own `cwd` is the fallback, and this process's working directory after that.
+payload's own `cwd` is the fallback, and this process's working directory after that. A closed stdin
+is EOF and not an event, which is what lets `empo doctor` run every wired hook as a liveness probe:
+the command resolves, starts and exits, with no event to answer. Doctor is the only caller that runs
+these outside a session, and its own section above says why it has to.
 
 Four rules, and they are one idea: a hook that speaks on the happy path is a hook that gets deleted.
 
