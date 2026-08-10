@@ -711,7 +711,8 @@ Nearly all of that is a fact rather than a finding, and the split is the Session
 the hook prints every finding doctor produces, on every session, so a finding raised on a steady
 state is a hook somebody uninstalls. A finding is raised only where the config asks for something
 this machine or this checkout cannot give it, which is three things, plus the hooks block below,
-where what asks for something is the host's wiring rather than the config. Two are the adapters' and
+where what asks for something is the host's wiring rather than the config. Every one of them is a
+warning, so nothing doctor finds moves its exit code. Two are the adapters' and
 print in this block: a `github` forge or a `github-issues` tracker whose `gh` is not on PATH, each
 stating its own consequence, and an `origin` whose **kind** disagrees with the configured forge
 kind on a host detection knows by name, which is github.com, bitbucket.org, gitlab.com and their
@@ -766,13 +767,19 @@ host would kill it. Exit 0 is healthy. Exit 127 is the shell's own answer for a 
 find, so it is reported as not found rather than as a failure, because those are two different
 repairs. Any other non-zero is a failure, and a run past the budget is a timeout.
 
-**Every broken hook is an error finding**, which is where this block parts from the adapters above:
-those warn and leave the exit code alone, and this one makes doctor exit 2. A warning says the
-answers are worse than they should be, while a hook that does not run says a gate the repository
-believes it has is not there at all, and the false all-clear is the whole of what this costs. The
-line itself only counts, because each broken hook is named on its own below the fact block, with its
-event, its command and the repair its particular failure asks for. A hook that ran clean says
-nothing.
+**Every broken hook is a warning**, exactly as the adapter findings above are, and doctor still
+exits 0. What was broken here was the silence and never the exit code: doctor naming each broken
+hook out loud, and saying which failure it hit, is the whole of the repair. Exiting non-zero would
+break every environment where the hooks are irrelevant but doctor is legitimately run, and CI is
+the plain case: no agent session ever runs there, this repository's own hooks are wired to the bare
+`empo` spelling CI never installs, and CI additionally runs doctor under a deliberately stripped
+PATH to prove the binary needs no Node. A check that is permanently red in those places is the same
+false gate this feature exists to remove, only inverted. It is the precedent too: a hook command the
+shell cannot find is the same kind of fact about this machine's PATH as a `gh` that is not on it.
+The line itself only counts, because each broken hook is named on its own below the fact block, with
+its event, its command and the repair its particular failure asks for. A hook that ran clean says
+nothing. And what the whole block reports on is the machine that ran it, so it is no mitigation for
+a teammate who never runs `empo doctor` at all.
 
 **`empo doctor` is the only thing that ever executes a hook.** The SessionStart hook reaches the
 same health report with the probe left off, because a hook that ran the hooks would recurse into
@@ -929,7 +936,7 @@ Consistent across commands so they compose in CI and hooks:
 |------|---------|
 | 0 | success, nothing to flag |
 | 1 | a gate failed (`check` found an unguarded spine change, `verify` found drift, `index --check` found staleness, `pack test` found a fixture-snapshot mismatch) |
-| 2 | usage or config error (bad flags, invalid `config.json`, missing pack, a ref this repository does not know, a host payload that will not read or does not check out against git, an `upgrade` asked of a build that cannot replace itself, a wired host hook `doctor` ran and found broken) |
+| 2 | usage or config error (bad flags, invalid `config.json`, missing pack, a ref this repository does not know, a host payload that will not read or does not check out against git, an `upgrade` asked of a build that cannot replace itself) |
 | 3 | environment error (an adapter's CLI is missing or unauthenticated, git itself could not produce the diff, `upgrade` could not reach GitHub, found no release asset for this platform, failed the checksum, or could not write the target path) |
 
 `empo review` never fails the build on its findings; a review reports, it does not gate. Only the

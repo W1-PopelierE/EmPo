@@ -427,17 +427,29 @@ function hookRunState(result: ShellResult): HookRunState {
 /**
  * One broken hook as a finding, or null where it ran clean.
  *
- * Error and not warning, on the argument `unloadablePackFinding` makes below: a warning says the
- * answers are worse than they should be, and this says a gate the repository believes it has is not
- * running at all. Every one of these sentences names the event, because a settings.json holds
- * several entries and "a hook is broken" is not a thing anybody can go and fix.
+ * Warn and not error, which is the one place `unloadablePackFinding` below argues the other way. The
+ * silence was the bug here and never the exit code: a hook fails open, so a repository enforcing
+ * nothing printed exactly what a repository enforcing everything printed, and doctor naming the
+ * event, the command and which of the three failures it hit is the whole of the repair. Exiting
+ * non-zero on top of that would break every environment where hooks are irrelevant and doctor is
+ * legitimately run. CI runs the built binary's `doctor` on a machine that deliberately has no `empo`
+ * on PATH, because this repository's own settings.json wires the bare spelling, and the stripped-PATH
+ * run that proves the binary needs no Node can never satisfy that command by construction. No agent
+ * session runs there at all, so "this hook cannot run" is a true statement about a machine where it
+ * does not matter, and a check that is permanently red in those places is the same false gate this
+ * probe exists to remove, only inverted.
+ *
+ * The precedent is `gh` a few blocks up: an adapter CLI that is not on PATH is a warning, and a hook
+ * command PATH cannot find is the same kind of fact about this machine. Every one of these sentences
+ * names the event, because a settings.json holds several entries and "a hook is broken" is not a
+ * thing anybody can go and fix.
  */
 function brokenHook(hook: WiredHook, report: HookReport): HealthFinding | null {
   const runs = `hook ${report.event} runs "${report.command}"`;
 
   if (report.state === "not-found") {
     return {
-      level: "error",
+      level: "warn",
       message:
         `${runs}, and that command could not be found, so this hook fails open on every ` +
         `${report.event} and enforces nothing. Install empo where the command names it ` +
@@ -452,7 +464,7 @@ function brokenHook(hook: WiredHook, report: HookReport): HealthFinding | null {
     const exit =
       report.exitCode === null ? "and no process started" : `and exited ${report.exitCode}`;
     return {
-      level: "error",
+      level: "warn",
       message:
         `${runs}, ${exit}, so this hook fails open on every ${report.event} and enforces nothing. ` +
         "Run the command by hand to see what it printed.",
@@ -461,7 +473,7 @@ function brokenHook(hook: WiredHook, report: HookReport): HealthFinding | null {
 
   if (report.state === "timeout") {
     return {
-      level: "error",
+      level: "warn",
       message:
         `${runs}, which did not finish inside its ${hook.timeout ?? 10} second timeout, so the ` +
         `host kills it and every ${report.event} passes unenforced. Find out what the command is ` +

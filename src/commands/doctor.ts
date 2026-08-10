@@ -147,10 +147,11 @@ export function trackerLine(tracker: TrackerHealth): string {
 /**
  * The host hooks this repository wires, and how they came back.
  *
- * Counted and never described, because every broken hook is already an error finding a few lines
- * below with its event, its command and its repair spelled out (engine/health.ts). Restating one
- * here would be the same sentence twice, and a count is the one thing the findings cannot give: a
- * reader looking at two ERROR lines cannot tell whether that is two of two or two of nine, and
+ * Counted and never described, because every broken hook is already a warn finding a few lines
+ * below with its event, its command and its repair spelled out (engine/health.ts, which argues why
+ * a hook nobody can run leaves doctor's exit code alone). Restating one here would be the same
+ * sentence twice, and a count is the one thing the findings cannot give: a reader looking at two
+ * warn lines cannot tell whether that is two of two or two of nine, and
  * "two of nine" is a wiring that mostly works while "two of two" is a repository enforcing nothing.
  * So the clean number is printed beside the broken one even when it is zero, the way `flowLine`
  * prints an earned zero.

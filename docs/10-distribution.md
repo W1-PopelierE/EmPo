@@ -492,9 +492,16 @@ inside it, and with stdin closed, so the hook reads EOF immediately and does not
 proving that its command resolves and starts. Each hook's own configured timeout is its budget, since
 that is exactly when the host would kill it. Exit 0 is healthy; exit 127 is the shell's own answer
 for a command it cannot find, so it is reported as not found rather than as a failure; any other
-non-zero is a failure, and a run past its budget is a timeout. Every broken hook is an error-level
-finding, so a repository whose hooks are all failing open makes `empo doctor` exit non-zero instead
-of reporting an all-clear it has no basis for.
+non-zero is a failure, and a run past its budget is a timeout. Every broken hook is a **warning**,
+and `empo doctor` still exits 0: what was broken here was the silence and never the exit code, so
+naming each broken hook and the failure it hit is the whole of the repair. A non-zero would break
+every environment where the hooks are irrelevant but doctor is legitimately run, and CI is the plain
+case, since no agent session ever runs there, this repository's own hooks are wired to the bare
+`empo` spelling CI never installs, and CI additionally runs doctor under a deliberately stripped PATH
+to prove the binary needs no Node. A check that is permanently red in those places is the same false
+gate this feature exists to remove, only inverted. It is the precedent as well: a missing adapter CLI
+is a warning and no adapter ever makes doctor exit non-zero ([06-cli](06-cli.md)), and a hook command
+the shell cannot find is the same kind of fact about this machine's PATH.
 
 **`empo doctor` is the only thing that ever executes a hook.** The SessionStart hook reaches the same
 health report through a seam that leaves the probe unset, because a hook that ran the hooks would

@@ -1778,7 +1778,9 @@ describe("hookHealth", () => {
     expect(health.hooks[0]?.state).toBe("not-found");
     expect(health.hooks[0]?.exitCode).toBe(127);
     expect(findings).toHaveLength(1);
-    expect(findings[0]?.level).toBe("error");
+    // The level, pinned explicitly, because the level is exactly what regressed: an error here made
+    // every CI run and every stripped-PATH run exit 2 over a hook no session was ever going to fire.
+    expect(findings[0]?.level).toBe("warn");
     expect(findings[0]?.message).toContain("hook PreToolUse");
     expect(findings[0]?.message).toContain("could not be found");
     expect(findings[0]?.message).toContain("fails open");
@@ -1793,7 +1795,7 @@ describe("hookHealth", () => {
     expect(health.hooks[0]?.state).toBe("failed");
     expect(health.hooks[0]?.exitCode).toBe(1);
     expect(findings).toHaveLength(1);
-    expect(findings[0]?.level).toBe("error");
+    expect(findings[0]?.level).toBe("warn");
     expect(findings[0]?.message).toContain("hook SessionStart");
     // The number, because it is the one thing the run said and the first thing anybody
     // reproducing this compares against.
@@ -1811,7 +1813,7 @@ describe("hookHealth", () => {
     // would read as a verdict the command never gave.
     expect(health.hooks[0]?.exitCode).toBeNull();
     expect(findings).toHaveLength(1);
-    expect(findings[0]?.level).toBe("error");
+    expect(findings[0]?.level).toBe("warn");
     expect(findings[0]?.message).toContain("hook SessionStart");
     expect(findings[0]?.message).toContain("5 second timeout");
   });
@@ -1851,15 +1853,18 @@ describe("hookHealth", () => {
     expect(calls[0]?.command).toContain(`\${CLAUDE_PROJECT_DIR}`);
   });
 
-  test("a broken hook is an error, so the whole report stops being ok", () => {
-    // The one thing a finding's level decides. A repository whose gates cannot run is not a
-    // repository with a warning about it, and `ok` is what every caller reads to say so.
+  test("a broken hook is a warning, so it is said out loud and the report stays ok", () => {
+    // The one thing a finding's level decides, and the direction it has to decide in. Saying which
+    // hook is broken is the repair; refusing the whole report over it would fail every machine that
+    // runs doctor and never runs a hook, which is CI, a container, and any stripped PATH.
     const repo = repoWithHooks([wired("PreToolUse", EDIT)]);
     const { probes } = runProbes([exited(127)]);
 
     const health = healthReport(repo, installedPackVersion, probes);
 
-    expect(health.ok).toBe(false);
+    // Not special-cased anywhere: `ok` is "no finding of level error", and a warn hook is not one.
+    expect(health.ok).toBe(true);
+    expect(health.findings.at(-1)?.level).toBe("warn");
     expect(health.hooks.state).toBe("probed");
     // Last of the list, after the spine warnings that have always closed it: every other finding is
     // about this repository, and this one is about the wiring around it.

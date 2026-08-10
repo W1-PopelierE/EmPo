@@ -700,9 +700,9 @@ describe("doctor flow line", () => {
  * state below is the result of really spawning a wired command, so a case that could only reach it
  * through `doctorCommand` would assert what this developer happens to have installed.
  *
- * What it must never do is restate a finding. Each broken hook already gets an ERROR line naming its
+ * What it must never do is restate a finding. Each broken hook already gets a warn line naming its
  * event, its command and its repair, so this line counts instead, and the count is the half the
- * findings cannot give: 2 ERROR lines are a mostly-working wiring at 2 of 9 and a repository
+ * findings cannot give: 2 warn lines are a mostly-working wiring at 2 of 9 and a repository
  * enforcing nothing at 2 of 2, and nothing else printed tells the two apart.
  */
 describe("doctor hook line", () => {
@@ -743,7 +743,7 @@ describe("doctor hook line", () => {
   test("one broken hook keeps the clean count beside it, which is what makes it readable", () => {
     // "1 broken" alone answers nothing: the reader cannot tell one of two from one of nine, and
     // those are a repository half enforcing and a repository nearly fine. The break itself is named
-    // in the ERROR line below, never here.
+    // in the warn line below, never here.
     expect(hookLine({ state: "probed", hooks: [ran("ok"), ran("not-found"), ran("ok")] })).toBe(
       "hooks      3 wired, 2 ran clean, 1 broken (named below)",
     );
@@ -751,7 +751,7 @@ describe("doctor hook line", () => {
 
   test("several broken hooks are one count, however differently each one failed", () => {
     // A timeout, a non-zero exit and a command nobody could find, and the line stays a count: the
-    // three repairs are different and each is spelled out in its own ERROR line, so naming them
+    // three repairs are different and each is spelled out in its own warn line, so naming them
     // here would print every one of them twice.
     expect(
       hookLine({
@@ -761,29 +761,49 @@ describe("doctor hook line", () => {
     ).toBe("hooks      4 wired, 1 ran clean, 3 broken (named below)");
   });
 
-  test("a wired hook whose command does not exist: the line, the ERROR, and exit 2", () => {
+  test("a wired hook whose command does not exist: the line, the warning, and exit 0", () => {
     // The bug this block was built for, end to end. The hook fails open by design, so before this
     // line the repository below printed a clean report and a closing OK while enforcing nothing.
+    // Saying so is the fix; the exit code is not, and this pins both halves of that in one run.
     //
     // The command is an absolute path under a directory that does not exist, so no PATH entry and
     // no local install on any machine can accidentally satisfy it, and the shell answers 127 at once.
     const repo = copyFixture();
     wireMissingHook(repo);
 
-    const { lines } = expectExit(2, () => {
+    const printed = capture(() => {
       doctorCommand(repo);
     });
-    const printed = lines.join("\n").split("\n");
 
     expect(printed).toContain("hooks      1 wired, 0 ran clean, 1 broken (named below)");
     // The finding is what says which hook and how to repair it, and the line above never repeats it.
     expect(printed).toContain(
-      `ERROR  hook SessionStart runs "${MISSING_HOOK_COMMAND}", and that command could not be ` +
+      `warn   hook SessionStart runs "${MISSING_HOOK_COMMAND}", and that command could not be ` +
         "found, so this hook fails open on every SessionStart and enforces nothing. Install empo " +
         "where the command names it (npm run install:local) or fix the command in " +
         ".claude/settings.json.",
     );
-    expect(printed.some((line) => line.includes("OK  config is valid"))).toBe(false);
+    // The closing line is back, and it is not a contradiction: the config is valid, and the warning
+    // above it is about the wiring around the config rather than about the config.
+    expect(printed.some((line) => line.includes("OK  config is valid"))).toBe(true);
+  });
+
+  test("a repository whose every wired hook is unfindable still exits 0, which is what CI runs", () => {
+    // The regression this level exists for, in the shape CI actually hits: ci.yml runs the built
+    // binary's `doctor` on a machine that deliberately has no `empo` on PATH, and one step strips
+    // PATH to /usr/bin:/bin on purpose to prove the binary carries its own Node. Every wired hook is
+    // unfindable there by construction, no agent session runs there at all, and an error-level hook
+    // finding made both steps permanently red over a gate nothing on that machine was ever going to
+    // fire. `capture` rethrows, so this fails loudly rather than quietly if doctor throws again.
+    const repo = copyFixture();
+    wireMissingHook(repo);
+
+    const printed = capture(() => {
+      doctorCommand(repo);
+    });
+
+    expect(printed.some((line) => line.startsWith("warn   hook SessionStart"))).toBe(true);
+    expect(printed.some((line) => line.startsWith("ERROR"))).toBe(false);
   });
 });
 
