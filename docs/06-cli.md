@@ -217,7 +217,7 @@ non-zero if the graph would change (a CI staleness gate).
 **A names block prints between the flows line and the built line**, one line per edge family whose
 rules resolve a bare name. On this repository's fixture:
 
-```
+```text
 names      hook     2 of 2 resolved
 names      template 1 of 1 resolved
 ```
@@ -241,7 +241,7 @@ graph rather than replace it. A full rebuild is fast enough that nothing has nee
 
 The core question. Accepts a file path or a short symbol name:
 
-```
+```bash
 empo query apps/api/app/Libraries/Price/PriceCalculator.php
 empo query PriceCalculator          # short name resolves if unambiguous
 empo query Order
@@ -267,7 +267,7 @@ Output (human-readable, and `--json` for machines):
 
 Modes:
 
-```
+```bash
 empo query --gods          # the 20 widest-blast-radius nodes, and a count of the rest
 empo query --blind         # flows where no test asserts on a produced value
 empo query --orphans       # code with zero consumers, minus what a framework resolves by name
@@ -607,7 +607,7 @@ release, compares its version against the running one, downloads the asset for t
 architecture together with its `.sha256`, verifies the checksum, and swaps the binary in place. Run
 it when you want a newer EmPo; nothing runs it for you.
 
-```
+```bash
 empo upgrade            # resolve, verify, replace
 empo upgrade --check    # say what would happen, write nothing
 empo upgrade --json     # the same answer as one document
@@ -838,7 +838,7 @@ never reach zero. Without a readable graph every field is `null` and the line re
 **A names block prints under the flows line**, one line per edge family whose rules resolve a bare
 name, and it is a count of the same kind. On this repository's fixture:
 
-```
+```text
 names      hook     2 of 2 resolved
 names      template 1 of 1 resolved
 ```
@@ -922,7 +922,7 @@ whose output is read by a machine rather than by a person. Three events, one com
 alternative is a shell one-liner inside generated JSON, and the hook contract belongs in code where
 it is tested.
 
-```
+```text
 empo hook session-start    a graph behind HEAD, a drifted spine, a root or pack that is not there
 empo hook pre-edit         deny a write under .empo/generated/, warn on a spine's guarded file
 empo hook pre-commit       run the commit gate over the staged diff and deny a commit that fails it

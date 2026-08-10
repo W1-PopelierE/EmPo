@@ -26,7 +26,7 @@ computation is the reason EmPo exists. The channel is not copied from it; that i
   inside it, so the target machine needs no Node and no npm.
 - **Repo layout** (the EmPo repo itself):
 
-```
+```text
 empo/
   src/
     commands/        init, index, query, verify, check, review, update, doctor, upgrade, pack
@@ -360,7 +360,7 @@ So the plugin buys a prettier name and costs the only thing that mattered: hooks
 everyone who cloned the repository, without anyone remembering them. EmPo generates standalone
 `.claude/` configuration instead, and takes the hyphen: `/empo-query`, `/empo-review`, `/empo-map`.
 
-```
+```text
 .claude/
   skills/
     empo-query/SKILL.md     generated whole, EmPo owns the file

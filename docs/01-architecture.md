@@ -5,7 +5,7 @@ coupling. Getting these two decompositions right is the whole design. Everything
 
 ## The four layers
 
-```
+```text
 ┌─ 4. ADAPTERS ──────────────────────────────────────────────────────────┐
 │   config, per project. Makes EmPo run in someone else's repo at all.    │
 │   forge: github | mcp | local             tracker: mcp | github-issues  │
@@ -50,7 +50,7 @@ feedback loop is what keeps the semantic layer worth having). The agent may neve
 A dependency graph that only reads imports sees one of the three ways code couples. In a
 monorepo it misses the two that cause the expensive bugs. EmPo models all three.
 
-```
+```text
 1. INTRA-LANGUAGE   import edges, resolved by a language pack
                     PHP:  use / inline \Acme\.. FQCN / Model::observe(...)
                     TS:   import / require / dynamic import()
@@ -106,7 +106,7 @@ because the app reached the backend through a level-2 string edge, not an import
 
 ## Data flow through the layers
 
-```
+```text
   repository files
         │
         ▼

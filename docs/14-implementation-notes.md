@@ -72,7 +72,7 @@ revisit it inside a pack's `module` escape hatch rather than in the engine.
 
 ## Repository layout (target state)
 
-```
+```text
 empo  (this repo)
   package.json
   tsconfig.json
