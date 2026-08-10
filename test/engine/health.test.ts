@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import { parseConfig } from "../../src/engine/config";
 import type { DetectedForge } from "../../src/engine/detect";
-import { run } from "../../src/engine/git";
+import { run, type ShellResult } from "../../src/engine/git";
 import { GRAPH_SCHEMA, installedPackVersion } from "../../src/engine/graph";
 import {
   adapterHealth,
@@ -13,10 +13,14 @@ import {
   flowHealth,
   type HealthProbes,
   healthReport,
+  hookHealth,
   nameHealth,
+  quietProbes,
+  systemProbes,
 } from "../../src/engine/health";
 import { loadPack } from "../../src/engine/pack-loader";
 import { configError, EmpoError } from "../../src/errors";
+import type { WiredHook } from "../../src/host/claude";
 import type { EmpoConfig } from "../../src/schema/config.schema";
 import type { Graph } from "../../src/schema/types";
 
@@ -1031,6 +1035,9 @@ describe("healthReport adapters", () => {
     return {
       commands,
       detected,
+      // Null, and this section never varies it: `adapterHealth` reads no hook, so a probe that
+      // could run one here would be a way for a case in this file to spawn a subprocess by accident.
+      runHook: null,
       commandExists: (command: string) => {
         commands.push(command);
         return answers.gh === true;
@@ -1616,5 +1623,307 @@ describe("checkConfig on a root's aliases", () => {
     );
 
     expect(findings.filter((finding) => finding.message.includes("aliases"))).toEqual([]);
+  });
+});
+
+/**
+ * The hooks, executed. A hook fails open by design (src/commands/hook.ts), so a hook whose command
+ * cannot be found is indistinguishable from a repository where every gate passed: the host runs it,
+ * the shell says "command not found", the exit is 127 and the session is silent exactly as a clean
+ * run is. Doctor had no hook line at all and its only executable probe was `commandExists("gh")`,
+ * so nothing anywhere checked that the wired command runs.
+ *
+ * Every case below substitutes `runHook`, for the reason the adapters section substitutes its two:
+ * a real run answers for the machine the suite happens to be on, and a spec that let it through
+ * would pin whether this developer has `empo` on PATH. The one case that does not substitute it
+ * asserts the probe itself, with a command that cannot depend on any of that.
+ *
+ * The distinction the whole section is about is which failure, not that there was one. A command
+ * that is missing, a command that ran and broke, and a command the host killed are three different
+ * repairs, and "the hook is broken" sends every one of them to the wrong place.
+ */
+describe("hookHealth", () => {
+  /** What the recorder keeps per call, which is everything the probe is handed. */
+  interface HookCall {
+    repoRoot: string;
+    command: string;
+    timeout: number | null;
+  }
+
+  /** The command shape `isEmpoHook` recognizes, which is the only kind this reads back. */
+  const SESSION = `empo hook session-start --repo "\${CLAUDE_PROJECT_DIR}"`;
+  const EDIT = `empo hook pre-edit --repo "\${CLAUDE_PROJECT_DIR}"`;
+
+  /**
+   * A fixture copy with these entries in `.claude/settings.json`, one group per entry so the group
+   * order and the file order are the same thing. Written as JSON rather than through
+   * `mergeSettings`, because what is under test is what `wiredHooks` reads back off a real file,
+   * and a hand-written file is also what a repository whose hooks broke actually holds.
+   */
+  function repoWithHooks(entries: WiredHook[]): string {
+    const repo = copyFixture();
+    const hooks: Record<string, unknown[]> = {};
+
+    for (const entry of entries) {
+      const command: Record<string, unknown> = { type: "command", command: entry.command };
+      if (entry.timeout !== null) command.timeout = entry.timeout;
+      const group: Record<string, unknown> = { hooks: [command] };
+      if (entry.matcher !== null) group.matcher = entry.matcher;
+      const groups = hooks[entry.event] ?? [];
+      groups.push(group);
+      hooks[entry.event] = groups;
+    }
+
+    mkdirSync(join(repo, ".claude"), { recursive: true });
+    writeFileSync(join(repo, ".claude/settings.json"), JSON.stringify({ hooks }, null, 2));
+    return repo;
+  }
+
+  function wired(event: string, command: string, timeout: number | null = null): WiredHook {
+    return { event, matcher: null, command, timeout };
+  }
+
+  /** A finished run at one exit code, with the two streams no case here reads. */
+  function exited(exitCode: number | null): ShellResult {
+    return { ok: exitCode === 0, exitCode, stdout: "", stderr: "", timedOut: false };
+  }
+
+  /** What `runShell` returns for a run the timeout killed: no exit code, and the flag. */
+  const KILLED: ShellResult = {
+    ok: false,
+    exitCode: null,
+    stdout: "",
+    stderr: "",
+    timedOut: true,
+  };
+
+  /**
+   * Probes that record every hook run and answer them in wiring order. The other two members are
+   * stubbed rather than inherited from `systemProbes`, so no case in this section can reach the
+   * machine for an answer about `gh` or about origin.
+   */
+  function runProbes(answers: ShellResult[]): { probes: HealthProbes; calls: HookCall[] } {
+    const calls: HookCall[] = [];
+    return {
+      calls,
+      probes: {
+        commandExists: () => false,
+        detectForge: () => null,
+        runHook: (repoRoot, hook) => {
+          calls.push({ repoRoot, command: hook.command, timeout: hook.timeout });
+          return answers[calls.length - 1] ?? exited(0);
+        },
+      },
+    };
+  }
+
+  test("no hook wired is a fact and never a finding, and nothing is run", () => {
+    // A Codex-only repository wires none of these, and so does one where `empo init` never ran.
+    // Both are choices rather than faults, and a finding here would fire on them forever.
+    const { probes, calls } = runProbes([]);
+
+    const { health, findings } = hookHealth(copyFixture(), probes);
+
+    expect(health).toEqual({ state: "none", hooks: [] });
+    expect(findings).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
+  test("runHook null lists the hooks and says outright that none of them was run", () => {
+    const repo = repoWithHooks([wired("SessionStart", SESSION), wired("PreToolUse", EDIT, 5)]);
+
+    const { health, findings } = hookHealth(repo, quietProbes);
+
+    // The state no reader may mistake for a verified one. "ok" on an entry nobody executed would
+    // claim the command resolves and exits clean, which is the exact claim this block exists to
+    // stop anybody from assuming, so the entries carry "unprobed" and not merely the block.
+    expect(health).toEqual({
+      state: "unprobed",
+      hooks: [
+        {
+          event: "SessionStart",
+          matcher: null,
+          command: SESSION,
+          state: "unprobed",
+          exitCode: null,
+        },
+        { event: "PreToolUse", matcher: null, command: EDIT, state: "unprobed", exitCode: null },
+      ],
+    });
+    // Nothing was proven, so nothing is claimed. An unexecuted hook is not a broken one.
+    expect(findings).toEqual([]);
+  });
+
+  test("every hook exits 0: probed, every entry ok, and the report says nothing", () => {
+    const repo = repoWithHooks([wired("SessionStart", SESSION), wired("PreToolUse", EDIT, 5)]);
+    const { probes } = runProbes([exited(0), exited(0)]);
+
+    const { health, findings } = hookHealth(repo, probes);
+
+    expect(health.state).toBe("probed");
+    expect(health.hooks.map((hook) => hook.state)).toEqual(["ok", "ok"]);
+    expect(health.hooks.map((hook) => hook.exitCode)).toEqual([0, 0]);
+    expect(findings).toEqual([]);
+  });
+
+  test("127 is the command not being found, and the finding says the hook enforces nothing", () => {
+    // The case the section exists for. Under `shell: true` a missing command is not a spawn
+    // failure: the shell starts, prints "command not found" and exits 127, which the host reads as
+    // "nothing to say" exactly as it reads a clean run.
+    const repo = repoWithHooks([wired("PreToolUse", EDIT)]);
+    const { probes } = runProbes([exited(127)]);
+
+    const { health, findings } = hookHealth(repo, probes);
+
+    expect(health.hooks[0]?.state).toBe("not-found");
+    expect(health.hooks[0]?.exitCode).toBe(127);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.level).toBe("error");
+    expect(findings[0]?.message).toContain("hook PreToolUse");
+    expect(findings[0]?.message).toContain("could not be found");
+    expect(findings[0]?.message).toContain("fails open");
+  });
+
+  test("any other non-zero is a run that failed, and the finding names the exit code", () => {
+    const repo = repoWithHooks([wired("SessionStart", SESSION)]);
+    const { probes } = runProbes([exited(1)]);
+
+    const { health, findings } = hookHealth(repo, probes);
+
+    expect(health.hooks[0]?.state).toBe("failed");
+    expect(health.hooks[0]?.exitCode).toBe(1);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.level).toBe("error");
+    expect(findings[0]?.message).toContain("hook SessionStart");
+    // The number, because it is the one thing the run said and the first thing anybody
+    // reproducing this compares against.
+    expect(findings[0]?.message).toContain("exited 1");
+  });
+
+  test("a killed run is a timeout, and the finding names the seconds the host allows", () => {
+    const repo = repoWithHooks([wired("SessionStart", SESSION, 5)]);
+    const { probes } = runProbes([KILLED]);
+
+    const { health, findings } = hookHealth(repo, probes);
+
+    expect(health.hooks[0]?.state).toBe("timeout");
+    // Never a number here: a process the host killed did not choose its exit code, and printing one
+    // would read as a verdict the command never gave.
+    expect(health.hooks[0]?.exitCode).toBeNull();
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.level).toBe("error");
+    expect(findings[0]?.message).toContain("hook SessionStart");
+    expect(findings[0]?.message).toContain("5 second timeout");
+  });
+
+  test("an entry with no timeout is reported against the host's 10 second default", () => {
+    const repo = repoWithHooks([wired("SessionStart", SESSION)]);
+    const { probes } = runProbes([KILLED]);
+
+    const { findings } = hookHealth(repo, probes);
+
+    expect(findings[0]?.message).toContain("10 second timeout");
+  });
+
+  test("the probe is run once per wired hook, with the repo root and the command as written", () => {
+    // Once each and never once for the file: two hooks that are both broken are two findings and
+    // two repairs, and a probe that ran the first and assumed the rest would report one of them.
+    const repo = repoWithHooks([wired("SessionStart", SESSION), wired("PreToolUse", EDIT, 5)]);
+    const { probes, calls } = runProbes([exited(0), exited(0)]);
+
+    hookHealth(repo, probes);
+
+    expect(calls).toEqual([
+      { repoRoot: repo, command: SESSION, timeout: null },
+      { repoRoot: repo, command: EDIT, timeout: 5 },
+    ]);
+  });
+
+  test("the command string is handed over unexpanded, with the host's variable still in it", () => {
+    // The probe is what expands `${CLAUDE_PROJECT_DIR}`, by handing it to a shell with that
+    // variable set. Expanding it here instead would run a command line the host never runs, and a
+    // quoting fault in the real string would be invisible.
+    const repo = repoWithHooks([wired("SessionStart", SESSION)]);
+    const { probes, calls } = runProbes([exited(0)]);
+
+    hookHealth(repo, probes);
+
+    expect(calls[0]?.command).toContain(`\${CLAUDE_PROJECT_DIR}`);
+  });
+
+  test("a broken hook is an error, so the whole report stops being ok", () => {
+    // The one thing a finding's level decides. A repository whose gates cannot run is not a
+    // repository with a warning about it, and `ok` is what every caller reads to say so.
+    const repo = repoWithHooks([wired("PreToolUse", EDIT)]);
+    const { probes } = runProbes([exited(127)]);
+
+    const health = healthReport(repo, installedPackVersion, probes);
+
+    expect(health.ok).toBe(false);
+    expect(health.hooks.state).toBe("probed");
+    // Last of the list, after the spine warnings that have always closed it: every other finding is
+    // about this repository, and this one is about the wiring around it.
+    expect(health.findings.at(-1)?.message).toContain("hook PreToolUse");
+  });
+
+  test("healthReport with quiet probes carries the hooks and adds no finding", () => {
+    const repo = repoWithHooks([wired("SessionStart", SESSION), wired("PreToolUse", EDIT, 5)]);
+
+    const health = healthReport(repo, installedPackVersion, quietProbes);
+
+    expect(health.hooks.state).toBe("unprobed");
+    expect(health.hooks.hooks).toHaveLength(2);
+    expect(health.findings.filter((finding) => finding.message.includes("hook "))).toEqual([]);
+  });
+
+  /**
+   * The real probe, which every case above substitutes. Two things about it can be wrong in a way
+   * no fake would ever show, and both are silent: the variable the host expands in the command
+   * string, and the unit the timeout is stated in.
+   */
+  describe("systemProbes.runHook", () => {
+    test("CLAUDE_PROJECT_DIR is the repo root, because that is what the command expands", () => {
+      const repo = copyFixture();
+
+      const result = systemProbes.runHook?.(repo, {
+        event: "SessionStart",
+        matcher: null,
+        // Harmless and self-reporting: it runs no empo and touches nothing, it only says back what
+        // the shell was given. A wrong or missing variable comes back as the empty string, which is
+        // the `--repo ""` a real hook would have resolved somewhere else from.
+        command: `printf %s "\${CLAUDE_PROJECT_DIR}"`,
+        timeout: null,
+      });
+
+      expect(result?.exitCode).toBe(0);
+      expect(result?.stdout).toBe(repo);
+    });
+
+    test("the configured timeout is seconds, so a run inside it survives and one past it is killed", () => {
+      const repo = copyFixture();
+
+      // Half a second of work against a one second budget. Read as milliseconds, this budget is
+      // 1ms and the command is killed before it starts, which is how a report that called every
+      // hook a timeout used to be produced.
+      const inside = systemProbes.runHook?.(repo, {
+        event: "SessionStart",
+        matcher: null,
+        command: "sleep 0.5",
+        timeout: 1,
+      });
+      expect(inside?.timedOut).toBe(false);
+      expect(inside?.exitCode).toBe(0);
+
+      // And the other direction, which is what stops the multiplication being applied twice: 30
+      // seconds of work against the same budget is killed, and this test finishes in about one.
+      const past = systemProbes.runHook?.(repo, {
+        event: "SessionStart",
+        matcher: null,
+        command: "sleep 30",
+        timeout: 1,
+      });
+      expect(past?.timedOut).toBe(true);
+      expect(past?.exitCode).toBeNull();
+    }, 20_000);
   });
 });

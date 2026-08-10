@@ -18,6 +18,7 @@ import {
   SETTINGS_PATH,
   SKILL_NAMES,
   skillPath,
+  wiredHooks,
   writeClaude,
 } from "../../src/host/claude";
 import type { EmpoConfig } from "../../src/schema/config.schema";
@@ -1006,5 +1007,145 @@ describe("writeClaude", () => {
 
     expect(written[3]).toEqual({ path: SETTINGS_PATH, state: "unchanged" });
     expect(read(SETTINGS_PATH)).toBe(theirs);
+  });
+});
+
+/**
+ * The read-only half, which `empo doctor` executes one by one to prove each hook resolves and runs.
+ * Its whole contract is that it is quiet: every state a merge would refuse over is a fact doctor
+ * renders as "nothing is wired", because a doctor that dies on a stray comma reports on none of the
+ * checks after it.
+ */
+describe("wiredHooks", () => {
+  test("says nothing about a repository with no .claude directory at all", () => {
+    expect(existsSync(join(repo, ".claude"))).toBe(false);
+    expect(wiredHooks(repo)).toEqual([]);
+  });
+
+  test("says nothing, rather than throwing, over a settings.json it cannot parse", () => {
+    // The same file `mergeSettings` refuses over, and correctly: that one is about to rewrite the
+    // bytes. This one only reports, and the malformed file is already named by `empo update`.
+    seed(SETTINGS_PATH, '{\n  // our settings\n  "model": "opus",\n}\n');
+
+    expect(() => wiredHooks(repo)).not.toThrow();
+    expect(wiredHooks(repo)).toEqual([]);
+  });
+
+  test("says nothing about a settings.json with no hooks at all", () => {
+    seed(SETTINGS_PATH, json({ permissions: { allow: ["Bash(npm run test:*)"] } }));
+
+    expect(wiredHooks(repo)).toEqual([]);
+  });
+
+  test("says nothing about a repository whose only hook is somebody else's", () => {
+    // Ownership is `isEmpoHook` and nothing else, so what this returns and what a regenerate would
+    // remove cannot disagree. A team's own gate is not EmPo's to report on.
+    seed(
+      SETTINGS_PATH,
+      json({
+        hooks: {
+          PreToolUse: [
+            { matcher: "Bash", hooks: [{ type: "command", command: "empo check --json" }] },
+          ],
+        },
+      }),
+    );
+
+    expect(wiredHooks(repo)).toEqual([]);
+  });
+
+  test("reads back the three hooks a real writeClaude wired, in file order", () => {
+    // Built by the writer rather than by hand, so this case tracks `empoHooks` instead of pinning a
+    // second copy of it that goes stale the day a hook changes.
+    writeClaude(repo, BARE);
+
+    const found = wiredHooks(repo);
+
+    expect(found.map((one) => [one.event, one.matcher, one.timeout])).toEqual([
+      // SessionStart takes no matcher: all of startup|resume|clear|compact|fork want the answer.
+      ["SessionStart", null, 10],
+      ["PreToolUse", "Edit|Write", 10],
+      // The longer timeout, because pre-commit computes the gate `empo check` does over a diff.
+      ["PreToolUse", "Bash", 20],
+    ]);
+    const written = Object.values(empoHooks(repo)).flatMap((groups) =>
+      groups.flatMap((group) => group.hooks),
+    );
+    expect(found.map((one) => one.command)).toEqual(written.map((one) => one.command));
+    // Unexpanded, exactly as the file spells it: doctor is what expands it, and a hook that fails
+    // because the variable never expanded is precisely what the section exists to catch.
+    expect(found[0]?.command).toContain(`--repo "\${CLAUDE_PROJECT_DIR}"`);
+  });
+
+  test("takes only EmPo's entries out of a group that holds both", () => {
+    // A team's own entry sitting beside EmPo's in one group, which the merge leaves exactly there.
+    seed(
+      SETTINGS_PATH,
+      json({
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: "Edit|Write",
+              hooks: [
+                { type: "command", command: "./scripts/lint-staged.sh", timeout: 5 },
+                { type: "command", command: "empo hook pre-edit --repo .", timeout: 10 },
+                { type: "command", command: "npx empo hook pre-edit" },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(wiredHooks(repo)).toEqual([
+      {
+        event: "PreToolUse",
+        matcher: "Edit|Write",
+        command: "empo hook pre-edit --repo .",
+        timeout: 10,
+      },
+    ]);
+  });
+
+  test("reports a missing timeout as null rather than inventing the default", () => {
+    // The host's own default is not EmPo's to state, and doctor prints what the file says.
+    seed(
+      SETTINGS_PATH,
+      json({
+        hooks: {
+          SessionStart: [{ hooks: [{ type: "command", command: "empo hook session-start" }] }],
+        },
+      }),
+    );
+
+    expect(wiredHooks(repo)).toEqual([
+      { event: "SessionStart", matcher: null, command: "empo hook session-start", timeout: null },
+    ]);
+  });
+
+  test("steps over the shapes a hand-edited file really holds", () => {
+    // Every one of these is a group or an event EmPo cannot read, and the merge passes each through
+    // untouched rather than deleting it. Reading is the same bargain: skip it, do not throw.
+    seed(
+      SETTINGS_PATH,
+      json({
+        hooks: {
+          PostToolUse: "all of them",
+          SessionEnd: [
+            "a string",
+            { matcher: "Bash" },
+            { hooks: "not an array" },
+            {
+              matcher: 7,
+              hooks: [{ type: "command", command: "empo hook session-start", timeout: "10" }],
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(wiredHooks(repo)).toEqual([
+      { event: "SessionEnd", matcher: null, command: "empo hook session-start", timeout: null },
+    ]);
   });
 });

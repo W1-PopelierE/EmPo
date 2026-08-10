@@ -3,11 +3,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { doctorCommand, flowLine, forgeLine, trackerLine } from "../../src/commands/doctor";
+import {
+  doctorCommand,
+  flowLine,
+  forgeLine,
+  hookLine,
+  trackerLine,
+} from "../../src/commands/doctor";
 import { hookAnswer } from "../../src/commands/hook";
 import { run } from "../../src/engine/git";
 import { GRAPH_SCHEMA } from "../../src/engine/graph";
-import type { ForgeHealth, TrackerHealth } from "../../src/engine/health";
+import type { ForgeHealth, HookReport, TrackerHealth } from "../../src/engine/health";
 import { healthReport } from "../../src/engine/health";
 import { loadPack } from "../../src/engine/pack-loader";
 import { EmpoError } from "../../src/errors";
@@ -183,6 +189,29 @@ function rewriteConfig(repo: string, change: (config: Record<string, unknown>) =
   writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
 }
 
+/**
+ * A hook command nothing on any machine can satisfy: an absolute path under a directory that does
+ * not exist, so no PATH entry and no local install of empo can accidentally answer for it, and the
+ * shell reports 127 immediately. It still ends in `empo hook `, which is what makes the entry EmPo's
+ * as far as `wiredHooks` is concerned (src/host/claude.ts).
+ */
+const MISSING_HOOK_COMMAND = "/empo-no-such-directory-4f21c/bin/empo hook session-start";
+
+/** The fixture with one real, wired, unrunnable hook: what a broken installation looks like. */
+function wireMissingHook(repo: string): void {
+  mkdirSync(join(repo, ".claude"), { recursive: true });
+  const settings = {
+    hooks: {
+      SessionStart: [
+        // A short timeout, so a machine that somehow does resolve the path still fails this fast
+        // rather than holding the suite for the host's ten second default.
+        { hooks: [{ type: "command", command: MISSING_HOOK_COMMAND, timeout: 5 }] },
+      ],
+    },
+  };
+  writeFileSync(join(repo, ".claude/settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
+}
+
 /** Destroy hop 0's anchor, which drifts the fixture spine by one hard citation. */
 function breakRoute(repo: string): void {
   const routes = linesOf(repo, ROUTES_FILE);
@@ -222,6 +251,11 @@ describe("doctor prose", () => {
       "bridges    2",
       "forge      not configured, so empo review reads the local diff",
       "tracker    not configured, so empo review grades no ticket-fit",
+      // The fixture has no `.claude/` at all, so this is the none state, and it is here for the
+      // reason the two adapter lines are: nothing else in a clean report mentions the hooks, and a
+      // repository whose every hook is broken used to print exactly this same block. Nothing is
+      // spawned to produce this line, because there is nothing wired to spawn.
+      "hooks      none wired, so no session runs empo",
       "spines     1, 7 citations, every anchor resolves",
       `graph      built against ${graph.builtAgainst.slice(0, 7)}, distance from HEAD unknown, ${graph.stats.nodes} nodes, ${graph.stats.edges} edges`,
       // The fixture curates three flows over 15 non-test files and leaves 5 of them out: the route
@@ -661,6 +695,98 @@ describe("doctor flow line", () => {
   });
 });
 
+/**
+ * The hook line, pinned through its renderer for the reason the adapter lines are: every probed
+ * state below is the result of really spawning a wired command, so a case that could only reach it
+ * through `doctorCommand` would assert what this developer happens to have installed.
+ *
+ * What it must never do is restate a finding. Each broken hook already gets an ERROR line naming its
+ * event, its command and its repair, so this line counts instead, and the count is the half the
+ * findings cannot give: 2 ERROR lines are a mostly-working wiring at 2 of 9 and a repository
+ * enforcing nothing at 2 of 2, and nothing else printed tells the two apart.
+ */
+describe("doctor hook line", () => {
+  /** One entry, only as far as the line reads it: the count and the per-hook state. */
+  function ran(state: HookReport["state"]): HookReport {
+    return {
+      event: "SessionStart",
+      matcher: null,
+      command: "empo hook session-start",
+      state,
+      exitCode: state === "ok" ? 0 : 127,
+    };
+  }
+
+  test("no hook wired is a plain fact, with no command to run and nothing to fix", () => {
+    // A Codex-only repository wires none of these and neither does one where `empo init` never ran,
+    // so this states the consequence and stops. A remedy here would scold somebody for a choice.
+    expect(hookLine({ state: "none", hooks: [] })).toBe(
+      "hooks      none wired, so no session runs empo",
+    );
+  });
+
+  test("wired but not run never reads as verified", () => {
+    // The state `commands/hook.ts` reaches through `quietProbes`, and the one that must never read
+    // as good news: these entries were listed off disk and nothing was executed, so "ran clean"
+    // about any of them would be the verified answer the whole block exists to stop anybody assuming.
+    expect(hookLine({ state: "unprobed", hooks: [ran("unprobed"), ran("unprobed")] })).toBe(
+      "hooks      2 wired, not run",
+    );
+  });
+
+  test("every wired hook running clean says so without a second count, and no remedy", () => {
+    expect(hookLine({ state: "probed", hooks: [ran("ok"), ran("ok"), ran("ok")] })).toBe(
+      "hooks      3 wired, all ran clean",
+    );
+  });
+
+  test("one broken hook keeps the clean count beside it, which is what makes it readable", () => {
+    // "1 broken" alone answers nothing: the reader cannot tell one of two from one of nine, and
+    // those are a repository half enforcing and a repository nearly fine. The break itself is named
+    // in the ERROR line below, never here.
+    expect(hookLine({ state: "probed", hooks: [ran("ok"), ran("not-found"), ran("ok")] })).toBe(
+      "hooks      3 wired, 2 ran clean, 1 broken (named below)",
+    );
+  });
+
+  test("several broken hooks are one count, however differently each one failed", () => {
+    // A timeout, a non-zero exit and a command nobody could find, and the line stays a count: the
+    // three repairs are different and each is spelled out in its own ERROR line, so naming them
+    // here would print every one of them twice.
+    expect(
+      hookLine({
+        state: "probed",
+        hooks: [ran("timeout"), ran("ok"), ran("failed"), ran("not-found")],
+      }),
+    ).toBe("hooks      4 wired, 1 ran clean, 3 broken (named below)");
+  });
+
+  test("a wired hook whose command does not exist: the line, the ERROR, and exit 2", () => {
+    // The bug this block was built for, end to end. The hook fails open by design, so before this
+    // line the repository below printed a clean report and a closing OK while enforcing nothing.
+    //
+    // The command is an absolute path under a directory that does not exist, so no PATH entry and
+    // no local install on any machine can accidentally satisfy it, and the shell answers 127 at once.
+    const repo = copyFixture();
+    wireMissingHook(repo);
+
+    const { lines } = expectExit(2, () => {
+      doctorCommand(repo);
+    });
+    const printed = lines.join("\n").split("\n");
+
+    expect(printed).toContain("hooks      1 wired, 0 ran clean, 1 broken (named below)");
+    // The finding is what says which hook and how to repair it, and the line above never repeats it.
+    expect(printed).toContain(
+      `ERROR  hook SessionStart runs "${MISSING_HOOK_COMMAND}", and that command could not be ` +
+        "found, so this hook fails open on every SessionStart and enforces nothing. Install empo " +
+        "where the command names it (npm run install:local) or fix the command in " +
+        ".claude/settings.json.",
+    );
+    expect(printed.some((line) => line.includes("OK  config is valid"))).toBe(false);
+  });
+});
+
 describe("doctor --json", () => {
   test("stdout is exactly one document, and it is the health report", () => {
     const repo = copyFixture();
@@ -715,6 +841,23 @@ describe("doctor --json", () => {
       forge: { kind: "local", host: null, slug: null, cli: null, remote: null },
       tracker: { kind: "none", host: null, project: null, cli: null },
     });
+  });
+
+  test("the document carries the hooks block, whole, in the state that spawns nothing", () => {
+    // The block a machine reader gets, and the fixture wires no hook, so this is the none state and
+    // no subprocess runs to produce it. A key the renderer knew about and the document did not
+    // would be a fact the two surfaces disagree on, which is what this and the adapters case above
+    // exist to stop.
+    const repo = copyFixture();
+
+    const { lines, thrown } = record(() => {
+      doctorCommand(repo, { json: true });
+    });
+
+    expect(thrown).toBeUndefined();
+    expect(lines).toHaveLength(1);
+    const health = JSON.parse(lines[0] ?? "");
+    expect(health.hooks).toEqual({ state: "none", hooks: [] });
   });
 
   test("the flow counts reach the document, and the unknown reaches it as null", () => {

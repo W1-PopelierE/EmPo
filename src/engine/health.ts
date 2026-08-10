@@ -4,12 +4,13 @@ import type { ForgeKind } from "../adapters/forge/types";
 import { forgeSlug } from "../adapters/forge/types";
 import type { TrackerKind } from "../adapters/tracker/types";
 import { EmpoError } from "../errors";
+import { type WiredHook, wiredHooks } from "../host/claude";
 import type { EmpoConfig } from "../schema/config.schema";
 import type { Graph, NameResolution } from "../schema/types";
 import { type BridgeReport, bridgeRoots } from "./bridger";
 import { loadConfig } from "./config";
 import { type DetectedForge, detectForge, recognizedHost } from "./detect";
-import { commandExists, ignoresPath } from "./git";
+import { commandExists, ignoresPath, runShell, type ShellResult } from "./git";
 import {
   graphDrift,
   graphPath,
@@ -279,10 +280,197 @@ export interface AdapterHealth {
 export interface HealthProbes {
   commandExists: (command: string) => boolean;
   detectForge: (repoRoot: string) => DetectedForge | null;
+  /** Runs one wired hook the way the host does, or null to leave them unexecuted. */
+  runHook: ((repoRoot: string, hook: WiredHook) => ShellResult) | null;
 }
 
 /** The probes that ask this machine. Every caller in the product leaves them alone. */
-export const systemProbes: HealthProbes = { commandExists, detectForge };
+export const systemProbes: HealthProbes = {
+  commandExists,
+  detectForge,
+  /**
+   * The host's own invocation, reproduced field for field, because a probe that runs the command
+   * differently proves nothing about the run that matters.
+   *
+   * `CLAUDE_PROJECT_DIR` is the variable the host expands in the command string (the generated
+   * settings.json spells `--repo "${CLAUDE_PROJECT_DIR}"`), so a probe that left it unset would run
+   * a different command line than the host does, and getting it wrong is the whole bug: an empty
+   * expansion is a `--repo ""` that resolves somewhere else, or a quoting error that reports a
+   * working hook as broken.
+   *
+   * The timeout is the hook's own configured budget and it is stated in **seconds**, so it is
+   * multiplied here (docs/10-distribution.md). The host kills the hook at exactly that, so a run
+   * that exceeds it is a run the host would have killed too, which is the fact worth reporting.
+   * Ten seconds is the host's default where the entry sets none.
+   */
+  runHook: (repoRoot, hook) =>
+    runShell(repoRoot, hook.command, { CLAUDE_PROJECT_DIR: repoRoot }, (hook.timeout ?? 10) * 1000),
+};
+
+/**
+ * The same probes with the hooks left alone, for the caller that is itself a hook.
+ *
+ * `commands/hook.ts` builds a health report on SessionStart, so executing the wired hooks from
+ * inside one is `empo hook session-start` spawning `empo hook session-start`, and three subprocesses
+ * do not fit the 10 second budget the host kills that event at either. The rest of the report is
+ * unchanged, because everything else about it is a file read.
+ */
+export const quietProbes: HealthProbes = { ...systemProbes, runHook: null };
+
+/**
+ * What happened when the wired hook was run the way the host runs it.
+ *
+ * `"unprobed"` is a state of the entry and not only of the block, and that is the point of it. A
+ * hook that was never executed has no result, and the only wrong answer here is one a reader can
+ * mistake for a verified one: `"ok"` on an entry nobody ran would say the command resolves and exits
+ * clean, which is exactly the claim the block exists to stop anybody from assuming. So `"ok"` means
+ * an observed zero exit and nothing else, `HookHealth.state` carries the same fact for the block,
+ * and the two cannot disagree because one is computed from the other.
+ */
+export type HookRunState = "ok" | "unprobed" | "not-found" | "failed" | "timeout";
+
+export interface HookReport {
+  event: string;
+  matcher: string | null;
+  command: string;
+  state: HookRunState;
+  /** The exit code observed, or null when the run timed out or no process started. */
+  exitCode: number | null;
+}
+
+export interface HookHealth {
+  /** "none": no EmPo hook is wired. "unprobed": hooks are wired but were not executed. "probed": every wired hook was run. */
+  state: "none" | "unprobed" | "probed";
+  hooks: HookReport[];
+}
+
+/**
+ * The wired hooks, executed. Doctor had no hook line at all until this landed, and its only
+ * executable probe was `commandExists("gh")`: nothing anywhere checked that the command the host is
+ * wired to run actually runs.
+ *
+ * That gap is invisible by construction, which is why it is worth a subprocess. A hook fails open on
+ * purpose (src/commands/hook.ts, invariant 3: never a non-zero exit, not even to deny), so a hook
+ * whose binary is not on PATH exits 127 and the host treats it as nothing to say. A repository with
+ * three broken hooks and a repository with three passing ones print the same thing, forever, and the
+ * first person to find out is whoever expected a denial that never came.
+ *
+ * So the failure is named rather than counted, because the three repairs are different: a command
+ * that could not be found is an install that is missing or a path that moved, a non-zero run is a
+ * command that resolved and then broke, and a timeout is a hook the host kills before it can answer.
+ * "The hook is broken" would send every one of them to the wrong place.
+ *
+ * **No hook wired is not a finding.** A Codex-only repository wires none of these, and neither does
+ * one where `empo init` has not run, and both of those are facts about a choice rather than faults.
+ */
+export function hookHealth(
+  repoRoot: string,
+  probes: HealthProbes = systemProbes,
+): { health: HookHealth; findings: HealthFinding[] } {
+  const wired = wiredHooks(repoRoot);
+  if (wired.length === 0) return { health: { state: "none", hooks: [] }, findings: [] };
+
+  const run = probes.runHook;
+  // Listed but not run, and said so entry by entry. The list is still worth printing: which hooks
+  // are wired is a fact a file read answers, and it is the half of the block that costs nothing.
+  if (run === null) {
+    return {
+      health: {
+        state: "unprobed",
+        hooks: wired.map((hook) => ({ ...listed(hook), state: "unprobed", exitCode: null })),
+      },
+      findings: [],
+    };
+  }
+
+  const hooks: HookReport[] = [];
+  const findings: HealthFinding[] = [];
+
+  for (const hook of wired) {
+    const result = run(repoRoot, hook);
+    const report: HookReport = {
+      ...listed(hook),
+      state: hookRunState(result),
+      // Null on a timeout whatever the platform reported, because a process the host killed did not
+      // choose its exit code and printing one would read as a verdict the command never gave.
+      exitCode: result.timedOut ? null : result.exitCode,
+    };
+    hooks.push(report);
+
+    const finding = brokenHook(hook, report);
+    if (finding !== null) findings.push(finding);
+  }
+
+  return { health: { state: "probed", hooks }, findings };
+}
+
+/** The three fields that come straight off the wiring, shared by the probed and unprobed paths. */
+function listed(hook: WiredHook): Pick<HookReport, "event" | "matcher" | "command"> {
+  return { event: hook.event, matcher: hook.matcher, command: hook.command };
+}
+
+/**
+ * Timeout first, because a killed run is the one case where the exit code is not the command's
+ * answer. After that the number decides: 127 is the shell saying it could not find the command
+ * (engine/git.ts on `runShell` says why that survives as a number), and everything else non-zero is
+ * a command that resolved and failed. A null exit code with no timeout is a process that never
+ * started, which is a failure the same way, and reported as one rather than as its own state: there
+ * is nothing a reader would do differently about it.
+ */
+function hookRunState(result: ShellResult): HookRunState {
+  if (result.timedOut) return "timeout";
+  if (result.exitCode === 0) return "ok";
+  if (result.exitCode === 127) return "not-found";
+  return "failed";
+}
+
+/**
+ * One broken hook as a finding, or null where it ran clean.
+ *
+ * Error and not warning, on the argument `unloadablePackFinding` makes below: a warning says the
+ * answers are worse than they should be, and this says a gate the repository believes it has is not
+ * running at all. Every one of these sentences names the event, because a settings.json holds
+ * several entries and "a hook is broken" is not a thing anybody can go and fix.
+ */
+function brokenHook(hook: WiredHook, report: HookReport): HealthFinding | null {
+  const runs = `hook ${report.event} runs "${report.command}"`;
+
+  if (report.state === "not-found") {
+    return {
+      level: "error",
+      message:
+        `${runs}, and that command could not be found, so this hook fails open on every ` +
+        `${report.event} and enforces nothing. Install empo where the command names it ` +
+        "(npm run install:local) or fix the command in .claude/settings.json.",
+    };
+  }
+
+  if (report.state === "failed") {
+    // The number, because it is the one thing the run said and the first thing anybody reproducing
+    // this will compare against. A process that never started has no number, and saying so is
+    // better than picking one.
+    const exit =
+      report.exitCode === null ? "and no process started" : `and exited ${report.exitCode}`;
+    return {
+      level: "error",
+      message:
+        `${runs}, ${exit}, so this hook fails open on every ${report.event} and enforces nothing. ` +
+        "Run the command by hand to see what it printed.",
+    };
+  }
+
+  if (report.state === "timeout") {
+    return {
+      level: "error",
+      message:
+        `${runs}, which did not finish inside its ${hook.timeout ?? 10} second timeout, so the ` +
+        `host kills it and every ${report.event} passes unenforced. Find out what the command is ` +
+        "waiting on, or raise the timeout in .claude/settings.json.",
+    };
+  }
+
+  return null;
+}
 
 export interface Health {
   configPath: string;
@@ -296,6 +484,8 @@ export interface Health {
   bridgeCount: number;
   /** Per-bridge match rate, from bridgeRoots(). Empty when there are no bridges or no readable graph. */
   bridges: BridgeReport[];
+  /** The host hooks this repository wires, and what each one did when it was run. */
+  hooks: HookHealth;
   adapters: AdapterHealth;
   graph: GraphHealth;
   /** The flow map against the files it could claim, all null without a readable graph. */
@@ -330,17 +520,26 @@ export function healthReport(
   const adapters = adapterHealth(config, repoRoot, probes);
   const spines = spineHealth(repoRoot, config);
   const graph = graphHealth(repoRoot, version);
+  const hooks = hookHealth(repoRoot, probes);
 
   // Config findings first, then the graph's own, then the spine ones. The graph's sit in the middle
   // because a pack that will not load is a broken installation like a missing root is, and the last
   // block has always been the spine warnings. The adapter findings join the first block, because
   // every one of them is a statement about the config being wrong about this machine or this
   // checkout, which is what the block above them already says.
+  //
+  // The hook findings go last, after the spine warnings that have always closed the list. They are
+  // the only block that is not about this repository at all: every other finding is a statement
+  // about the config, the packs, the graph or the spines, while these are about the wiring in the
+  // host's settings.json and the empo installation the host reaches. That is also the order somebody
+  // repairs them in, because a hook runs the very commands the blocks above report on, and a report
+  // read top to bottom should say what is wrong with the tool before what is wrong with running it.
   const findings = [
     ...checkConfig(config, repoRoot),
     ...adapters.findings,
     ...graph.findings,
     ...spines.findings,
+    ...hooks.findings,
   ];
 
   return {
@@ -352,6 +551,7 @@ export function healthReport(
     // Computed from the graph on disk, so this describes the graph as built, at the age the graph
     // section states. It reads nodes only, so no rebuild is needed (engine/bridger.ts).
     bridges: graph.graph === null ? [] : bridgeRoots(graph.graph.nodes, config.bridges).reports,
+    hooks: hooks.health,
     adapters: adapters.health,
     graph: graph.health,
     // Read off the same graph the bridge rates are, so the two describe one build rather than two.

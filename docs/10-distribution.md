@@ -238,7 +238,9 @@ politeness. The failure it prevents is the specific one this whole document is a
 exists on disk and cannot be found is indistinguishable, from a hook's side, from an `empo` that was
 never installed, and the hooks fail open in silence either way (see the hooks section below). An
 install that finished successfully and left the tool unreachable is the worst of the outcomes here,
-because it is the one nobody investigates.
+because it is the one nobody investigates. `empo doctor` now runs each wired hook the way the host
+runs it and names that failure, which makes the outcome findable after the fact; the warning is what
+keeps it from happening in the first place, and the two are not substitutes.
 
 ## Upgrading
 
@@ -470,15 +472,44 @@ responses, and the developer's own check cannot tell them apart either: `empo --
 interactive shell, which is the one environment where the second never appears. So a target below the
 floor reported health while three hooks failed open on every event.
 
-**The binary removes that second case and the report-level fixes it argued for are still worth
-having.** A hook pointed at a binary carrying its own interpreter cannot fail for the target's Node
-version, so the ambiguity collapses back to the honest one. What it does not cover is the first
-failure: an `empo` that was installed into a directory the user never put on PATH is unfindable, and
-nothing detects that either. So `empo doctor` executing each wired hook the way the host runs it
-remains open and remains the cheaper of the two fixes, and until it exists the honest statement is
-unchanged: the hooks are silent about their own absence, and CI is not a mitigation for a developer
-who has not wired one. `install.sh` warning about PATH is the mitigation that exists, and it only
-covers the machine that ran the script.
+**The binary removes that second case, and `empo doctor` now covers the first.** A hook pointed at a
+binary carrying its own interpreter cannot fail for the target's Node version, so the ambiguity
+collapses back to the honest one. What the binary does not cover is the failure that survives it: an
+`empo` installed into a directory the user never put on PATH is present on disk, is current, and is
+still unfindable. That is exactly the case `install.sh` prints its warning about, since its default
+target is `$HOME/.local/bin`, and it is a warning a user can scroll past. Doing so used to buy three
+hooks failing open on every event for as long as the repository lived, with nothing anywhere saying
+so, because the hooks were the only thing in a position to notice and failing open is precisely their
+refusal to notice out loud.
+
+**So `empo doctor` executes each wired hook the way the host runs it and reports which failure it
+hit.** It reads the EmPo-owned entries out of `.claude/settings.json` through the same ownership
+predicate the merge uses, so what it probes can never disagree with what `empo update` would strip,
+and every unreadable state (no file, unparseable JSON, no `hooks` key) is an empty list rather than a
+throw. Each command string is run through a shell, because a shell is what the host runs it through,
+with `CLAUDE_PROJECT_DIR` set to the repository root, because that is the variable the host expands
+inside it, and with stdin closed, so the hook reads EOF immediately and does nothing while still
+proving that its command resolves and starts. Each hook's own configured timeout is its budget, since
+that is exactly when the host would kill it. Exit 0 is healthy; exit 127 is the shell's own answer
+for a command it cannot find, so it is reported as not found rather than as a failure; any other
+non-zero is a failure, and a run past its budget is a timeout. Every broken hook is an error-level
+finding, so a repository whose hooks are all failing open makes `empo doctor` exit non-zero instead
+of reporting an all-clear it has no basis for.
+
+**`empo doctor` is the only thing that ever executes a hook.** The SessionStart hook reaches the same
+health report through a seam that leaves the probe unset, because a hook that ran the hooks would
+recurse into itself, and because the work does not fit the ten seconds the host allows a session to
+start in. So a healthy session still opens in silence and a session start still spawns nothing.
+Hooks are a Claude Code concept: Codex gets the skills and `AGENTS.md` and no hooks at all, so a
+Codex-only repository is reported as having none wired, which is a plain fact about that host and
+never a fault.
+
+**The residue is real and is not softened by the check existing.** It reports on the machine that ran
+it, so it is not a mitigation for a teammate who never runs `empo doctor`, any more than CI is a
+mitigation for a developer who has not wired one. `install.sh` warning about PATH still only covers
+the machine that ran the script. And `empo --version` still proves only that some `empo` answers this
+shell, which was never the question the hooks pose. What has changed is that the question can now be
+asked at all, by one command, from inside the repository it is about.
 
 **The wiring is target-dependent, which is now a leftover rather than a route.** Where the target has
 a `${CLAUDE_PROJECT_DIR}/node_modules/.bin/empo`, the generator writes that in-repo path; where it

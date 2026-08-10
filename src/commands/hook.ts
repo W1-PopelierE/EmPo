@@ -1,9 +1,15 @@
 import { realpathSync } from "node:fs";
 import { isAbsolute, posix, relative, resolve, sep } from "node:path";
 import { loadConfig } from "../engine/config";
-import { GRAPH_PATH, type PackDrift, type SchemaDrift, schemaDriftClause } from "../engine/graph";
+import {
+  GRAPH_PATH,
+  installedPackVersion,
+  type PackDrift,
+  type SchemaDrift,
+  schemaDriftClause,
+} from "../engine/graph";
 import { guardsPath } from "../engine/guard";
-import { healthReport } from "../engine/health";
+import { healthReport, quietProbes } from "../engine/health";
 import { loadSpines } from "../engine/spines";
 import { checkFacts, describeFailure, failedSpines, wantedPaths, wantedTerms } from "./check";
 
@@ -127,7 +133,17 @@ export async function hookCommand(event: string, options: HookOptions = {}): Pro
  * this is no answer at all, and the agent has no way to find that out except by asking and failing.
  */
 function sessionStart(repoRoot: string): string | null {
-  const health = healthReport(repoRoot);
+  // `quietProbes` and never the default ones, because this function is itself one of the hooks the
+  // report would execute. With the system probes, `empo hook session-start` spawns
+  // `empo hook session-start`, which is the one call in this file that can reach back into it. And
+  // even if it could not, the budget forbids it: the host kills a SessionStart hook at 10 seconds
+  // (docs/10-distribution.md) and there are three entries wired, so running them all would spend the
+  // whole allowance on proving something the session cannot act on anyway.
+  //
+  // Nothing is lost by staying quiet here. A hook the host cannot run is a finding for `empo doctor`,
+  // which is the command that has the time for it, and a session that opened by reporting its own
+  // hook as broken would be reporting it from inside a run that just proved otherwise.
+  const health = healthReport(repoRoot, installedPackVersion, quietProbes);
   // The guard that keeps a healthy session silent has to name every state the notes below are built
   // from, because a state it does not enumerate is a state the session can never mention however
   // loudly the code under it speaks. An unreadable graph was one such omission, and every warning

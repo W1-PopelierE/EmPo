@@ -5,6 +5,7 @@ import {
   type ForgeHealth,
   type GraphHealth,
   type Health,
+  type HookHealth,
   healthReport,
   type RequiredCommand,
   remoteLabel,
@@ -67,6 +68,13 @@ function renderProse(health: Health): void {
   // are not stated here they are stated nowhere, which is the gap this closed.
   console.log(forgeLine(health.adapters.forge));
   console.log(trackerLine(health.adapters.tracker));
+  // Last of the three wiring lines rather than beside `bridges`, because forge, tracker and hooks
+  // are the same kind of fact: what this repository is wired to outside its own files, and what
+  // happens when it is not. It closes that group instead of opening it for the reason the hook
+  // findings close the finding list (engine/health.ts): the other two say what empo does when it is
+  // asked, and this one says whether anything asks at all, which is the question that only makes
+  // sense once the reader knows what the asking would get them.
+  console.log(hookLine(health.hooks));
   console.log(spineLine(health.spines));
   console.log(graphLine(health.graph));
   // Directly under the age it contradicts, because that line can say "current with HEAD" and be
@@ -134,6 +142,47 @@ export function trackerLine(tracker: TrackerHealth): string {
   if (tracker.project !== null) clauses.push(`project ${tracker.project}`);
   if (tracker.cli !== null) clauses.push(cliClause(tracker.cli));
   return `tracker    ${clauses.join(", ")}`;
+}
+
+/**
+ * The host hooks this repository wires, and how they came back.
+ *
+ * Counted and never described, because every broken hook is already an error finding a few lines
+ * below with its event, its command and its repair spelled out (engine/health.ts). Restating one
+ * here would be the same sentence twice, and a count is the one thing the findings cannot give: a
+ * reader looking at two ERROR lines cannot tell whether that is two of two or two of nine, and
+ * "two of nine" is a wiring that mostly works while "two of two" is a repository enforcing nothing.
+ * So the clean number is printed beside the broken one even when it is zero, the way `flowLine`
+ * prints an earned zero.
+ *
+ * **None wired is a plain fact.** A Codex-only repository wires none of these and a checkout where
+ * `empo init` never ran wires none either, and neither is a fault, so this states the consequence
+ * and stops. No command is named because there is nothing here to repair.
+ *
+ * Exported for the reason `forgeLine` and `flowLine` are: it is a pure renderer, and the states
+ * behind it are answers about this machine. Reaching the probed ones through `doctorCommand` means
+ * spawning the wired commands, so a spec that could only get at them that way would assert what the
+ * developer running it happens to have installed.
+ */
+export function hookLine(hooks: HookHealth): string {
+  if (hooks.state === "none") return "hooks      none wired, so no session runs empo";
+
+  const wired = `${hooks.hooks.length} wired`;
+  // The list is real and worth its number even here: which hooks exist is a file read, and only the
+  // running of them was skipped (engine/health.ts on `quietProbes` says by whom, and why).
+  //
+  // No command is named, and the branch is unreachable from here on purpose. `doctorCommand` always
+  // probes, so the only producer of this state is the session hook, which renders no prose at all.
+  // Naming a command would mean telling a reader to run the one command that would have probed, and
+  // the only reader who could ever see this line got here from something else entirely.
+  if (hooks.state === "unprobed") return `hooks      ${wired}, not run`;
+
+  const broken = hooks.hooks.filter((hook) => hook.state !== "ok").length;
+  const clean = hooks.hooks.length - broken;
+  // "all ran clean" rather than repeating the count: a second number earns its place only when it
+  // is not the first one again, which is exactly the broken case below.
+  if (broken === 0) return `hooks      ${wired}, all ran clean`;
+  return `hooks      ${wired}, ${clean} ran clean, ${broken} broken (named below)`;
 }
 
 function cliClause(cli: RequiredCommand): string {
