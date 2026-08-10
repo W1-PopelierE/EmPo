@@ -16,6 +16,7 @@ import { loadSpines } from "../engine/spines";
 import { configError } from "../errors";
 import { writeAgents } from "../host/agents";
 import { writeClaude } from "../host/claude";
+import { writeCodex } from "../host/codex";
 import type { EmpoAdapters, EmpoConfig } from "../schema/config.schema";
 import { parseProposalFile } from "../schema/proposal.schema";
 import type { Graph, GraphNode } from "../schema/types";
@@ -38,9 +39,9 @@ import { indexCommand } from "./index";
  * is why there is no `--force`: the files it writes are human-owned from the moment they exist.
  *
  * The host wiring is the exception, and has to be, because none of it is human-owned. `writeClaude`
- * regenerates the `.claude/` files whole out of the config and `writeAgents` merges the managed
- * block, so both report `created`, `updated` or `unchanged` and neither can report `kept`. A skill
- * kept as it was found would go on describing the roots and packs of a config that has since
+ * and `writeCodex` regenerate their skill files whole out of the config and `writeAgents` merges
+ * the managed block, so all report `created`, `updated` or `unchanged` and none can report `kept`.
+ * A skill kept as it was found would go on describing the roots and packs of a config that has since
  * changed, which is the one outcome the wiring exists to prevent.
  */
 
@@ -146,19 +147,21 @@ function scaffoldPhase(repoRoot: string, options: InitOptions): void {
   if (options.host === false) {
     console.log("  skipped (--no-host). Nothing outside .empo/ was touched.");
   } else {
-    // Claude first, for the reason empo update does it in that order: this target can refuse, and
-    // refusing before AGENTS.md is written leaves the repository as it was.
+    // Claude first, for the reason empo update does it in that order: this target can refuse before
+    // the generated Codex skills or shared AGENTS.md change.
     const claude = writeClaude(repoRoot, config);
+    const codex = writeCodex(repoRoot, config);
     const agents = writeAgents(repoRoot, config);
-    for (const file of [{ path: agents.path, state: agents.state }, ...claude]) {
+    for (const file of [{ path: agents.path, state: agents.state }, ...claude, ...codex]) {
       console.log(`  ${file.state.padEnd(9)} ${relativeTo(repoRoot, file.path)}`);
     }
     console.log("");
-    console.log("  AGENTS.md is read by any host; the .claude/ files are Claude Code's. The three");
-    console.log("  hooks fire on their own, so the machine-owned directory and the commit gate");
-    console.log("  are enforced rather than merely stated. They need empo on PATH: when it is not");
-    console.log("  there a hook fails open and nothing is gated, which is why CI runs the gates");
-    console.log("  too (docs/10-distribution.md).");
+    console.log("  AGENTS.md is shared; .claude/ and .codex/ each hold the EmPo skills. Claude's");
+    console.log(
+      "  hooks fire on their own; Codex uses the skills and AGENTS.md. CI runs the gates",
+    );
+    console.log("  for every host, and Claude's hooks fail open when empo is not on PATH");
+    console.log("  (docs/10-distribution.md).");
   }
 
   // Step 4 exists so step 5 stands on real data rather than on a directory listing. A failure here

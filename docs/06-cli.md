@@ -27,7 +27,7 @@ tool, and adding the call quietly later would be the way that happens.
 | `empo verify` | Resolve every spine citation, report drift | no | no |
 | `empo check` | Commit gate: spine touched without a value-asserting test? | no | no |
 | `empo review [<pr>]` | Run the review discipline over a PR or local diff | yes | only via `gh`; an `mcp` forge makes none |
-| `empo update` | Regenerate the host wiring, `AGENTS.md` and `.claude/`, from this config | no | no |
+| `empo update` | Regenerate the host wiring, `AGENTS.md`, `.claude/` and `.codex/`, from this config | no | no |
 | `empo upgrade` | Replace this standalone binary with the latest GitHub Release | no | **yes**, and it is the only one |
 | `empo doctor` | Health: staleness, config validity, unmapped dirs, bridge match rates, unclaimed files, `commit` vs git | no | no |
 | `empo hook <event>` | Answer one host hook: payload on stdin, JSON on stdout, silence when all is well | no | no |
@@ -68,11 +68,12 @@ afterwards in a file they own. Steps, in order:
    For a repository with two or more languages and no bridge, init prints that cross-language reach
    reads as zero until a human configures one, because that answer is indistinguishable from the one
    a repository with no coupling at all would get.
-3. **Wire the host.** Two targets: the managed block in `AGENTS.md`, and the standalone `.claude/`
-   configuration, which is the three `empo-*` skills written whole plus EmPo's hook entries merged
-   into `settings.json` (see [10-distribution](10-distribution.md)). `--no-host` skips both and
-   touches nothing outside `.empo/`. Init prints that the hooks need `empo` on PATH and fail open
-   without it, so nobody counts on a gate that is not firing.
+3. **Wire the hosts.** Three targets: the managed block in `AGENTS.md`, the standalone `.claude/`
+   configuration, and `.codex/skills/`. Both host directories receive the three generated `empo-*`
+   skills; Claude alone receives EmPo's hook entries merged into `settings.json` (see
+   [10-distribution](10-distribution.md)). `--no-host` skips all three and touches nothing outside
+   `.empo/`. Init prints that Claude's hooks need `empo` on PATH and fail open without it, so nobody
+   counts on a gate that is not firing.
 4. **Build the first graph.** Run `empo index` so the proposal step has real data.
 5. **Propose flows and spines (agent step).** Two phases, below.
 
@@ -83,13 +84,14 @@ no `--force`: a tuned config, approved flows and a false-positive register that 
 reviews are not reproducible from a file listing.
 
 **The host wiring in step 3 is the exception, and it has to be, because none of it is human-owned.**
-The three skill files are generated whole out of the config, so a run rewrites one that is already
+The six skill files are generated whole out of the config, so a run rewrites one that is already
 there and each file says so in a comment at its top. That is the point rather than a cost: a skill
 kept as it was found would go on describing the roots and packs of a config that has since changed.
-`settings.json` and the managed block in `AGENTS.md` are merged rather than replaced, so what a team
-wrote around EmPo's own entries survives ([10-distribution](10-distribution.md)). All five report
-`created`, `updated` or `unchanged`, never `kept`, and `unchanged` is decided on the content, so a
-rerun with nothing to change still leaves a clean checkout clean. `--no-host` skips the whole step.
+Claude's `settings.json` and the managed block in `AGENTS.md` are merged rather than replaced, so
+what a team wrote around EmPo's own entries survives ([10-distribution](10-distribution.md)). Every
+host artifact reports `created`, `updated` or `unchanged`, never `kept`, and `unchanged` is decided
+on the content, so a rerun with nothing to change still leaves a clean checkout clean. `--no-host`
+skips the whole step.
 
 **An `aliases` section prints between the scaffold and the forge**, and only where some pack in play
 declares an `aliasSources` block: a repository written in a language whose imports carry no aliases
@@ -564,12 +566,15 @@ languages, its forge and its tracker, and states what a review cannot know when 
 it after upgrading EmPo or after changing the config. This is the OpenSpec-parity command. Flags:
 `--repo <path>`.
 
-**Two targets, not one.** The managed block in `AGENTS.md`, and the `.claude/` configuration: the
-three `empo-*` skill files, which are EmPo's own and are written whole, and the hook entries, which
-are merged into a `settings.json` that belongs to the repository. In both files EmPo owns a part and
-not the whole, and it identifies its part two different ways because the formats allow different
-things: marker comments in markdown, and a content rule in JSON, where an entry is EmPo's only if its
-`type` is `"command"` and its `command` starts with `empo hook `. See
+**Three targets, not one.** The managed block in `AGENTS.md`, the `.claude/` configuration, and the
+`.codex/skills/` tree. Both host trees contain the three `empo-*` skill files, which are EmPo's own
+and are written whole. Claude also receives hook entries merged into a `settings.json` that belongs
+to the repository. In the merged files EmPo owns a part and not the whole, and it identifies its part
+two different ways because the formats allow different things: marker comments in markdown, and a
+content rule in JSON, where an entry is EmPo's only if its `type` is `"command"` and its `command`
+contains `"empo hook "` either at the start or immediately after a path separator. This also claims
+the older path-qualified spelling during migration, so regeneration replaces it instead of adding a
+second hook. See
 [10-distribution](10-distribution.md) for what that rule costs and what the command reports when it
 takes something out and cannot put it back.
 

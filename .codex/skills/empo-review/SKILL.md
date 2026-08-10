@@ -1,7 +1,6 @@
 ---
 name: empo-review
 description: Review a pull request or the local diff under the EmPo review discipline, where no finding reaches the author until it has been verified against the real source.
-disable-model-invocation: true
 ---
 
 <!--

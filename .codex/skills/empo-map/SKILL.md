@@ -1,7 +1,6 @@
 ---
 name: empo-map
 description: Propose this repository's end-user flows and its spines from the EmPo map brief, as a diff for a human to approve.
-disable-model-invocation: true
 ---
 
 <!--

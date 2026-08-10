@@ -19,6 +19,8 @@ import { run } from "../../src/engine/git";
 import { LIST_FRAMEWORK_RESOLVED, NOT_AN_ARRIVAL_REASON } from "../../src/engine/kinds";
 import { EmpoError } from "../../src/errors";
 import { AGENTS_PATH, EMPO_BEGIN } from "../../src/host/agents";
+import { SKILL_NAMES } from "../../src/host/claude";
+import { codexSkillPath } from "../../src/host/codex";
 
 /**
  * `empo init` end to end over the acme fixture: the on-ramp, judged on what it leaves on disk.
@@ -364,13 +366,15 @@ describe("the flags", () => {
     expect(printed).toContain("roots      apps/api (php)");
   });
 
-  test("--no-host writes no AGENTS.md, and the default run writes one from this config", () => {
+  test("--no-host writes no host files, and the default run writes shared instructions and both skill targets", () => {
     const skipped = target();
     const skippedOutput = capture(() => {
       initCommand(skipped, { host: false });
     });
 
     expect(existsSync(join(skipped, AGENTS_PATH))).toBe(false);
+    for (const name of SKILL_NAMES)
+      expect(existsSync(join(skipped, codexSkillPath(name)))).toBe(false);
     expect(skippedOutput).toContain("skipped (--no-host). Nothing outside .empo/ was touched.");
 
     const wired = target();
@@ -385,6 +389,10 @@ describe("the flags", () => {
     // these instructions is which directory is which language in *this* repository.
     expect(agents).toContain("- `apps/api` (php)");
     expect(agents).toContain("- `apps/mobile` (typescript)");
+    for (const name of SKILL_NAMES) {
+      expect(wiredOutput).toContain(`created   ${codexSkillPath(name)}`);
+      expect(existsSync(join(wired, codexSkillPath(name)))).toBe(true);
+    }
   });
 
   test("--config-at-root moves one file and leaves the rest under .empo/", () => {
