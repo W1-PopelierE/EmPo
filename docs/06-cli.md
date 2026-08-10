@@ -572,7 +572,9 @@ and are written whole. Claude also receives hook entries merged into a `settings
 to the repository. In the merged files EmPo owns a part and not the whole, and it identifies its part
 two different ways because the formats allow different things: marker comments in markdown, and a
 content rule in JSON, where an entry is EmPo's only if its `type` is `"command"` and its `command`
-starts with `empo hook `. See
+contains `"empo hook "` either at the start or immediately after a path separator. This also claims
+the older path-qualified spelling during migration, so regeneration replaces it instead of adding a
+second hook. See
 [10-distribution](10-distribution.md) for what that rule costs and what the command reports when it
 takes something out and cannot put it back.
 

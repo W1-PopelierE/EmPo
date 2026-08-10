@@ -13,7 +13,7 @@ the next run, so a hand edit here is lost. Change `.empo/config.json` and run `e
 
 Run:
 
-```
+```sh
 empo review $ARGUMENTS
 ```
 

@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { parseConfig } from "../../src/engine/config";
 import { SKILL_NAMES } from "../../src/host/claude";
-import { codexSkillPath, renderCodexSkill, writeCodex } from "../../src/host/codex";
+import { CODEX_DIR, codexSkillPath, renderCodexSkill, writeCodex } from "../../src/host/codex";
 
 const CONFIG = parseConfig(
   {
@@ -79,5 +79,31 @@ describe("writeCodex", () => {
 
     expect(written[0]).toEqual({ path: codexSkillPath("empo-query"), state: "updated" });
     expect(read(codexSkillPath("empo-query"))).toBe(renderCodexSkill("empo-query", CONFIG));
+  });
+
+  test("refuses a symbolic link at an owned skill file", () => {
+    const outside = join(repo, "..", "outside-skill.md");
+    writeFileSync(outside, "outside\n");
+    const target = join(repo, codexSkillPath("empo-query"));
+    mkdirSync(dirname(target), { recursive: true });
+    symlinkSync(outside, target);
+
+    expect(() => writeCodex(repo, CONFIG)).toThrow(
+      "Refusing to write Codex skill through symbolic link",
+    );
+    expect(readFileSync(outside, "utf8")).toBe("outside\n");
+  });
+
+  test("refuses a symbolic link at an owned skill directory", () => {
+    const outside = join(repo, "..", "outside-skill-directory");
+    mkdirSync(outside, { recursive: true });
+    const target = join(repo, CODEX_DIR, "skills", "empo-query");
+    mkdirSync(dirname(target), { recursive: true });
+    symlinkSync(outside, target);
+
+    expect(() => writeCodex(repo, CONFIG)).toThrow(
+      "Refusing to write Codex skill through symbolic link",
+    );
+    expect(() => readFileSync(join(outside, "SKILL.md"), "utf8")).toThrow();
   });
 });

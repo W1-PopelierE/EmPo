@@ -13,7 +13,7 @@ the next run, so a hand edit here is lost. Change `.empo/config.json` and run `e
 
 Run:
 
-```
+```sh
 empo init
 ```
 
@@ -36,7 +36,7 @@ the command prints is the one the gate is built around, and a second copy drifts
 
 Write the proposal to the path the brief names, then:
 
-```
+```sh
 empo init --proposal <the path it named>            the verdict, nothing written
 empo init --proposal <the path it named> --apply    write what survived
 ```

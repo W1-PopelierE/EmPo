@@ -505,7 +505,7 @@ Codex receives the same repository-local workflows without a plugin or marketpla
 `empo init` writes the skill files for a new project and `empo update` regenerates them from that
 project's config:
 
-```
+```sh
 .codex/
   skills/
     empo-query/SKILL.md     generated whole, EmPo owns the file

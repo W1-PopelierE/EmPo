@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, sep } from "node:path";
 import type { EmpoConfig } from "../schema/config.schema";
 import { renderSkill, SKILL_NAMES, type SkillName } from "./claude";
 
@@ -41,6 +41,7 @@ export function writeCodex(repoRoot: string, config: EmpoConfig): CodexFile[] {
   return SKILL_NAMES.map((name) => {
     const path = codexSkillPath(name);
     const target = join(repoRoot, path);
+    assertNoSymlinkComponent(repoRoot, target);
     const existing = read(target);
     const content = renderCodexSkill(name, config);
     if (existing === content) return { path, state: "unchanged" };
@@ -52,5 +53,34 @@ export function writeCodex(repoRoot: string, config: EmpoConfig): CodexFile[] {
 }
 
 function read(target: string): string | null {
-  return existsSync(target) ? readFileSync(target, "utf8") : null;
+  try {
+    return readFileSync(target, "utf8");
+  } catch (error: unknown) {
+    if (isMissing(error)) return null;
+    throw error;
+  }
+}
+
+/** Refuse a generated target that would make Node follow a repository-controlled symlink. */
+function assertNoSymlinkComponent(repoRoot: string, target: string): void {
+  let component = repoRoot;
+  for (const segment of relative(repoRoot, target).split(sep)) {
+    component = join(component, segment);
+    try {
+      if (lstatSync(component).isSymbolicLink()) {
+        throw new Error(`Refusing to write Codex skill through symbolic link: ${component}`);
+      }
+    } catch (error: unknown) {
+      if (isMissing(error)) return;
+      throw error;
+    }
+  }
+}
+
+function isMissing(error: unknown): error is NodeJS.ErrnoException {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as NodeJS.ErrnoException).code === "ENOENT"
+  );
 }
