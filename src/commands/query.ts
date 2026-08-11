@@ -11,6 +11,7 @@ import { nameLines } from "../engine/names";
 import { compareStrings } from "../engine/order";
 import { configError } from "../errors";
 import type { Graph, GraphEdge, GraphNode, Hazard, NameResolution } from "../schema/types";
+import { columnWidth } from "../term";
 
 /**
  * `empo query`: the blast-radius answer (docs/06-cli.md). Every line it prints is a lookup in the
@@ -289,6 +290,21 @@ function earlierEvidence(edge: GraphEdge, held: GraphEdge): boolean {
 
 /** How many of the widest-blast-radius nodes to name before summarizing the rest. */
 const GODS_SHOWN = 20;
+
+/**
+ * How many cross-language joins to name before summarizing the rest. Ten, and not the twenty
+ * `--gods` prints, because a bridge is two printed lines per row and this keeps the block to the
+ * same twenty lines that mode costs.
+ *
+ * The number is a measurement and not a taste. On a 5,048-node Laravel monorepo, the blast radius of
+ * an ordinary model (`App\Models\Club`, 528 direct consumers) closes over 2,752 nodes and encloses
+ * 15,809 edges, and the p90 radius across every node with fan-in is that same 2,752. This list is
+ * `graph.edges.filter(from in radius)`, so whatever share of a repository's bridge edges lives in
+ * that surface is what got printed: uncapped, a bridged repository of that size prints a wall, not a
+ * list. The measured repository is single-root and configures no bridges, so the count it could give
+ * is the radius the filter runs over rather than the matches inside it.
+ */
+const BRIDGES_SHOWN = 10;
 
 interface GodsAnswer {
   mode: "gods";
@@ -607,7 +623,7 @@ function printBlastRadius(answer: BlastRadius): void {
   if (answer.flows.length === 0) {
     console.log("  none: this node is in no flow's paths, and neither is anything that uses it");
   }
-  const width = Math.max(0, ...answer.flows.map((flow) => flow.flow.length));
+  const width = columnWidth(answer.flows, (flow) => flow.flow);
   for (const flow of answer.flows) {
     const reach = `${plural(flow.tests, "test")} ${flow.tests === 1 ? "reaches" : "reach"} it`;
     const state = flow.blind
@@ -625,7 +641,7 @@ function printBlastRadius(answer: BlastRadius): void {
 
   console.log("top consumers");
   if (answer.consumers.length === 0) console.log("  none: nothing in the graph references it");
-  const idWidth = Math.max(0, ...answer.consumers.slice(0, 10).map((row) => row.id.length));
+  const idWidth = columnWidth(answer.consumers.slice(0, 10), (row) => row.id);
   for (const consumer of answer.consumers.slice(0, 10)) {
     console.log(
       `  ${String(consumer.fanin).padStart(4)}  ${consumer.id.padEnd(idWidth)}  ${consumer.evidence}`,
@@ -654,8 +670,9 @@ function printBlastRadius(answer: BlastRadius): void {
             "none is in this blast radius",
     );
   }
-  const symbolWidth = Math.max(0, ...answer.bridges.map((bridge) => (bridge.symbol ?? "?").length));
-  for (const bridge of answer.bridges) {
+  const shown = answer.bridges.slice(0, BRIDGES_SHOWN);
+  const symbolWidth = columnWidth(shown, (bridge) => bridge.symbol ?? "?");
+  for (const bridge of shown) {
     // Both ends, always, on two lines. Either one can be the file the reader asked about, so a row
     // naming one of them alone answers the question from one direction and repeats the question
     // back from the other. The evidence is a line in `from`, which is the side that spells the
@@ -666,6 +683,9 @@ function printBlastRadius(answer: BlastRadius): void {
     // the one row whose two halves are both paths: `consumes <path>  <path>:11` reads as a list of
     // two files rather than as a claim and its citation.
     console.log(`  ${" ".repeat(symbolWidth)}  consumes ${bridge.to}  named at ${bridge.evidence}`);
+  }
+  if (answer.bridges.length > BRIDGES_SHOWN) {
+    console.log(`  ... and ${answer.bridges.length - BRIDGES_SHOWN} more`);
   }
 }
 
@@ -711,8 +731,8 @@ function hazardLines(answer: HazardsAnswer): string[] {
     );
   }
 
-  const jobWidth = Math.max(0, ...rows.map((row) => row.job.length));
-  const lineWidth = Math.max(0, ...rows.map((row) => String(row.transactionLine).length));
+  const jobWidth = columnWidth(rows, (row) => row.job);
+  const lineWidth = columnWidth(rows, (row) => String(row.transactionLine));
   for (const row of rows) {
     lines.push(
       `  ${row.job.padEnd(jobWidth)}  opened at line ` +

@@ -913,6 +913,37 @@ describe("queryCommand cross-language reach", () => {
 
     expect(lines).toEqual(["  none: the one bridge edge in the graph is not in this blast radius"]);
   });
+
+  test("caps the list and says how many it held back", () => {
+    // The one list in a blast radius that had no cap, in the shape that made it one: every bridge
+    // edge whose `from` is in the radius, and a radius on a real monorepo closes over thousands of
+    // nodes. Two printed lines per row, so an uncapped block is a wall and the count under it is
+    // what keeps the wall from reading as the whole answer.
+    const wide = manyGodsGraph(15);
+    const [target] = wide.nodes;
+    if (target === undefined) throw new Error("expected a node");
+    wide.edges = wide.nodes.slice(1).map((node) => ({
+      from: node.id,
+      to: target.id,
+      kind: "bridge" as const,
+      symbol: "http-route",
+      evidence: { file: node.file, line: 1 },
+    }));
+
+    const lines = block(capture(() => queryCommand(repoWithGraph(wide), target.id)));
+
+    // Ten rows of two lines, then the exclusion. The far ends stay unnamed past the cap, which is
+    // the trade the count is there to declare.
+    expect(lines).toHaveLength(21);
+    expect(lines.at(-1)).toBe("  ... and 4 more");
+
+    // The JSON keeps all fourteen: the cap is a property of what is printed, the same as the
+    // consumer list's, and an agent reading `--json` gets the whole set.
+    const answer = JSON.parse(
+      capture(() => queryCommand(repoWithGraph(wide), target.id, { json: true })),
+    );
+    expect(answer.bridges).toHaveLength(14);
+  });
 });
 
 /**

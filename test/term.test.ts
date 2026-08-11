@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { humanBytes, ProgressLine, styleFor, supportsColor, tick } from "../src/term";
+import { columnWidth, humanBytes, ProgressLine, styleFor, supportsColor, tick } from "../src/term";
 
 /**
  * The rules under test are the ones that decide whether anything is written at all. Colour and a
@@ -155,5 +155,19 @@ describe("ProgressLine", () => {
     // A second clear is a no-op rather than a second erase, so a caller may call it defensively.
     line.clear();
     expect(stream.written.at(-1)).toBe("\r\u001b[K");
+  });
+});
+
+describe("columnWidth", () => {
+  it("is zero on an empty column and the longest cell otherwise", () => {
+    expect(columnWidth([], (row: string) => row)).toBe(0);
+    expect(columnWidth(["a", "bbb", "cc"], (row) => row)).toBe(3);
+  });
+
+  // The reason this is a fold and not `Math.max(0, ...rows.map(...))`: a blast radius on a
+  // widely-bridged file is uncapped, and spreading a list this long throws a RangeError.
+  it("survives a column longer than the engine's argument limit", () => {
+    const rows = Array.from({ length: 500_000 }, (_, index) => "x".repeat((index % 4) + 1));
+    expect(columnWidth(rows, (row) => row)).toBe(4);
   });
 });

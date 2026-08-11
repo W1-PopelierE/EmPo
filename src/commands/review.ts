@@ -35,6 +35,7 @@ import type { EmpoConfig, EmpoForge } from "../schema/config.schema";
 import { parseFindingsFile } from "../schema/findings.schema";
 import type { HostTicket } from "../schema/host-payload.schema";
 import type { Graph, GraphNode } from "../schema/types";
+import { columnWidth } from "../term";
 import { describeTouch, wantedPaths, wantedTerms } from "./check";
 import { type BlastRadius, blastRadius, FLOOR_NOT_CEILING } from "./query";
 
@@ -1118,7 +1119,7 @@ function printChangedFiles(facts: FileFacts[]): void {
     console.log("  none: the diff is empty. Check the base ref.");
     return;
   }
-  const width = Math.max(0, ...facts.map((entry) => entry.file.path.length));
+  const width = columnWidth(facts, (entry) => entry.file.path);
   for (const entry of facts) {
     const counts = `+${entry.file.addedCount} -${entry.file.removedCount}`;
     const mapped =
@@ -1156,7 +1157,14 @@ function printBlastRadius(facts: FileFacts[]): void {
     for (const consumer of radius.consumers.slice(0, 5)) {
       console.log(`    consumer ${consumer.id}  ${consumer.evidence}`);
     }
-    for (const bridge of radius.bridges) {
+    // Both lists say what they held back. A brief is read by an agent that quotes it, and five
+    // consumers of five hundred printed as a bare list is the same "reads as all of it" failure the
+    // rest of this command exists to avoid. Five and not `empo query`'s ten: every row here is one
+    // line inside a block that already carries the node, its fan-in and its flows.
+    if (radius.consumers.length > 5) {
+      console.log(`    ... and ${radius.consumers.length - 5} more consumers`);
+    }
+    for (const bridge of radius.bridges.slice(0, 5)) {
       // Both ends, for the reason `empo query` prints both: the changed file is as often the
       // consuming side as the producing one, and a row naming only the near end tells a reviewer
       // reading a php diff that the php file is cross-language, which is not a fact about anything.
@@ -1164,6 +1172,9 @@ function printBlastRadius(facts: FileFacts[]): void {
         `    cross-language ${bridge.symbol ?? "?"}  ${bridge.from}` +
           ` consumes ${bridge.to}  named at ${bridge.evidence}`,
       );
+    }
+    if (radius.bridges.length > 5) {
+      console.log(`    ... and ${radius.bridges.length - 5} more cross-language joins`);
     }
   }
 }
