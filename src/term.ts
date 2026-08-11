@@ -122,3 +122,12 @@ export class ProgressLine {
     this.painted = true;
   }
 }
+
+/**
+ * The widest cell in a column, for `padEnd`. Folded rather than spread: `Math.max(0, ...rows.map())`
+ * throws a RangeError once the list passes the engine's argument limit, and the lists these columns
+ * are drawn from (a blast radius on a widely-bridged file) are the ones with no cap on them.
+ */
+export function columnWidth<T>(rows: readonly T[], of: (row: T) => string): number {
+  return rows.reduce((width, row) => Math.max(width, of(row).length), 0);
+}
