@@ -140,6 +140,11 @@
     "^[ \\t]*(?:export[ \\t]+)?(?:default[ \\t]+)?(?:abstract[ \\t]+)?class[ \\t]+([A-Za-z_$][A-Za-z0-9_$]*)",
     "^[ \\t]*(?:export[ \\t]+)?(?:const|let|var)[ \\t]+([A-Za-z_$][A-Za-z0-9_$]*)[ \\t]*[:=]"
   ],
+  "packages": {
+    "file": "package.json",
+    "name": "name",
+    "dependencies": ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]
+  },
   "tests": {
     "paths": [
       "tests/",

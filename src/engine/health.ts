@@ -151,6 +151,7 @@ function isNameResolution(value: unknown): value is NameResolution {
     isCount(report.ambiguous) &&
     isCount(report.wrongKind) &&
     isCount(report.local) &&
+    isCount(report.vendor) &&
     Array.isArray(report.ambiguousNames) &&
     report.ambiguousNames.every(isAmbiguousName)
   );

@@ -577,7 +577,13 @@ function report(repoRoot: string, graph: Graph, answer: Answer, options: QueryOp
 function namesRead(graph: Graph): NameResolution[] {
   return (nameHealth(graph) ?? []).filter(
     (report) =>
-      report.resolved + report.unknown + report.ambiguous + report.wrongKind + report.local > 0,
+      report.resolved +
+        report.unknown +
+        report.ambiguous +
+        report.wrongKind +
+        report.local +
+        report.vendor >
+      0,
   );
 }
 

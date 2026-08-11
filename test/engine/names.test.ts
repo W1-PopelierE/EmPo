@@ -47,6 +47,7 @@ function report(
     ambiguous: counts.ambiguous ?? 0,
     wrongKind: counts.wrongKind ?? 0,
     local: counts.local ?? 0,
+    vendor: counts.vendor ?? 0,
     ambiguousNames: counts.ambiguousNames ?? [],
   };
 }

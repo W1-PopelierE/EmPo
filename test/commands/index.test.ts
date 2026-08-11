@@ -398,6 +398,7 @@ describe("indexCommand", () => {
         ambiguous: 0,
         wrongKind: 0,
         local: 0,
+        vendor: 0,
         ambiguousNames: [],
       },
       {
@@ -407,6 +408,7 @@ describe("indexCommand", () => {
         ambiguous: 0,
         wrongKind: 0,
         local: 0,
+        vendor: 0,
         ambiguousNames: [],
       },
     ]);

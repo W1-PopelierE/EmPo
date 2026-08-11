@@ -861,7 +861,8 @@ describe("resolveEdges, the names it declined", () => {
     // file was shadowing with its own `const`. A story file declaring `const SelectInput = ...` and
     // rendering `<SelectInput />` names nothing outside itself, whatever another package happens to
     // call a file. The refusal prevents a wrong edge rather than losing a right one, which is why it
-    // is counted apart from the three that lose one.
+    // is counted apart from the three that lose one, and it is asked of the one name that was about
+    // to become an edge: a name in no node was never at risk and stays `unknown`.
     const real = kinded(
       "packages/ui/src/input/SelectInput.tsx",
       "SelectInput",
@@ -883,7 +884,128 @@ describe("resolveEdges, the names it declined", () => {
 
     expect(resolved.edges).toEqual([]);
     expect(resolved.names).toEqual([
-      { family: "template", name: "SelectInput", outcome: "local", candidates: 0 },
+      { family: "template", name: "SelectInput", outcome: "local", candidates: 1 },
+    ]);
+  });
+
+  test("refuses a name the file imports from a package the repository depends on", () => {
+    // The last of the four ways this strategy was measured to be wrong, and the only one no question
+    // about the name can reach: `import Button from "@mui/material/Button"` beside a local
+    // Button.tsx leaves the index one node, of the right kind, in one place. Measured on
+    // marmelab/react-admin, 189 of 2715 template edges were MUI components landing on a local file.
+    const local = kinded(
+      "src/components/Button.tsx",
+      "Button",
+      "src/components/Button.tsx",
+      "component",
+    );
+    const view = {
+      ...kinded(
+        "src/reviews/AcceptButton.tsx",
+        "AcceptButton",
+        "src/reviews/AcceptButton.tsx",
+        "component",
+      ),
+      captures: [
+        {
+          family: "import" as const,
+          resolve: "module-path" as const,
+          groups: ['import Button from "@mui/material/Button"', "@mui/material/Button"],
+          line: 2,
+        },
+        kindedCapture("Button", 54, ["component"]),
+      ],
+    };
+
+    const resolved = resolveEdges(view, buildNodeIndex([local, view]), {
+      ...TS,
+      vendorPackages: new Set(["@mui/material"]),
+    });
+
+    expect(resolved.edges).toEqual([]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "Button", outcome: "vendor", candidates: 1 },
+    ]);
+  });
+
+  test("resolves a name imported from a package this repository is, not one it depends on", () => {
+    // The half that keeps the family worth having. A component reached through a workspace barrel is
+    // the coupling no import parser sees, and `@acme/ui` is spelled at the import site exactly like a
+    // third-party package. `vendorPackages` is the manifests' dependencies minus their own names, so
+    // a workspace never reaches this refusal and cal.com's 1300-odd barrel edges stay.
+    const button = kinded(
+      "packages/ui/src/Button.tsx",
+      "Button",
+      "packages/ui/src/Button.tsx",
+      "component",
+    );
+    const view = {
+      ...kinded("apps/web/src/Page.tsx", "Page", "apps/web/src/Page.tsx", "component"),
+      captures: [
+        {
+          family: "import" as const,
+          resolve: "module-path" as const,
+          groups: ['import { Button } from "@acme/ui"', "@acme/ui"],
+          line: 1,
+        },
+        kindedCapture("Button", 12, ["component"]),
+      ],
+    };
+
+    const resolved = resolveEdges(view, buildNodeIndex([button, view]), {
+      ...TS,
+      vendorPackages: new Set(["@mui/material"]),
+    });
+
+    expect(resolved.edges.map((edge) => edge.to)).toEqual(["packages/ui/src/Button.tsx"]);
+  });
+
+  test("does not read a vendor import that renamed the name away as binding it", () => {
+    // The false refusal the first version made, found by opening the ones it refused: react-admin's
+    // AppBar.stories.tsx aliases MUI's ThemeProvider out of the way (`ThemeProvider as
+    // MuiThemeProvider`) and imports the local one under the plain name on the next line. A check
+    // that read the statement for the bare name refused a real edge, which costs the same coupling
+    // the wrong edge would have invented.
+    const local = kinded(
+      "packages/ui/src/theme/ThemeProvider.tsx",
+      "ThemeProvider",
+      "packages/ui/src/theme/ThemeProvider.tsx",
+      "component",
+    );
+    const story = {
+      ...kinded(
+        "packages/ui/src/AppBar.stories.tsx",
+        "AppBar.stories",
+        "packages/ui/src/AppBar.stories.tsx",
+        "component",
+      ),
+      captures: [
+        {
+          family: "import" as const,
+          resolve: "module-path" as const,
+          groups: [
+            'import { ThemeProvider as MuiThemeProvider } from "@mui/material"',
+            "@mui/material",
+          ],
+          line: 5,
+        },
+        {
+          family: "import" as const,
+          resolve: "module-path" as const,
+          groups: ['import { ThemeProvider } from "./theme"', "./theme"],
+          line: 31,
+        },
+        kindedCapture("ThemeProvider", 176, ["component"]),
+      ],
+    };
+
+    const resolved = resolveEdges(story, buildNodeIndex([local, story]), {
+      ...TS,
+      vendorPackages: new Set(["@mui/material"]),
+    });
+
+    expect(resolved.names).toEqual([
+      { family: "template", name: "ThemeProvider", outcome: "resolved", candidates: 1 },
     ]);
   });
 

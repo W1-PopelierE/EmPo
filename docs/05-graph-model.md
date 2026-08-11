@@ -110,6 +110,9 @@ name belongs to a package cannot fall onto the lone local file that happens to s
 That filter is applied to the survivor of the uniqueness test and not before it, so where two local
 files carry the name the tag resolves to nothing, which is what `short-name` already did. Section 4
 carries what each was measured to cost, what it did not, and why the other order invents an edge.
+Two further refusals are asked of the survivor of both tests, out of the pack's `declares` patterns
+and its `packages` block: a tag naming something the rendering file declares itself, and a tag naming
+something that file imports from a package the repository depends on, produce no edge either.
 
 **Where no file carries the name as written, the spelling is folded before it is given up on.** A
 file naming convention is not a language: `<Badge />` is `Badge.tsx` in one React repository and
@@ -133,7 +136,7 @@ nothing in the file says which is meant, and here the file has said. A fold no i
 What the fold is worth is the whole yield of the family on such a repository rather than a margin: on
 a real 186-file React Native application whose components live in `src/components/badge.tsx`,
 `template` resolved **3 of 1531** tag references before the fold and **735 of 1531** after it, with
-**682** in no node and **114** `local`, and every one of the 1528 misses had been `unknown` rather
+**795** in no node and one `local`, and every one of the 1528 misses had been `unknown` rather
 than an ambiguity anybody could have repaired by renaming a file. What corroboration buys is measured
 where the fold is most dangerous: cal.com names its shadcn-style files `toaster.tsx`,
 `collapsible.tsx` and `textarea.tsx`, and the uncorroborated fold produced 53 extra template edges
@@ -424,6 +427,7 @@ repair, the same as above.
   "ambiguous": 7,              // the name is in several nodes, so no edge is emitted to any of them
   "wrongKind": 3,              // one node carries it, of a kind the rule's `targetKinds` excludes
   "local": 2,                  // the file that wrote the reference declares that name itself
+  "vendor": 1,                 // that file imports the name from a package this repository installs
   "ambiguousNames": [ { "name": "OrderTable", "nodes": 2, "references": 5 }, … ]
 }
 ```
@@ -461,68 +465,81 @@ nothing to do with resolution. The same reasoning is why the counts are not dedu
 roots either: two overlapping roots that scan one file twice do read its names twice, which moves
 numerator and denominator together, and `empo index` already names root overlap as the defect it is.
 
-**Five verdicts and not one, because they call for five different reactions.** `unknown` is the
+**Six verdicts and not one, because they call for six different reactions.** `unknown` is the
 ordinary cost of reading a language whose vendor components are spelled exactly like local ones: a
 JSX tag naming a package's component, a Blade built-in like `<x-slot>`. Nobody can act on it, and a
 healthy typescript repository carries a lot of it. `wrongKind` is a rule's own `targetKinds` doing
 precisely what it was declared for, refusing to land a tag on the one local `.ts` module that
 happens to share a basename with a package (the Edge section above, and
 [04-language-packs](04-language-packs.md) section 4, carry why that filter runs on the survivor of
-the uniqueness test rather than before it). `local` is the reference answering itself: the file that
-wrote it declares that name, through the pack's `declares` patterns, so whatever a node of the same
-basename elsewhere in the tree holds, it is not what this line names, and no other node can be
-meant. It is therefore checked **before** the index is consulted at all, which is what makes it win
-over `unknown`, over `ambiguous` and over `wrongKind` alike, and its `candidates` is 0 because
-nothing was ever weighed. It is a refusal that prevents a wrong edge rather than one that loses a
-right one, and it is not rare: on marmelab/react-admin **139 of 2715** template edges were this
-case. `ambiguous` is the only one of the four failures that hides a coupling this repository really
+the uniqueness test rather than before it). `local` and `vendor` are the two where the index did
+answer and its answer is still not what the line names. `local` is the reference answering itself:
+the file that wrote it declares that name, through the pack's `declares` patterns, so whatever a node
+of the same basename elsewhere in the tree holds, it is not what this line means. `vendor` is the
+reference answered by somebody else's code: that file imports the name from a package this repository
+declares a dependency on ([04-language-packs](04-language-packs.md) section 4's `packages` block), so
+the node carrying the name is a basename collision — `import Button from '@mui/material/Button'`
+beside a local `Button.tsx`. **Both are asked last**, of the one name that had survived uniqueness
+and `targetKinds` and was about to become an edge, and both carry `candidates: 1` because exactly
+one node was weighed and then declined. That ordering is the honest one: a name in no node was never
+at risk of a wrong edge, so it stays `unknown` whatever the reading file declares or imports, and
+asking these two first billed every vendor tag in a repository as a refusal that reads like a
+repairable loss. Both prevent a wrong edge rather than losing a right one, and neither is rare: on
+marmelab/react-admin **213** references are `local` and **507** are `vendor`.
+`ambiguous` is the only one of the five failures that hides a coupling this repository really
 has: the name is in the graph, more than once, and the edge is dropped in both directions rather
-than guessed at. `resolved` is the fifth because the other four
+than guessed at. `resolved` is the sixth because the other five
 are unreadable without it: it is the numerator, and added to them it is the denominator, which is
 why every surface prints the ratio on every run including the run where nothing was refused.
 `41 of 41 resolved` and `0 of 53 resolved` are opposite results, and the total is the only thing
 that separates them. A denominator that appears only in the bad case is one nobody learns to look
 for.
-Returned as a bare null downstream, as they were, all four failures were one fact, which is how a
+Returned as a bare null downstream, as they were, all five failures were one fact, which is how a
 family whose yield had gone to zero went on producing the same silence as a family with nothing to
 find.
 
-**The denominator is every verdict, `local` included, and the printed line names the refusals that
-happened.** `nameLines` sums `resolved + unknown + ambiguous + wrongKind + local` and prints
+**The denominator is every verdict, `local` and `vendor` included, and the printed line names the
+refusals that happened.** `nameLines` sums `resolved + unknown + ambiguous + wrongKind + local +
+vendor` and prints
 `N of TOTAL resolved` followed by a clause per non-zero refusal, `N ambiguous`, `N in no node`,
-`N of the wrong kind`, and after those `N declared where they are used`. A zero gets no clause,
-because the denominator has already said it and four `0 …` clauses on every healthy family is the
-noise that gets a line skimmed. `local` counts in the total for the same reason the other three do:
-it is a name a rule read and did not turn into an edge, and a denominator that quietly dropped the
-references a family declined would report a yield higher than the one measured.
+`N of the wrong kind`, and after those `N declared where they are used` and
+`N imported from a package`. A zero gets no clause,
+because the denominator has already said it and five `0 …` clauses on every healthy family is the
+noise that gets a line skimmed. The two newest count in the total for the same reason the other three
+do: each is a name a rule read and did not turn into an edge, and a denominator that quietly dropped
+the references a family declined would report a yield higher than the one measured.
 
-**What these counts look like on real trees, so nobody reads a ratio as a defect.** On
-marmelab/react-admin, **7672 of 17415** references resolved, **3199** were ambiguous, **3283** named
-no node, **508** were of the wrong kind and **2753** were `local`. The ambiguity is the ordinary
-shape of a tree with feature directories rather than a fault; **139 of its 2715** template edges were
-the `local` case. excalidraw resolves **589 of 1264** (3 ambiguous, 456 in no node, 1 wrong kind, 215
-local) and cal.com **2499 of 5917** (475 ambiguous, 2338 in no node, 9 wrong kind, 596 local). A
-family in the middle of that range is a family working; the number worth reacting to is a family that
-was resolving and stopped.
+**What these counts look like on real trees, so nobody reads a ratio as a defect.**
 
-Those are all lower than the same corpus read before the fold and `local` landed — react-admin
-resolved 7881 of 17415 then, excalidraw 592 and cal.com 2537 — and lower is the point rather than a
-regression: the references that moved went to `local`, which prevents a wrong edge, and to the
-corroboration the fold now demands. The repository the change is for reads the other way: the React
-Native application went from **3 of 1531** to **735 of 1531**.
+| repository | resolved | ambiguous | in no node | wrong kind | local | vendor | template edges |
+|---|---|---|---|---|---|---|---|
+| a real 186-file React Native app | 735 of 1531 | 0 | 795 | 0 | 1 | 0 | 433 |
+| excalidraw | 563 of 1264 | 3 | 668 | 1 | 3 | 26 | 317 |
+| marmelab/react-admin | 7165 of 17415 | 3386 | 5617 | 527 | 213 | 507 | 2339 |
+| cal.com | 2476 of 5917 | 515 | 2843 | 9 | 51 | 23 | 1617 |
 
-**One wrong-edge ceiling survives this change and is not fixed by it.** A tag whose component comes
-from a third-party package, whose name collides with a local file's basename, still resolves to the
-local file: `import Button from '@mui/material/Button'` beside a local `Button.tsx` produces an edge
-to the local file that the line does not render. `targetKinds` does not catch it, because the local
-file really is a component; `local` does not, because the rendering file declares nothing; the fold
-does not, because the exact spelling already matched. It is **189 of react-admin's 2715** template
-edges, 8 in cal.com and 8 in excalidraw. Opening a sample of 38 resolved edges at their cited lines
-found **32 real and 6 wrong**, and all 6 were this case or the one `local` now refuses, which is
-what puts a bound on the remaining error and says where the next narrowing has to go. Reading the
-reading file's imports on the **exact** path is what would close it, and nothing does that: the
-corroboration above reads them only to witness a fold, which is the guess, and leaves the exact match
-answered by the language's own convention.
+The ambiguity on react-admin is the ordinary shape of a tree with feature directories rather than a
+fault. A family in the middle of that range is a family working; the number worth reacting to is a
+family that was resolving and stopped.
+
+**Three of the four resolve fewer references than the build before this one, and that is the
+result rather than a regression.** react-admin resolved 7672 of 17415 then and 7165 now. The
+references that moved were resolving to the wrong file: to a package's component that a local
+basename happened to collide with, or to a name the reading file had declared itself. Of the six
+edges independent checkers had refuted in a sample of 38, four are refused now — two MUI collisions,
+one radix collision, one same-file `const`. The repository the fold was for reads the other way and
+is unchanged by it: the React Native application went from **3 of 1531** to **735 of 1531**.
+
+**Two wrong-edge residues survive, and both are stated with their evidence rather than as a
+direction.** The first is a collision with another **workspace** package, which is the case the
+`vendor` rule has to allow through: cal.com's
+`apps/web/modules/webhooks/components/WebhookListItem.tsx:222` imports `Button` from `@coss/ui`, the
+internal `packages/coss-ui`, and the edge still lands on
+`packages/ui/components/button/Button.tsx`. Requiring the resolved candidate to live under the named
+package's directory would close it and would break re-export chains, where react-admin's own barrel
+legitimately re-exports `ra-ui-materialui` components; the two are indistinguishable to that rule.
+The second is dotted: `<DropdownMenu.Trigger>` in excalidraw contributes its head, so it resolves to
+the file holding the namespace object rather than to the file holding the component.
 
 **`ambiguousNames` is what makes the count actionable**, and it is the one place the record cuts by
 name instead of by reference. A number alone says the family is losing edges; this says which rename
@@ -534,8 +551,8 @@ entries that cost the same have to order the same on every machine or `graph.jso
 byte-comparable.
 
 **Merging across roots sums the counts and takes the MAX of the candidate counts.** Two references
-read under two roots are two references, so `resolved`, `unknown`, `ambiguous`, `wrongKind` and
-`local` add.
+read under two roots are two references, so `resolved`, `unknown`, `ambiguous`, `wrongKind`, `local`
+and `vendor` add.
 `nodes` does not, and the asymmetry is not an oversight. Ambiguity is decided against one root's
 node index: a name refused under `apps/portal` was weighed against `apps/portal`'s three files and a
 name refused under `apps/admin` against that root's two, and no single refusal ever looked at five.
@@ -572,16 +589,18 @@ written by an earlier binary would parse, look well formed, and answer the one q
 was added to answer with a fact no run ever established. `empo doctor` reports the schema drift
 against the binary reading it, and `empo index` is the repair, the same as above.
 
-**`schema` goes from 5 to 6 with the case fold and with `local`**, and it is the plainest case the
-number exists for, twice over. `resolved` kept its name and now admits a name a node carries in
+**`schema` goes from 5 to 6 with the case fold, with `local` and with `vendor`**, one bump for the
+three because they landed inside it, and it is the plainest case the
+number exists for. `resolved` kept its name and now admits a name a node carries in
 another case, so every count written under schema 5 was taken under a stricter rule and the two are
 not comparable: a family whose ratio jumps from 3 of 1531 to 735 of 1531 across two builds has not
 been repaired, it has been remeasured, and nothing else on disk records that. And `names` gained
-`local`, whose absence and whose zero are different answers, which is `hazards`' case: a schema 5
-graph has no `local` key because nothing ever asked whether the file writing a reference declared
-the name itself, and defaulting that to 0 turns "nobody looked" into "this repository shadows
-nothing", a clean bill of health invented out of a field no run wrote. `isNameResolution` in
-`engine/health.ts` requires the key for the same reason, so a record missing it is a malformed
+`local` and `vendor`, whose absence and whose zero are different answers, which is `hazards`' case: a
+schema 5 graph has no `local` key because nothing ever asked whether the file writing a reference
+declared the name itself, and no `vendor` key because nothing read a manifest, and defaulting either
+to 0 turns "nobody looked" into "this repository shadows nothing" and "nothing here renders somebody
+else's component", clean bills of health invented out of fields no run wrote. `isNameResolution` in
+`engine/health.ts` requires both keys for the same reason, so a record missing one is a malformed
 graph rather than one with a zero. `empo doctor` reports the drift and `empo index` is the repair.
 
 `names` is not a health finding and never becomes one. An ambiguous component name is the normal

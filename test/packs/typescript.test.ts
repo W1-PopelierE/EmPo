@@ -420,7 +420,7 @@ describe("typescript pack", () => {
   });
 
   test("counts every verdict a name-resolving rule can reach, refusals included", () => {
-    // This corpus is the only place all five verdicts are exercised at once, which is why the tally
+    // This corpus is the only place all six verdicts are exercised at once, which is why the tally
     // is pinned here rather than left to the snapshot. `Badge` and `Total` are ambiguous by
     // construction, each carried by two files; `OrderRow` is the `targetKinds` refusal, a name in
     // exactly one node of a kind no tag may name; `Spinner` is the vendor component in no node at
@@ -438,8 +438,9 @@ describe("typescript pack", () => {
     expect(actual.names).toEqual([
       {
         family: "template",
-        resolved: 16,
+        resolved: 17,
         local: 1,
+        vendor: 1,
         unknown: 1,
         ambiguous: 2,
         wrongKind: 1,

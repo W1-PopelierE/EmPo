@@ -3,6 +3,7 @@ import { configError } from "../errors";
 import type { GraphEdge, NameOutcome, NameVerdict } from "../schema/types";
 import type { Capture, ExtractedFile } from "./extractor";
 import { compareStrings } from "./order";
+import { packageOf } from "./packages";
 
 /**
  * Turns raw captures into edges between known nodes. An edge whose target is not a node in the
@@ -50,6 +51,12 @@ export interface ResolveContext {
    * no config, so an alias rule can never be smuggled into a pack's snapshot.
    */
   aliases?: AliasRule[];
+  /**
+   * The package names this repository depends on and does not itself carry, from engine/packages.ts.
+   * Absent where the pack declares no `packages` block, which leaves every name resolving exactly as
+   * it did before the field existed.
+   */
+  vendorPackages?: Set<string>;
 }
 
 /** One config alias pattern, split at its `*` once so resolution does no parsing per capture. */
@@ -166,24 +173,66 @@ export function resolveEdges(
    * answer without a TypeScript-shaped rule in the engine: php's imports resolve by `fqcn`, so no
    * php fold is ever corroborated and that pack behaves exactly as it did before the fold existed.
    *
+   * **A name the statement renames away is not bound by it.** `import { ThemeProvider as
+   * MuiThemeProvider } from "@mui/material"` leaves the plain name free, and the file next to that
+   * line imports the local `ThemeProvider` and renders it. Reading the statement for the bare name
+   * refuses that real edge, which is the one thing this check must never do: it exists to stop a
+   * wrong edge, and a wrong refusal costs the same coupling by the other route. Measured on
+   * marmelab/react-admin, `AppBar.stories.tsx` is the case, twice.
+   *
    * The name is escaped before it is spliced into a pattern. Every name that reaches here today is
    * an identifier, and a strategy that one day reads a name holding a regex metacharacter would
    * otherwise turn a pack's capture into a pattern this engine compiles.
    */
-  const importsNameFrom = (name: string, id: string): boolean => {
+  const statementBinds = (statement: string, name: string): boolean => {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const binds = new RegExp(`(?:^|[^A-Za-z0-9_$])${escaped}(?:[^A-Za-z0-9_$]|$)`);
-    return file.captures.some(
+    if (!new RegExp(`(?:^|[^A-Za-z0-9_$])${escaped}(?:[^A-Za-z0-9_$]|$)`).test(statement)) {
+      return false;
+    }
+    // Renamed away, and every occurrence of it: a clause naming one symbol twice, once renamed and
+    // once not, is not something a language lets a file write.
+    return !new RegExp(`(?:^|[^A-Za-z0-9_$])${escaped}\\s+as\\s`).test(statement);
+  };
+
+  const importsNameFrom = (name: string, id: string): boolean =>
+    file.captures.some(
       (capture) =>
         capture.resolve === "module-path" &&
-        binds.test(capture.groups[0] ?? "") &&
+        statementBinds(capture.groups[0] ?? "", name) &&
         resolveModulePath(file.file, capture.groups[1] ?? "", index, context) === id,
     );
+
+  /**
+   * Does this file import `name` from a package the repository installs? Asked of every name before
+   * the index is, because the index cannot see it: `<Button />` beside
+   * `import Button from "@mui/material/Button"` is a MUI component in a file that also happens to
+   * hold one local `Button.tsx`, and every question a name-resolving strategy asks — is the name
+   * unique, is the kind right — answers yes.
+   *
+   * A specifier naming a package this repository **is** never reaches here: `vendorPackages` has
+   * already subtracted the manifests' own names, so a workspace barrel goes on resolving and the
+   * edges this family exists for survive.
+   */
+  const importsVendorName = (name: string): boolean => {
+    const vendor = context.vendorPackages;
+    if (vendor === undefined || vendor.size === 0) return false;
+
+    return file.captures.some((capture) => {
+      if (capture.resolve !== "module-path" || !statementBinds(capture.groups[0] ?? "", name)) {
+        return false;
+      }
+      const named = packageOf(capture.groups[1] ?? "");
+      return named !== null && vendor.has(named);
+    });
   };
 
   /** Look one name up, record the verdict, and hand back the id for the caller to use or not. */
   const read = (raw: string | undefined, capture: Capture): string | null => {
-    const found = resolveName(index, raw, capture.targetKinds, declared, importsNameFrom);
+    const found = resolveName(index, raw, capture.targetKinds, {
+      declared,
+      importsNameFrom,
+      importsVendorName,
+    });
     // A capture whose group did not participate has no name to record. It is not a refusal about a
     // name, it is a rule that matched without capturing one, and counting it as `unknown` would put
     // a pack's own bug into a number that is read as a fact about the repository.
@@ -368,31 +417,35 @@ function* candidatePaths(base: string, context: ResolveContext): Generator<strin
  * this strategy cannot read, whatever the kinds are, and narrowing the field of candidates does not
  * change that: it only hides it behind a plausible pick.
  *
- * **The verdict comes back with the id**, so the three ways to answer null stay three answers. They
+ * **The verdict comes back with the id**, so the five ways to answer null stay five answers. They
  * are not one fact: a name in no node is a vendor component and costs this repository nothing, a
- * name of the wrong kind is a rule's own `targetKinds` doing what it was declared for, and a name in
- * several nodes is a coupling that exists and is not in the graph. Returned as a bare null they were
- * indistinguishable downstream, which is how a family whose yield had gone to zero went on reporting
- * the same silence as a family with nothing to find.
+ * name of the wrong kind is a rule's own `targetKinds` doing what it was declared for, a name in
+ * several nodes is a coupling that exists and is not in the graph, and `local` and `vendor` are the
+ * two where a node was found, was of the right kind, and is still not what the line renders.
+ * Returned as a bare null they were indistinguishable downstream, which is how a family whose yield
+ * had gone to zero went on reporting the same silence as a family with nothing to find.
  */
+/** What one file says about a name, which is everything the root's index cannot say. */
+interface ReadingFile {
+  /** Names this file declares itself, from the pack's `declares` patterns. */
+  declared: Set<string>;
+  /** Whether this file imports the name from the module that is this node id. */
+  importsNameFrom: (name: string, id: string) => boolean;
+  /** Whether this file imports the name from a package the repository depends on. */
+  importsVendorName: (name: string) => boolean;
+}
+
 function resolveName(
   index: NodeIndex,
   shortName: string | undefined,
   targetKinds: string[] | undefined,
-  declared: Set<string>,
-  importsNameFrom: (name: string, id: string) => boolean,
+  file: ReadingFile,
 ): { id: string | null; outcome: NameVerdict; candidates: number } {
   if (shortName === undefined) return { id: null, outcome: "unknown", candidates: 0 };
 
-  // Asked before the index is, because the index cannot answer it: a name the reading file declares
-  // itself is answered inside that file, and every node the root holds under that name is some other
-  // file's. Resolving it would be the confident wrong answer the ordering below already refuses in
-  // its other form.
-  if (declared.has(shortName)) return { id: null, outcome: "local", candidates: 0 };
-
   const candidates =
     index.byShortName.get(shortName) ??
-    foldedCandidates(index, shortName).filter((id) => importsNameFrom(shortName, id));
+    foldedCandidates(index, shortName).filter((id) => file.importsNameFrom(shortName, id));
   if (candidates.length === 0) return { id: null, outcome: "unknown", candidates: 0 };
   if (candidates.length > 1) {
     return { id: null, outcome: "ambiguous", candidates: candidates.length };
@@ -403,6 +456,16 @@ function resolveName(
   if (targetKinds !== undefined && !targetKinds.includes(index.kindById.get(id) ?? "")) {
     return { id: null, outcome: "wrong-kind", candidates: 1 };
   }
+
+  // Asked last, of the one name that was about to become an edge, because that is the only case
+  // either question can change. A name in no node was never at risk of a wrong edge and its honest
+  // verdict is `unknown`, whatever the reading file declares or imports; asking these two first put
+  // every vendor tag in the repository into a refusal count that reads as a repairable loss. What is
+  // left here is the case both were added for: the index found exactly one node, of a kind the rule
+  // allows, and the file that wrote the reference says it meant something else.
+  if (file.declared.has(shortName)) return { id: null, outcome: "local", candidates: 1 };
+  if (file.importsVendorName(shortName)) return { id: null, outcome: "vendor", candidates: 1 };
+
   return { id, outcome: "resolved", candidates: 1 };
 }
 

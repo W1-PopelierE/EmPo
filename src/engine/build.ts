@@ -9,6 +9,7 @@ import type {
 import { compilePack, type ExtractedFile, extractFile } from "./extractor";
 import { tallyNames } from "./names";
 import { byEdgeOrder, byNodeId, compareStrings } from "./order";
+import { vendorPackages } from "./packages";
 import {
   buildNodeIndex,
   compileAliases,
@@ -86,6 +87,11 @@ export function buildRoot(options: BuildRootOptions): RootGraph {
     extensions: options.pack.match.extensions,
     indexNames: options.pack.node.id.indexNames ?? [],
     aliases: compileAliases(options.root.aliases),
+    // Read per root and not per repository, because a root is what carries a pack and the manifest
+    // that says what a package is belongs to the language the pack speaks. A repository whose php
+    // and TypeScript halves both declare a `packages` block gets two sets, each read out of its own
+    // language's manifests, and neither can refuse a name in the other's files.
+    vendorPackages: vendorPackages(options.repoRoot, options.pack.packages, options.ignore),
   };
   const edges: GraphEdge[] = [];
   const names: NameOutcome[] = [];

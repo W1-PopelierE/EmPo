@@ -547,6 +547,35 @@ export const packSchema = z
      */
     declares: z.array(regex).optional(),
     /**
+     * Where this language's package manager writes what a repository depends on, so a bare specifier
+     * can be told apart from a path into this repository.
+     *
+     * The need is the last of the four ways a `short-name` strategy was measured to be wrong, and the
+     * only one no rule about names can reach. `import Button from "@mui/material/Button"` beside a
+     * local `Button.tsx` gives the root's index one node under that name, of the right kind, in one
+     * place, and the tag resolves to a file the line does not render. On marmelab/react-admin that
+     * was 189 of 2715 template edges, all of them MUI. Nothing in the tag, the file name or the kind
+     * separates it from a real local component; the only thing that does is that `@mui/material` is a
+     * package this repository installs, and the manifest is where that is written down.
+     *
+     * Both fields are read and both are needed. A monorepo's own workspaces are imported exactly like
+     * third-party packages — `@calcom/ui`, `react-admin`, `ra-core` — and a rule that refused every
+     * bare specifier would delete the edges this family exists for, since a component reached through
+     * a workspace barrel is precisely the coupling no import parser sees. So the names the manifests
+     * declare (`name`) are subtracted from the names they depend on (`dependencies`), and what is
+     * left is the set that is not this repository.
+     *
+     * Declared as field names rather than as values, like `aliasSources` above, so composer's
+     * `require` fills it for php exactly as npm's `dependencies` does for TypeScript.
+     */
+    packages: z
+      .object({
+        file: z.string().min(1),
+        name: z.string().min(1),
+        dependencies: z.array(z.string().min(1)).min(1),
+      })
+      .optional(),
+    /**
      * Where this language's toolchain writes its import aliases, so `empo init` can seed config
      * `aliases` instead of leaving a human to copy a tsconfig by hand.
      *

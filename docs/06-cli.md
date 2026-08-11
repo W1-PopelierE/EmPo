@@ -904,31 +904,46 @@ sampled edges survive and each was opened at its cited line and confirmed real. 
 know: a component rendered with no import at all — a globally registered Vue component — is reachable
 through an exact-name match and never through a fold, since there is no import to corroborate it.
 
-The ceiling that remains after all of this: a tag whose component comes from a third-party package
-still resolves to a local file whose basename collides with it **exactly**, so react-native's `<Text>`
-in a repository holding `src/components/Text.tsx` becomes an edge to a file that line does not render.
-Measured, 189 of react-admin's 2715 template edges are MUI components, 8 in cal.com and 8 in
-excalidraw. A sample of 38 resolved edges opened at their cited lines came out 32 real and 6 wrong,
-and all 6 were either that collision or the `declared where they are used` case above. The yields
-those runs printed: react-admin 7672 of 17415 references resolved with 3199 ambiguous, excalidraw 589
-of 1264, cal.com 2499 of 5917 — which is the point of the block, since a reader who can see
-7672 of 17415 knows what weight to put on an answer built out of them.
+A tag whose component comes from a package used to resolve to a local file whose basename collided
+with it **exactly** — react-native's `<Text>` in a repository holding `src/components/Text.tsx`
+became an edge to a file that line does not render, and that was 189 of react-admin's template edges.
+It is refused now, as `imported from a package`: the repository's own manifests say which names are
+packages it depends on and are not itself, and a name the reading file imports from one of those is
+declined even though the index holds exactly one node for it, of the right kind
+([04-language-packs](04-language-packs.md)). The yields the current runs print: react-admin 7165 of
+17415 references resolved with 3386 ambiguous, 5617 in no node, 527 of the wrong kind, 213 declared
+where they are used and 507 imported from a package; excalidraw 563 of 1264, cal.com 2476 of 5917,
+the React Native application 735 of 1531. Three of those four are **lower** than the build before,
+react-admin by 507 from 7672, and lower is the result rather than a regression: those references were
+resolving to the wrong file. That is the point of the block, since a reader who can see 7165 of 17415
+knows what weight to put on an answer built out of them.
+
+What still gets an edge it should not: a name imported from another **workspace** package of the same
+monorepo, since a workspace is a name the repository is and can never be refused on that evidence —
+cal.com's `WebhookListItem.tsx:222` imports `Button` from the internal `@coss/ui` and the edge lands
+on `packages/ui/components/button/Button.tsx`. And a dotted tag contributes its head, so
+excalidraw's `<DropdownMenu.Trigger>` reaches the file holding the namespace object rather than the
+one holding the component.
 
 A family that refused something adds a clause per refusal it made: `, N ambiguous` for a name several
 nodes carry, `, N in no node` for a name no node carries (a vendor component, a Blade built-in like
 `<x-slot>`), `, N of the wrong kind` for a name in exactly one node of a kind the rule's
-`targetKinds` does not list, and `, N declared where they are used` for a name the file that wrote
-the reference declares itself, through the pack's `declares` patterns
-([04-language-packs](04-language-packs.md)). That last one is asked **before** the index is and so
-takes precedence over the other three: a name answered inside the reading file is answered there
-whatever the index holds, since every node carrying that name elsewhere belongs to some other file.
-It is the one refusal that prevents a wrong edge rather than losing a right one, which is why it is
-worth a clause of its own rather than being folded into `in no node` — measured on
-marmelab/react-admin, 139 of 2715 template edges were a file shadowing the name it renders with its
-own declaration, and before this they were 139 edges pointing at somebody else's file.
+`targetKinds` does not list, `, N declared where they are used` for a name the file that wrote
+the reference declares itself, through the pack's `declares` patterns, and
+`, N imported from a package` for a name that file imports from a package the repository depends on,
+through the pack's `packages` block ([04-language-packs](04-language-packs.md)). The last two are
+asked **last**, of the one name that had survived the other three and was about to become an edge,
+because that is the only case either can change: a name in no node was never at risk of a wrong edge
+and its honest verdict is `in no node`, whatever the reading file declares or imports. What is left
+is the case both exist for — the index found exactly one node, of a kind the rule allows, and the
+file that wrote the reference says it meant something else. They are the two refusals that prevent a
+wrong edge rather than losing a right one, which is why each is worth a clause rather than being
+folded into `in no node`: measured on marmelab/react-admin, 213 references are a file shadowing the
+name it renders with its own declaration and 507 are a component imported from a package, and before
+these they were edges pointing at somebody else's file.
 
 A clause for a refusal that did not happen is left out, because the
-denominator has already stated that zero and four `0 ...` clauses on every healthy family is what
+denominator has already stated that zero and five `0 ...` clauses on every healthy family is what
 gets a line skimmed. Where a family has ambiguous names, an indented second line names them,
 `"OrderTable" (2 files, 5 references)`, most references first and then most files, five at most with
 `, and N more` for the rest. That second line is what makes the count actionable: the number says the
