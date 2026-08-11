@@ -28,6 +28,15 @@ class ReceiptController
         $mail->view('orders.row');
         TextView::make('orders.row');
 
+        // Qualified by a namespace, so none of the three names Laravel's. `Acme\View` is this
+        // application's own class that happens to be called View, and `Acme\view()` its own
+        // function: the framework's are reachable unqualified or with the one leading separator
+        // that means the global namespace, and by nothing else. Each of these three lines is here
+        // to fail if a lookbehind stops excluding the separator.
+        Acme\View::make('orders.row');
+        Acme\Route::view('/receipts', 'orders.row');
+        Acme\view('orders.row');
+
         return \View::make('layouts.app');
     }
 }

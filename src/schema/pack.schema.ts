@@ -654,6 +654,24 @@ export const packSchema = z
       }
     }
 
+    // A view extension the scanner never admits indexes no template, and the strategy then resolves
+    // every name it reads against an empty map. `scanRoot` globs `**/*<extension>` per entry in
+    // `match.extensions` (src/engine/scanner.ts), so a file reaches `buildNodeIndex` only if its
+    // name ends in one of those, and `.blade.php` qualifies through its plain `.php` tail exactly as
+    // `commentsByExtension`'s compound keys do. A pack declaring `.twig` beside a php `match` block
+    // passes every other check here and ships a family that can never produce an edge, which is the
+    // same silence the missing-`views` case above is refused for.
+    for (const [position, extension] of (pack.views?.extensions ?? []).entries()) {
+      if (pack.match.extensions.some((scanned) => extension.endsWith(scanned))) continue;
+      ctx.addIssue({
+        code: "custom",
+        path: ["views", "extensions", position],
+        message:
+          `"${extension}" ends in none of the extensions this pack scans ` +
+          `(${pack.match.extensions.join(", ")}), so no template carrying it is ever read`,
+      });
+    }
+
     // A `view` rule with no view roots to resolve against reads every name and resolves none, and
     // a family whose yield is zero looks exactly like a corpus with nothing to find. Answer at load.
     if (pack.views === undefined) {

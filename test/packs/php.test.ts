@@ -469,10 +469,19 @@ describe("php pack", () => {
       ]);
     });
 
-    test("reads the facade spelling and refuses a method call that merely ends in view(", () => {
-      // `\View::make('layouts.app')` resolves; `$mail->view('orders.row')` on the line above it is
-      // a method on somebody's object and must not become an edge. Both are in ReceiptController,
-      // so one assertion holds the lookbehind in place.
+    test("reads the facade spelling and refuses every near-miss beside it", () => {
+      // ReceiptController holds one real render and five things shaped like one, so a single
+      // assertion holds all four lookbehinds in place. `\View::make('layouts.app')` resolves.
+      // `$mail->view(...)` is a method on somebody's object; `TextView::make(...)` is a class whose
+      // name merely ends in the facade's; and `Acme\View::make(...)`, `Acme\Route::view(...)` and
+      // `Acme\view(...)` name this application's own class and function rather than Laravel's,
+      // since the framework's are reachable unqualified or behind the one leading separator that
+      // means the global namespace.
+      //
+      // What the last of those costs is the fully-qualified inline facade,
+      // `Illuminate\Support\Facades\View::make(...)`, which real code writes as a `use` plus a bare
+      // `View::make(...)`. A missed edge is the acceptable direction here and an invented one is
+      // not, which is the same trade every refusal in this pack makes.
       expect(viewTargets("Acme\\Http\\Controllers\\ReceiptController")).toEqual([
         "resources/views/layouts/app.blade.php",
       ]);

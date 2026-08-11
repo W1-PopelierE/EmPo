@@ -564,10 +564,23 @@ naming another (`@extends('layouts.app')`, `@include('orders.row')`), a class na
 (`view('orders.show')`, `View::make(...)`) and a route naming one with no controller in between
 (`Route::view('/about', 'pages.about')`, whose **second** argument is the template).
 
-What each of those looks like as a pattern is pack data and stays there, and two of the four rules
-carry a lookbehind for the same reason `short-name`'s refusals exist: `$mail->view(...)` is a method
+What each of those looks like as a pattern is pack data and stays there, and three of the four rules
+carry a lookbehind for the same reason `short-name`'s refusals exist. `$mail->view(...)` is a method
 on somebody's object and `TextView::make(...)` is a class whose name merely ends in the facade's, and
-a rule that read every `view(` in the language would invent an edge out of either.
+a rule that read every `view(` in the language would invent an edge out of either. So is a **name
+qualified by a namespace**: `Acme\View::make(...)` and `Acme\view(...)` are an application's own
+class and function, and the framework's are reachable unqualified or behind the one leading separator
+that means the global namespace, so each lookbehind excludes the separator while the pattern admits
+an optional leading one. What that last refusal costs is the fully-qualified inline facade,
+`Illuminate\Support\Facades\View::make(...)`, which real code writes as a `use` and a bare
+`View::make(...)`; a missed edge is the acceptable direction and an invented one is not.
+
+The `views` block is checked against `match.extensions` at load for the same reason the block is
+required at all. `scanRoot` globs `**/*<extension>` per entry in `match.extensions`, so a template
+whose name ends in none of them is never read and never indexed, and a pack declaring `.twig` beside
+a php `match` block would pass every other check and ship a family that cannot produce an edge.
+`.blade.php` qualifies through its plain `.php` tail, exactly as a compound `commentsByExtension`
+key does.
 
 What it resolves is a **path below a root**, never a name looked up in the index of node names. A
 view name is not a short name: `orders/show` is where the file sits, and the only thing no line of

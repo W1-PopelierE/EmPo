@@ -533,7 +533,7 @@
       "symbol": null,
       "evidence": {
         "file": "app/Http/Controllers/ReceiptController.php",
-        "line": 31
+        "line": 40
       }
     },
     {

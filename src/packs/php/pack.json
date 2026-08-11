@@ -102,17 +102,17 @@
         "normalize": ["dot-to-slash"]
       },
       {
-        "pattern": "(?<![\\w>$:])view\\(\\s*['\"]([A-Za-z0-9._/-]+)['\"]",
+        "pattern": "(?<![A-Za-z0-9_\\\\>$:])\\\\?view\\(\\s*['\"]([A-Za-z0-9._/-]+)['\"]",
         "resolve": "view",
         "normalize": ["dot-to-slash"]
       },
       {
-        "pattern": "(?<![A-Za-z0-9_])View::make\\(\\s*['\"]([A-Za-z0-9._/-]+)['\"]",
+        "pattern": "(?<![A-Za-z0-9_\\\\])\\\\?View::make\\(\\s*['\"]([A-Za-z0-9._/-]+)['\"]",
         "resolve": "view",
         "normalize": ["dot-to-slash"]
       },
       {
-        "pattern": "(?<![A-Za-z0-9_])Route::view\\(\\s*['\"][^'\"]*['\"]\\s*,\\s*['\"]([A-Za-z0-9._/-]+)['\"]",
+        "pattern": "(?<![A-Za-z0-9_\\\\])\\\\?Route::view\\(\\s*['\"][^'\"]*['\"]\\s*,\\s*['\"]([A-Za-z0-9._/-]+)['\"]",
         "resolve": "view",
         "normalize": ["dot-to-slash"]
       }
