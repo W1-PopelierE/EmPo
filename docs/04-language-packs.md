@@ -82,6 +82,14 @@ exactly the honesty this tradeoff requires.
     "hook":    [ { "pattern": "([A-Za-z0-9_]+)::observe\\(([A-Za-z0-9_]+)::class", "resolve": "observer" } ]
   },
 
+  // 4b. optional: how this language spells a declaration, first group the name declared. Read by
+  //     the two name-resolving strategies above and by nothing else, so a tag naming something the
+  //     rendering file declares itself is refused instead of resolved against some other file of
+  //     that basename (section 4). Shown as the typescript pack declares it; php declares none
+  "declares": [
+    "^[ \\t]*(?:export[ \\t]+)?(?:default[ \\t]+)?(?:async[ \\t]+)?function[ \\t*]+([A-Za-z_$][A-Za-z0-9_$]*)"
+  ],
+
   // 5. cross-language symbol tables (level 2)
   "produces": [
     { "symbol": "http-route",
@@ -403,7 +411,7 @@ turns a captured string into a target node id:
 | `module-path` | a module-id node by resolving a relative import against the importing file |
 | `view` | a template node by resolving a view name against the framework's view roots |
 | `observer` | a hook edge from the observed model to the listener class |
-| `short-name` | a class-id node by looking one short name up in the index of names |
+| `short-name` | a class-id node by looking one short name up in the index of names, exact spelling first and a case fold only where that finds none, and a fold only where the reading file's own import corroborates it |
 
 A TypeScript pack uses `import` with `resolve: module-path` and has no `hook` family. The php pack
 that ships uses all five, `template` included since it gained the Blade component tag, and the
@@ -531,19 +539,23 @@ nothing (a vendor component, or a Blade built-in like `<x-slot>`), and so does a
 ambiguity bites harder here than it does for observers: `forms.text-input` and `fields.text-input`
 both fold to `TextInput`, and a component library with namespaced folders is the normal case rather
 than the odd one. **Resolved against refused is counted rather than assumed**, on whatever repository
-the pack is pointed at. Every name these two strategies read reaches one of four verdicts:
+the pack is pointed at. Every name these two strategies read reaches one of five verdicts:
 `resolved`, `unknown` (the name is in no node at all — a vendor component, a Blade built-in like
-`<x-slot>`), `ambiguous` (the name is in several nodes, so no edge is emitted to any of them) and
-`wrong-kind` (the name is in exactly one node, of a kind the rule's `targetKinds` does not list). The
+`<x-slot>`), `ambiguous` (the name is in several nodes, so no edge is emitted to any of them),
+`wrong-kind` (the name is in exactly one node, of a kind the rule's `targetKinds` does not list) and
+`local` (the file that wrote the reference declares that name itself, so no other node can be what
+the reference means — the pack's `declares` patterns below are what say so). The
 tally is recorded on the graph as `names`, one record per edge family, counted per **reference read**
 and not per distinct name, and both `empo index` and `empo doctor` print it
 ([06-cli](06-cli.md)).
 Where the rule declares `targetKinds`, the uniqueness question is asked first and the
 filter is applied to whatever survived it, so a name carried by two nodes is ambiguous even where
 only one of the two is a legal target: `resolveName` in `engine/resolver.ts` refuses on the count
-before it looks at a kind, and its docstring records why. That order is also why the two refusals are
-counted apart: `ambiguous` is the only one of the three that hides a coupling this repository really
-has.
+before it looks at a kind, and its docstring records why. That order is also why the refusals are
+counted apart: `ambiguous` is the only one of the four that hides a coupling this repository really
+has, `unknown` is the ordinary cost of reading a language whose vendor components are spelled like
+local ones, `wrong-kind` is a rule's own `targetKinds` doing what it was declared for, and `local` is
+the reference answering itself.
 
 **It bites harder again in React, and now with a number.** The refusal is per name and not per
 reference, so one duplicate basename anywhere in the repository removes every edge to that name,
@@ -563,6 +575,87 @@ that both runs say so, so "this family found nothing" and "this family had nothi
 reading alike — that was the whole of the defect, and a strategy whose yield can be zero without
 saying so was not one anybody could call proven. Narrowing the refusal is a separate and larger
 change, and nothing here should be read as having made it.
+
+**That larger change landed afterwards, and it narrows the refusal in exactly one direction: case.**
+A file naming convention is not a language. `<Badge />` is written `Badge.tsx` in one React
+repository and `badge.tsx` in the next, and both are a component this graph holds, so `buildNodeIndex`
+now keeps a second index keyed by the lower-cased name and `resolveName` asks it **only** where the
+exact spelling is carried by no node at all. The order is the whole of the safety: a repository that
+spells its files as it spells its tags is answered by the exact map and can never be handed an answer
+a fold produced. `targetKinds` still filters whatever survives, so nothing about the two paragraphs
+above is softened for a repository that already resolved. **Measured** on a real 186-file React Native
+application whose components are all named in lowerCamelCase (`src/components/badge.tsx`, rendered
+`<Badge />`): `template` resolved 3 of 1531 tag references before the fold and 735 of 1531 after it,
+with 682 in no node and 114 `local`. Every one of those 1528 earlier misses was `unknown`, not one was
+an ambiguity anybody could have repaired by renaming a file, which is what says the convention and not
+the repository was what the strategy could not read.
+
+**A fold is corroborated before it resolves, and an exact match is not**, which is the other half of
+the safety and the half a first version of this section did without. A tag spelled exactly as a file
+is the language's own convention answering; a fold is the engine guessing that a naming style is in
+play, and a guess needs a witness. The witness is the rendering file's own imports: a folded candidate
+stands only where that file carries an `import` capture whose statement text binds the name and whose
+specifier resolves — through `resolveModulePath`, so relative paths and the root's configured aliases
+— to exactly that candidate. **Measured** on cal.com, which names its shadcn-style files
+`toaster.tsx`, `collapsible.tsx` and `textarea.tsx`: the uncorroborated fold produced 53 extra
+template edges there, and a sample of 6 was 5 wrong — `<Toaster />` imported from the `sonner`
+package landing on the local `toaster.tsx`, `<Collapsible>` from `@radix-ui/react-collapsible`,
+`<TextArea>` from a `@calcom/ui` barrel whose real file is `inputs/Input.tsx`. Corroboration removed
+46 of those 53, every refuted one included, and kept the real edge
+(`apps/web/app/layout.tsx:167 -> apps/web/app/providers.tsx`, imported as `./providers`). On the React
+Native application, where the tags really do name those files, 12 of 12 sampled edges survive and each
+was opened at its cited line and confirmed real.
+
+Two consequences of asking the witness **per candidate and before the uniqueness test**. A fold no
+import corroborates is `unknown` and not `ambiguous`: nothing was weighed, because nothing was
+admitted as a candidate. And a name two files carry once case is set aside still resolves where the
+reading file imports exactly one of them — which is not the ambiguity the exact map refuses, since
+there nothing in the file says which is meant and here the file has said. The cost is at the other
+end: a component rendered with no import at all, a globally registered Vue component, is reachable
+through an exact-name match and never through a fold.
+
+**The refusal also widened in one direction, and that half needed a new pack field.** A
+name-resolving strategy asks the whole root's index which file carries a name, and the one file it
+never asks is the one doing the asking — so a story file holding its own `const SelectInput = ...`
+and rendering `<SelectInput />` collects an edge to a real `SelectInput.tsx` in another package that
+it neither imports nor renders. **Measured** on marmelab/react-admin, 139 of 2715 template edges were
+exactly that. A name the reading file declares itself is answered inside that file, so the strategy
+refuses it and reports the fifth verdict, `local`: not a coupling lost, a wrong one prevented. The
+check is made **before** the index is consulted, so `local` outranks `unknown`, `ambiguous` and
+`wrong-kind` rather than competing with them, and it carries `candidates: 0` because no node was ever
+counted; `nameLines` prints it as `N declared where they are used`.
+
+Which spellings declare a name is a fact about the language, so it is pack data like every other one,
+and the field is **`declares`**: a list of patterns whose **first capture group** is a name the file
+declares itself, one per shape the language spells a declaration in. They are compiled with `gm`
+and matched against the same string-blanked, comment-masked view the tag rules read, on the same
+argument those rules make — a name inside a quoted example is prose about a declaration, not one. The
+names one file yields are deduplicated and sorted before they are stored, so two runs over the same
+bytes write the same `graph.json`. A pattern that matches and captures nothing contributes nothing:
+a pack's own bug is not a declaration, and admitting the empty string would make every
+name-resolving strategy in that pack refuse every name it read. **A pack that declares no `declares`
+behaves exactly as every pack did before the field existed**, which is the same bargain `pathGlob`,
+`maskStrings` and `targetKinds` each struck: the php pack declares none and the edges it emits are
+byte-identical. The typescript pack declares three, one per shape TypeScript spells a declaration in
+— `function` with its `export`, `default`, `async` and generator prefixes, `class` with its `export`,
+`default` and `abstract` ones, and `const`/`let`/`var` followed by a `:` or an `=`, which is the form
+every React function component is actually written in. That moved the pack from 1.7.0 to 1.8.0, and
+section 8's pin demanded the bump rather than trusting anybody to remember it.
+
+**What neither of them fixed is worth stating plainly, because a floor read as a ceiling is the
+failure mode this whole document is written against.** On react-admin, 7672 of 17415 names resolve
+and 3199 come back `ambiguous`, which is the ordinary shape of a tree with feature directories;
+excalidraw resolves 589 of 1264 and cal.com 2499 of 5917. The wrong answers that remain are almost
+all one shape: a tag whose component is imported from a **third-party package** whose name collides
+with a local file's basename still resolves to the local file, because the vendor import resolves to
+no node and leaves no competing edge for the name to lose to. `import Button from
+'@mui/material/Button'` beside a local `Button.tsx` is the whole of it, and it is not rare — 189 of
+react-admin's 2715 template edges name a MUI component, 8 of cal.com's and 8 of excalidraw's. A
+sample of 38 resolved edges opened at the line each cites read 32 real and 6 wrong, and all six were
+either that package collision or the shadowed-declaration case `declares` now refuses. Reading the
+import list of the file that wrote the tag on the **exact** path is what would close the rest, and
+nothing here does it: corroboration reads that list only to witness a fold, never to second-guess a
+name a node carries exactly as written.
 
 The alternative for the namespace, declaring a root prefix such as `App\View\Components\` in the
 pack, was rejected: that is a property of the repository rather than of the language, composer and
@@ -635,6 +728,17 @@ a type module nobody rendered. The same file renders `<Total />` where `react/ca
 order would have resolved, and it produces **no edge**. This is also where piece 2 of the React work
 pays for piece 3, and the two are not independent: without a `component` kind there is no kind to
 name here, and the filter would have nothing to say.
+
+**Both later changes to the strategy reach these two rules and nothing else in either shipped pack**,
+since they are the only `short-name` rules pointed at a language that spells its components one way
+and its files another. The case fold is what lets a `<CardFooter />` find `cardFooter.tsx` in a file
+that imports it as such, which is how half the React repositories in the world name a component file;
+`declares` is what stops a
+`<CardFooter />` in a file holding its own `const CardFooter = () => ...` finding that file at all.
+The php pack's `template` rule is reached by neither in practice: a Blade tag is kebab-cased and
+normalized into PascalCase before the index sees it, and PSR-4 makes the file's basename the class's
+own spelling, so the exact map answers it and the fold is never asked. And php declares no `declares`
+patterns at all, so every name it reads is looked up exactly as it was before both fields existed.
 
 **A bare opening `<Name>` is deliberately not matched, and this is the clause the measurement paid
 for.** An opening-tag rule cannot be told apart from a TypeScript generic. Measured over the tracked
@@ -1172,7 +1276,9 @@ Two, deliberately different, to keep the interface honest:
   syntax, `.blade.php` masking `{{-- --}}`.
 - **typescript** (`strategy: module-path`, three `import` rules, two `template` rules for the JSX and
   Vue component tag, scoped with `pathGlob` to `**/*.{tsx,jsx,vue}` and confined by `targetKinds` to
-  landing on a `component` or a `screen`, no `hook` family at all, http-route `consumes` rules for
+  landing on a `component` or a `screen`, three `declares` patterns so those two rules refuse a tag
+  naming something the rendering file declares itself, no `hook` family at all, http-route
+  `consumes` rules for
   fetch and axios, and one `produces` rule that reads an Inertia page name off the file's path rather
   than out of its source).
   It is the mirror image of the php pack on every
@@ -1252,11 +1358,29 @@ ambiguous, comes back red from the pack's own corpus rather than from somebody's
 with no name-resolving rule snapshots an empty array, which is the same statement the hazard axis
 makes with its own. The diff is keyed on the edge family and reports `changed names <family>` with
 the expected and the actual record both printed under it, because the whole record is what says which
-of the four counts moved.
+of the five counts moved.
 
 **The typescript corpus grew a `<Spinner />` in `react/cards/OrderCard.tsx`** to close the one hole
-in it. `unknown`, a name carried by no node at all, was the one verdict of the four that corpus never
+in it. `unknown`, a name carried by no node at all, was the one verdict the corpus never
 reached, so the separation between "in no node" and "ambiguous" — the separation the two counts exist
 to keep — was ungated. `Spinner` is imported from `@acme/ui` and is defined nowhere in the tree, so
 the tag is refused before ambiguity or `targetKinds` is consulted, which is the ordinary cost of
 reading a language whose vendor components are spelled exactly like local ones.
+
+**Three more files landed with the case fold and `declares`, for the same reason.** A fold and a
+refusal are both invisible in the edge list of a corpus that never asks for one, so the corpus now
+asks. `react/cards/cardFooter.tsx` is a component file named in lowerCamelCase while the tag that
+renders it is `<CardFooter />`, and `react/cards/CardShelf.tsx` renders exactly that tag: the exact
+index carries `cardFooter` and nothing carries `CardFooter`, so before the fold that reference was
+`unknown` and the component was rendered, in this graph, by nobody. `CardShelf.tsx` imports it as
+`./cardFooter`, which is what corroborates the fold: strip that import and the reference goes back to
+`unknown`, so the snapshot pins the witness as well as the fold. `CardHeader.tsx` beside it is
+spelled as its own tag and is answered by the exact map with no witness asked for, which is what pins
+the fold as a fallback rather than as the primary lookup. `react/cards/CardStory.tsx` is the other
+half: it declares its own
+`const CardFooter = () => ...` and renders both `<CardFooter />` and `<CardHeader />`, so the
+snapshot pins that the shadowed name is refused as `local` while the tag the file does not declare
+still resolves — the refusal is about the name, not about the file that wrote it. The corpus went
+from 40 nodes to 43 and its `template` record from 14 resolved to 16, with `local` at 1, and no
+count that was there before moved: `unknown` is still 1, `ambiguous` still 2 over `Badge` and
+`Total`, `wrongKind` still 1.

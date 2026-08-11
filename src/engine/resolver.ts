@@ -21,6 +21,16 @@ export interface NodeIndex {
   /** Short name to node ids. More than one id means the name is ambiguous and is not resolved. */
   byShortName: Map<string, string[]>;
   /**
+   * The same index keyed by the lower-cased name, consulted only when the exact spelling is in no
+   * node. A file naming convention is not a language: `<Badge />` is written `Badge.tsx` in one
+   * React repository and `badge.tsx` in the next, and both are a component the graph holds.
+   *
+   * It is a fallback and not the primary index, so a repository that spells its files exactly as it
+   * spells its tags resolves through the exact map and can never be answered by a fold. What it
+   * yields is corroborated before it resolves; `foldedCandidates` below is where that is argued.
+   */
+  byFoldedName: Map<string, string[]>;
+  /**
    * Node id to the kind its pack's `kindRules` gave it, for the rules that declare `targetKinds`.
    * The kind is on the node either way; this is the lookup a name-resolving strategy needs and the
    * node list cannot give it without a scan per capture.
@@ -95,6 +105,7 @@ export function compileAliases(aliases: Record<string, string[]> | undefined): A
 export function buildNodeIndex(files: ExtractedFile[]): NodeIndex {
   const ids = new Set<string>();
   const byShortName = new Map<string, string[]>();
+  const byFoldedName = new Map<string, string[]>();
   const kindById = new Map<string, string>();
 
   for (const file of files) {
@@ -103,9 +114,13 @@ export function buildNodeIndex(files: ExtractedFile[]): NodeIndex {
     const bucket = byShortName.get(file.name);
     if (bucket) bucket.push(file.id);
     else byShortName.set(file.name, [file.id]);
+    const folded = file.name.toLowerCase();
+    const foldedBucket = byFoldedName.get(folded);
+    if (foldedBucket) foldedBucket.push(file.id);
+    else byFoldedName.set(folded, [file.id]);
   }
 
-  return { ids, byShortName, kindById };
+  return { ids, byShortName, byFoldedName, kindById };
 }
 
 /** Strip a leading separator and collapse the doubled backslashes a quoted class name carries. */
@@ -139,9 +154,36 @@ export function resolveEdges(
   const edges: GraphEdge[] = [];
   const names: NameOutcome[] = [];
 
+  const declared = new Set(file.declares);
+
+  /**
+   * Does this file import `name` from the module that is `id`? Asked of a folded candidate only,
+   * and answered out of the captures the file already produced rather than out of a new pack rule:
+   * an `import` capture's group 0 is the statement as written, so the clause that binds the name and
+   * the specifier that says where it came from are both already here.
+   *
+   * Only a `module-path` capture can witness anything, which is what keeps this a TypeScript-shaped
+   * answer without a TypeScript-shaped rule in the engine: php's imports resolve by `fqcn`, so no
+   * php fold is ever corroborated and that pack behaves exactly as it did before the fold existed.
+   *
+   * The name is escaped before it is spliced into a pattern. Every name that reaches here today is
+   * an identifier, and a strategy that one day reads a name holding a regex metacharacter would
+   * otherwise turn a pack's capture into a pattern this engine compiles.
+   */
+  const importsNameFrom = (name: string, id: string): boolean => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const binds = new RegExp(`(?:^|[^A-Za-z0-9_$])${escaped}(?:[^A-Za-z0-9_$]|$)`);
+    return file.captures.some(
+      (capture) =>
+        capture.resolve === "module-path" &&
+        binds.test(capture.groups[0] ?? "") &&
+        resolveModulePath(file.file, capture.groups[1] ?? "", index, context) === id,
+    );
+  };
+
   /** Look one name up, record the verdict, and hand back the id for the caller to use or not. */
   const read = (raw: string | undefined, capture: Capture): string | null => {
-    const found = resolveName(index, raw, capture.targetKinds);
+    const found = resolveName(index, raw, capture.targetKinds, declared, importsNameFrom);
     // A capture whose group did not participate has no name to record. It is not a refusal about a
     // name, it is a rule that matched without capturing one, and counting it as `unknown` would put
     // a pack's own bug into a number that is read as a fact about the repository.
@@ -337,10 +379,20 @@ function resolveName(
   index: NodeIndex,
   shortName: string | undefined,
   targetKinds: string[] | undefined,
+  declared: Set<string>,
+  importsNameFrom: (name: string, id: string) => boolean,
 ): { id: string | null; outcome: NameVerdict; candidates: number } {
   if (shortName === undefined) return { id: null, outcome: "unknown", candidates: 0 };
 
-  const candidates = index.byShortName.get(shortName) ?? [];
+  // Asked before the index is, because the index cannot answer it: a name the reading file declares
+  // itself is answered inside that file, and every node the root holds under that name is some other
+  // file's. Resolving it would be the confident wrong answer the ordering below already refuses in
+  // its other form.
+  if (declared.has(shortName)) return { id: null, outcome: "local", candidates: 0 };
+
+  const candidates =
+    index.byShortName.get(shortName) ??
+    foldedCandidates(index, shortName).filter((id) => importsNameFrom(shortName, id));
   if (candidates.length === 0) return { id: null, outcome: "unknown", candidates: 0 };
   if (candidates.length > 1) {
     return { id: null, outcome: "ambiguous", candidates: candidates.length };
@@ -352,4 +404,34 @@ function resolveName(
     return { id: null, outcome: "wrong-kind", candidates: 1 };
   }
   return { id, outcome: "resolved", candidates: 1 };
+}
+
+/**
+ * The nodes carrying a name once case is set aside, and only worth asking for when the exact
+ * spelling carried none.
+ *
+ * The whole yield of `short-name` on a repository can turn on this. Measured on a real 186-file
+ * React Native application, whose components live in `src/components/badge.tsx` and are rendered
+ * as `<Badge />`: 3 of 1531 tag references resolved before this fallback, and none of the 1528
+ * misses was an ambiguity anybody could have repaired by renaming a file. A pack that reads tags and
+ * yields nothing on the commonest file-naming convention in the language is not one anybody can call
+ * proven, whatever it does on a corpus written to be read.
+ *
+ * **A fold is corroborated before it resolves, and an exact match is not.** A tag spelled exactly as
+ * a file is the language's own convention answering; a fold is this engine guessing that a naming
+ * style is in play, and a guess needs a witness. The witness is the rendering file's own imports:
+ * the fold stands only where that file imports this name from this module. Measured on cal.com,
+ * which names its shadcn-style files `toaster.tsx` and `collapsible.tsx`, the uncorroborated fold
+ * produced 53 edges of which a sampled 5 in 6 were wrong — `<Toaster />` from the `sonner` package
+ * landing on a local file that merely folds onto its name. Every one of those refuses here, and on
+ * the React Native application, where the tags really do name those files, 12 of 12 sampled edges
+ * survive.
+ *
+ * The corroboration is asked per candidate and before the uniqueness test, so a name two files carry
+ * once case is set aside resolves when the reading file imports exactly one of them. That is not the
+ * ambiguity the exact map refuses: there, nothing in the file says which is meant, and here the file
+ * has said.
+ */
+function foldedCandidates(index: NodeIndex, shortName: string): string[] {
+  return index.byFoldedName.get(shortName.toLowerCase()) ?? [];
 }

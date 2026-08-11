@@ -707,6 +707,48 @@ describe("queryCommand", () => {
     expect(answer.caveat).toBe(FLOOR_NOT_CEILING);
   });
 
+  test("states what the name-resolving rules yielded beside the answer they helped build", () => {
+    // The surface the count was missing from. `empo index` and `empo doctor` have printed it since
+    // it was counted, and neither is what a reader is looking at when they decide what a change can
+    // reach. Measured on a real React Native application: `template` resolved 3 of 1531 tag
+    // references and `empo query` said nothing, so a blast radius holding almost none of that
+    // repository's component edges read exactly like a complete one.
+    const graph = renderedComponentGraph();
+    const printed = capture(() =>
+      queryCommand(
+        repoWithGraph({
+          ...graph,
+          names: [
+            {
+              family: "template",
+              resolved: 3,
+              unknown: 1528,
+              ambiguous: 0,
+              wrongKind: 0,
+              local: 0,
+              ambiguousNames: [],
+            },
+          ],
+        }),
+        "src/Card.tsx",
+      ),
+    );
+
+    expect(printed).toContain("names      template 3 of 1531 resolved, 1528 in no node");
+  });
+
+  test("says nothing about names where no rule read one, rather than a line about zero", () => {
+    // The two silences `nameLines` keeps apart are answers about the graph, not about the node being
+    // queried, and both already print under `empo index` and `empo doctor`. An answer over a graph
+    // whose rules read no name at all that ended with a sentence about name-resolving rules would be
+    // one more line to skim past on every query, which is how the line that matters stops being read.
+    const printed = capture(() =>
+      queryCommand(repoWithGraph(ambiguousGraph()), "Acme\\Billing\\Invoice"),
+    );
+
+    expect(printed).not.toContain("names      ");
+  });
+
   test("refuses a query with no symbol and no mode flag, with exit code 2", () => {
     const error = expectEmpoError(2, () => capture(() => queryCommand(repo, undefined)));
 

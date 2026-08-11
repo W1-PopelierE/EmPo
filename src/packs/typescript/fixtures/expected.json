@@ -286,6 +286,30 @@
       "assertsValue": false
     },
     {
+      "id": "src/react/cards/CardShelf.tsx",
+      "file": "src/react/cards/CardShelf.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "CardShelf",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/cards/CardStory.tsx",
+      "file": "src/react/cards/CardStory.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "CardStory",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
       "id": "src/react/cards/CardTemplates.tsx",
       "file": "src/react/cards/CardTemplates.tsx",
       "root": ".",
@@ -340,6 +364,18 @@
       "lang": "typescript",
       "kind": "component",
       "name": "Total",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/cards/cardFooter.tsx",
+      "file": "src/react/cards/cardFooter.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "cardFooter",
       "produces": [],
       "consumes": [],
       "isTest": false,
@@ -846,6 +882,46 @@
       }
     },
     {
+      "from": "src/react/cards/CardShelf.tsx",
+      "to": "src/react/cards/cardFooter.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/CardShelf.tsx",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/react/cards/CardShelf.tsx",
+      "to": "src/react/cards/cardFooter.tsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/CardShelf.tsx",
+        "line": 15
+      }
+    },
+    {
+      "from": "src/react/cards/CardStory.tsx",
+      "to": "src/react/cards/CardHeader.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/CardStory.tsx",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/react/cards/CardStory.tsx",
+      "to": "src/react/cards/CardHeader.tsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/CardStory.tsx",
+        "line": 17
+      }
+    },
+    {
       "from": "src/react/cards/OrderCard.tsx",
       "to": "src/browser/widgets/PriceWidget.jsx",
       "kind": "import",
@@ -1150,10 +1226,11 @@
   "names": [
     {
       "family": "template",
-      "resolved": 14,
+      "resolved": 16,
       "unknown": 1,
       "ambiguous": 2,
       "wrongKind": 1,
+      "local": 1,
       "ambiguousNames": [
         {
           "name": "Badge",

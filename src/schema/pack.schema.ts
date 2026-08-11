@@ -530,6 +530,23 @@ export const packSchema = z
      */
     hazards: hazardsSchema.optional(),
     /**
+     * Patterns whose first capture group is a name the file **declares itself**, one per shape the
+     * language spells a declaration in. The two name-resolving strategies read the result and
+     * nothing else does.
+     *
+     * The need was measured rather than reasoned. A `short-name` strategy asks the whole root which
+     * file carries a name, and the file that wrote the reference is never consulted, so a story file
+     * holding its own `const SelectInput = ...` and rendering `<SelectInput />` collects an edge to
+     * a real `SelectInput.tsx` in another package that it never imports. On marmelab/react-admin
+     * that was 139 of 2715 template edges. A name a file declares is answered inside that file, so
+     * the strategy refuses it: not a coupling lost, a wrong one prevented.
+     *
+     * Which spellings declare a name is a fact about the language, so it lives in the pack beside
+     * `comments` and `edges`. A pack that declares nothing here loses nothing: every name is looked
+     * up exactly as it was before the field existed.
+     */
+    declares: z.array(regex).optional(),
+    /**
      * Where this language's toolchain writes its import aliases, so `empo init` can seed config
      * `aliases` instead of leaving a human to copy a tsconfig by hand.
      *

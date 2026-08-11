@@ -21,7 +21,7 @@ describe("typescript pack", () => {
 
   test("loads with its declared identity", () => {
     expect(pack.name).toBe("typescript");
-    expect(pack.version).toBe("1.7.0");
+    expect(pack.version).toBe("1.8.0");
   });
 
   test("reproduces the expected nodes", () => {
@@ -232,6 +232,7 @@ describe("typescript pack", () => {
     const index = {
       ids: new Set(["src/shared/money.js", "src/shared/money.ts"]),
       byShortName: new Map<string, string[]>(),
+      byFoldedName: new Map<string, string[]>(),
       kindById: new Map<string, string>(),
     };
 
@@ -419,11 +420,16 @@ describe("typescript pack", () => {
   });
 
   test("counts every verdict a name-resolving rule can reach, refusals included", () => {
-    // This corpus is the only place all four verdicts are exercised at once, which is why the tally
+    // This corpus is the only place all five verdicts are exercised at once, which is why the tally
     // is pinned here rather than left to the snapshot. `Badge` and `Total` are ambiguous by
     // construction, each carried by two files; `OrderRow` is the `targetKinds` refusal, a name in
-    // exactly one node of a kind no tag may name; and `Spinner` is the vendor component in no node
-    // at all, so it lands in `unknown` and must never be counted with the ambiguous ones.
+    // exactly one node of a kind no tag may name; `Spinner` is the vendor component in no node at
+    // all, so it lands in `unknown` and must never be counted with the ambiguous ones; and
+    // CardStory.tsx renders a `<CardFooter />` it declares itself, which `local` counts and the
+    // other four must not, because that refusal prevented a wrong edge instead of losing a right
+    // one. `CardShelf.tsx` renders the same name without declaring it and resolves through the case
+    // fold to `cardFooter.tsx`, which is what says the guard is about the shadowing and not the
+    // name.
     //
     // Pinning the counts is what makes a silent refusal gate-able at all. Every other test here
     // asserts an edge that is present or a list an edge is absent from, and no edge disappears from
@@ -432,7 +438,8 @@ describe("typescript pack", () => {
     expect(actual.names).toEqual([
       {
         family: "template",
-        resolved: 14,
+        resolved: 16,
+        local: 1,
         unknown: 1,
         ambiguous: 2,
         wrongKind: 1,

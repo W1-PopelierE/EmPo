@@ -1,14 +1,16 @@
 import { reachableFrom } from "../engine/coverage";
 import { readGraph, stalenessLines } from "../engine/graph";
+import { nameHealth } from "../engine/health";
 import {
   claims,
   FRAMEWORK_RESOLVED_REASON,
   kindAxes,
   LIST_FRAMEWORK_RESOLVED,
 } from "../engine/kinds";
+import { nameLines } from "../engine/names";
 import { compareStrings } from "../engine/order";
 import { configError } from "../errors";
-import type { Graph, GraphEdge, GraphNode, Hazard } from "../schema/types";
+import type { Graph, GraphEdge, GraphNode, Hazard, NameResolution } from "../schema/types";
 
 /**
  * `empo query`: the blast-radius answer (docs/06-cli.md). Every line it prints is a lookup in the
@@ -543,6 +545,17 @@ function report(repoRoot: string, graph: Graph, answer: Answer, options: QueryOp
   else printBlastRadius(answer);
 
   console.log("");
+  // What the name-resolving rules yielded on this repository, beside the answer they helped build.
+  // `empo index` and `empo doctor` have printed it since it was counted, and neither is the surface
+  // a reader is looking at when they decide what a change can reach: measured on a real React Native
+  // application, `template` resolved 3 of 1531 tag references, and `empo query` said nothing about
+  // it. A blast radius whose component edges nearly all failed to resolve is not wrong, it is thin,
+  // and thin is indistinguishable from complete unless the yield prints where the answer does.
+  const read = namesRead(graph);
+  if (read.length > 0) {
+    for (const line of nameLines(read)) console.log(line);
+    console.log("");
+  }
   // Every reason the answer above is out of date, not only the git distance. A pack that moved and
   // a schema this empo does not write both leave the git line saying "current with HEAD" and being
   // right, and a reader deciding whether to trust the numbers above would take that as the whole
@@ -550,6 +563,22 @@ function report(repoRoot: string, graph: Graph, answer: Answer, options: QueryOp
   for (const line of stalenessLines(repoRoot, graph)) console.log(line);
   console.log("");
   console.log(FLOOR_NOT_CEILING);
+}
+
+/**
+ * The families that actually read a name, so a query prints a yield where there is one and stays
+ * silent where there is none.
+ *
+ * The two silences `nameLines` keeps apart — nobody counted, and nothing read a name — are answers
+ * about the graph rather than about the node being queried, and `empo index` and `empo doctor` both
+ * say them already. What belongs beside an answer is the case a reader of that answer can be misled
+ * by: rules that read names here and resolved few of them.
+ */
+function namesRead(graph: Graph): NameResolution[] {
+  return (nameHealth(graph) ?? []).filter(
+    (report) =>
+      report.resolved + report.unknown + report.ambiguous + report.wrongKind + report.local > 0,
+  );
 }
 
 function plural(count: number, noun: string): string {

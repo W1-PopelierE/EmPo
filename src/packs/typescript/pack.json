@@ -1,6 +1,6 @@
 {
   "name": "typescript",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "match": {
     "extensions": [".ts", ".tsx", ".vue", ".js", ".jsx", ".mjs", ".cjs"],
     "manifest": ["package.json", "tsconfig.json"]
@@ -134,6 +134,11 @@
         "path": ["strip-leading-slash"]
       }
     }
+  ],
+  "declares": [
+    "^[ \\t]*(?:export[ \\t]+)?(?:default[ \\t]+)?(?:async[ \\t]+)?function[ \\t*]+([A-Za-z_$][A-Za-z0-9_$]*)",
+    "^[ \\t]*(?:export[ \\t]+)?(?:default[ \\t]+)?(?:abstract[ \\t]+)?class[ \\t]+([A-Za-z_$][A-Za-z0-9_$]*)",
+    "^[ \\t]*(?:export[ \\t]+)?(?:const|let|var)[ \\t]+([A-Za-z_$][A-Za-z0-9_$]*)[ \\t]*[:=]"
   ],
   "tests": {
     "paths": [

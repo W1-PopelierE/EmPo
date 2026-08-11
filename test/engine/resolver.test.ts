@@ -32,6 +32,7 @@ function node(id: string, name: string, filePath: string, captures: Capture[] = 
     produces: [],
     consumes: [],
     captures,
+    declares: [],
     // The resolver reads neither, but an ExtractedFile carries them, and a hand-made one that
     // omitted them would stop compiling rather than quietly resolve differently.
     dispatches: [],
@@ -760,6 +761,129 @@ describe("resolveEdges, the names it declined", () => {
     expect(resolved.names).toEqual([
       { family: "hook", name: "Order", outcome: "ambiguous", candidates: 2 },
       { family: "hook", name: "OrderObserver", outcome: "resolved", candidates: 1 },
+    ]);
+  });
+
+  test("resolves a name a node carries in another case, and says it resolved", () => {
+    // Measured on a real 186-file React Native application: components live in
+    // `src/components/badge.tsx` and are rendered `<Badge />`, and 3 of 1531 tag references
+    // resolved. None of the misses was an ambiguity anybody could repair by renaming a file, so an
+    // exact-only index does not report a fixable problem here — it reports nothing at all.
+    const badge = kinded(
+      "src/components/badge.tsx",
+      "badge",
+      "src/components/badge.tsx",
+      "component",
+    );
+    const screen = kinded(
+      "src/screens/orderScreen.tsx",
+      "orderScreen",
+      "src/screens/orderScreen.tsx",
+      "screen",
+    );
+    const view = {
+      ...screen,
+      captures: [
+        // The witness the fold needs: this file imports `Badge` from that module. Without it the
+        // fold is this engine guessing that a naming style is in play, which is how `<Toaster />`
+        // from a package lands on a local `toaster.tsx`.
+        {
+          family: "import" as const,
+          resolve: "module-path" as const,
+          groups: ['import Badge from "../components/badge"', "../components/badge"],
+          line: 1,
+        },
+        kindedCapture("Badge", 7, ["component", "screen"]),
+      ],
+    };
+
+    const resolved = resolveEdges(view, buildNodeIndex([badge, screen]), TS);
+
+    expect(resolved.edges).toContainEqual({
+      from: "src/screens/orderScreen.tsx",
+      to: "src/components/badge.tsx",
+      kind: "template",
+      symbol: null,
+      evidence: { file: "src/screens/orderScreen.tsx", line: 7 },
+    });
+    expect(resolved.names).toEqual([
+      { family: "template", name: "Badge", outcome: "resolved", candidates: 1 },
+    ]);
+  });
+
+  test("prefers the exact spelling over the fold, and refuses a fold nothing corroborates", () => {
+    // The fold is a fallback and never a competitor: a repository holding both `Badge.tsx` and
+    // `badge.tsx` resolves `<Badge />` to the one it is spelled as, and the exact match needs no
+    // witness. A fold does: the second case is cal.com's, where `<Toaster />` comes from the
+    // `sonner` package and a local `toaster.tsx` folds onto its name. Nothing in the file imports
+    // that file, so the fold is refused and the reference is what it always was, a name in no node.
+    const exact = kinded(
+      "src/components/Badge.tsx",
+      "Badge",
+      "src/components/Badge.tsx",
+      "component",
+    );
+    const lower = kinded("src/widgets/badge.tsx", "badge", "src/widgets/badge.tsx", "component");
+    const other = kinded("src/widgets/BADGE.tsx", "BADGE", "src/widgets/BADGE.tsx", "component");
+    const view = kinded("src/screens/Cart.tsx", "Cart", "src/screens/Cart.tsx", "screen");
+
+    const exactly = resolveEdges(
+      { ...view, captures: [kindedCapture("Badge", 3, ["component"])] },
+      buildNodeIndex([exact, lower, view]),
+      TS,
+    );
+    const folded = resolveEdges(
+      {
+        ...view,
+        captures: [
+          {
+            family: "import" as const,
+            resolve: "module-path" as const,
+            groups: ['import { Badge } from "sonner"', "sonner"],
+            line: 1,
+          },
+          kindedCapture("Badge", 3, ["component"]),
+        ],
+      },
+      buildNodeIndex([lower, other, view]),
+      TS,
+    );
+
+    expect(exactly.edges.map((edge) => edge.to)).toEqual(["src/components/Badge.tsx"]);
+    expect(folded.edges).toEqual([]);
+    expect(folded.names).toEqual([
+      { family: "template", name: "Badge", outcome: "unknown", candidates: 0 },
+    ]);
+  });
+
+  test("refuses a name the file that rendered it declares itself", () => {
+    // Measured on marmelab/react-admin: 139 of 2715 template edges pointed at a file the rendering
+    // file was shadowing with its own `const`. A story file declaring `const SelectInput = ...` and
+    // rendering `<SelectInput />` names nothing outside itself, whatever another package happens to
+    // call a file. The refusal prevents a wrong edge rather than losing a right one, which is why it
+    // is counted apart from the three that lose one.
+    const real = kinded(
+      "packages/ui/src/input/SelectInput.tsx",
+      "SelectInput",
+      "packages/ui/src/input/SelectInput.tsx",
+      "component",
+    );
+    const story = {
+      ...kinded(
+        "packages/core/src/ReferenceInput.stories.tsx",
+        "ReferenceInput.stories",
+        "packages/core/src/ReferenceInput.stories.tsx",
+        "component",
+      ),
+      declares: ["SelectInput"],
+      captures: [kindedCapture("SelectInput", 186, ["component"])],
+    };
+
+    const resolved = resolveEdges(story, buildNodeIndex([real, story]), TS);
+
+    expect(resolved.edges).toEqual([]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "SelectInput", outcome: "local", candidates: 0 },
     ]);
   });
 

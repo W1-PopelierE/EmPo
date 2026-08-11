@@ -34,6 +34,9 @@ cross-language reach
   http-route  apps/mobile/src/api/client.ts
               consumes apps/api/routes/api.php  named at apps/mobile/src/api/client.ts:2
 
+names      hook     2 of 2 resolved
+names      template 1 of 1 resolved
+
 Treat the flow list as a floor, not a ceiling. Absence of evidence is not evidence of absence.
 ```
 
@@ -43,8 +46,17 @@ counts as covered, but nothing on that path asserts a value, and changing the ro
 suite green.
 
 The cross-language edge is not an import. The mobile client names a route string the PHP backend
-produces, which no import parser on either side can see. And the closing line is the contract, not
-modesty: reflection and dynamic dispatch add reach no static graph can see.
+produces, which no import parser on either side can see.
+
+The `names` lines are the answer's own yield: a component tag or a Blade `<x-...>` names a file by a
+bare name, and where that name is carried by two files or by none, no edge is written. Both counts
+print with their denominator, so a blast radius standing on rules that resolved almost nothing says
+so instead of reading like a complete one. Measured on a real React Native application, that family
+resolved 3 of 1531 tag references before the fix that shipped with this line, and nothing on the
+answer said it.
+
+And the closing line is the contract, not modesty: reflection and dynamic dispatch add reach no
+static graph can see.
 
 ## Quick start
 

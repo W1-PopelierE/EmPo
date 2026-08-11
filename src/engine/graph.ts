@@ -56,8 +56,15 @@ export const LOCK_PATH = ".empo/generated/packs.lock.json";
  * which is the one answer this field exists to distinguish from the counts. So the absence has to
  * remain readable, and a graph that predates the count says so rather than reporting a yield no run
  * ever measured.
+ *
+ * 6 is the plainest case again, twice over. `resolved` kept its name and admits a name a node
+ * carries in another case, so every count written before it was taken under a stricter rule and the
+ * two cannot be compared. And `names` gained `local`, whose absence and whose zero are the two
+ * answers apart: a schema 5 graph has no `local` key because nothing asked whether a file declared
+ * the name it rendered, and reading that as "nothing did" is a clean bill of health invented out of
+ * a field nobody wrote.
  */
-export const GRAPH_SCHEMA = 5;
+export const GRAPH_SCHEMA = 6;
 
 export function graphPath(repoRoot: string): string {
   return join(repoRoot, GRAPH_PATH);

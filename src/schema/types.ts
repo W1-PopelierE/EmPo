@@ -92,18 +92,26 @@ export interface NameOutcome {
   /** The name as the rule's `normalize` chain left it, which is the spelling the index is keyed by. */
   name: string;
   outcome: NameVerdict;
-  /** Nodes carrying the name: 0 for `unknown`, 1 for `resolved` and `wrong-kind`, 2+ for `ambiguous`. */
+  /**
+   * Nodes carrying the name: 0 for `unknown` and `local`, 1 for `resolved` and `wrong-kind`, 2+ for
+   * `ambiguous`.
+   */
   candidates: number;
 }
 
 /**
- * Why a name did or did not become a node id. Three ways to fail rather than one, because they call
- * for three different reactions: `unknown` is the normal cost of reading a language whose vendor
+ * Why a name did or did not become a node id. Four ways to fail rather than one, because they call
+ * for four different reactions: `unknown` is the normal cost of reading a language whose vendor
  * components are spelled exactly like local ones, `wrong-kind` is a rule's own `targetKinds` doing
- * what it was declared for, and `ambiguous` is the only one of the three that hides a coupling this
- * repository really has.
+ * what it was declared for, `local` is the reference answering itself, and `ambiguous` is the only
+ * one of the four that hides a coupling this repository really has.
+ *
+ * `local` is a refusal that prevents a wrong edge rather than losing a right one: the file rendering
+ * the tag declares that name itself, so whatever a file of the same basename elsewhere holds, it is
+ * not what this line renders. Measured on marmelab/react-admin, 139 of 2715 template edges pointed
+ * at a file the rendering file was shadowing with its own declaration.
  */
-export type NameVerdict = "resolved" | "unknown" | "ambiguous" | "wrong-kind";
+export type NameVerdict = "resolved" | "unknown" | "ambiguous" | "wrong-kind" | "local";
 
 /**
  * What one edge family's name-resolving rules did with every name they read, counted per **reference
@@ -120,6 +128,8 @@ export interface NameResolution {
   ambiguous: number;
   /** The name is in exactly one node, of a kind the rule does not list in `targetKinds`. */
   wrongKind: number;
+  /** The file that wrote the reference declares the name itself, so no other node can be meant. */
+  local: number;
   /** The distinct names behind `ambiguous`, so the count names something a reader can go and fix. */
   ambiguousNames: AmbiguousName[];
 }
@@ -386,6 +396,12 @@ export interface Pack {
     /** Removed from the source before assertionTerms are matched. See pack.schema.ts. */
     assertionExcludes: string[];
   };
+  /**
+   * Patterns whose first group is a name **this file declares itself**, read by the two
+   * name-resolving strategies and by nothing else. A pack that declares none behaves exactly as
+   * every pack did before the field existed. See src/schema/pack.schema.ts.
+   */
+  declares?: string[];
   /** Optional: a pack that declares none makes no hazard claim at all. See PackHazards. */
   hazards?: PackHazards;
   /** Optional: where this toolchain writes import aliases, read by `empo init` only. */
