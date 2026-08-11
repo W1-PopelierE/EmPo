@@ -750,7 +750,9 @@ proven before anything depends on it. Order within phase 1:
    different things about whether the graph is stale.
 
    What it cost: ownership by content, because JSON has no marker comment. An entry is EmPo's if its
-   `type` is `"command"` and its `command` starts with `empo hook `, which cannot tell an entry EmPo
+   `type` is `"command"` and its `command` invokes `empo hook `, at the start or after a path
+   separator so the path-qualified spelling an older release wrote is still claimed and replaced
+   rather than doubled. It cannot tell an entry EmPo
    wrote from one a human wrote that looks the same, so a hand-wired `empo hook` entry is removed on
    the next update and not restored. That is unfixable at this layer; what is fixable is the silence,
    so every entry taken out and not put back verbatim under the same event and matcher is reported

@@ -25,10 +25,9 @@ import { adapterLines } from "./agents";
  * replaced, and EmPo removes only the entries it can prove are its own.
  *
  * **The hooks fail open.** A machine that cannot run the command exits 127, which the host treats
- * as "other", which is non-blocking for every event. That holds for both spellings below, a bare
- * `empo` missing from PATH and a `node_modules/.bin/empo` missing from the checkout. It is
- * deliberate and the generated files say so: a gate that blocks every edit on a machine where the
- * tool is absent is a gate that gets deleted within a day.
+ * as "other", which is non-blocking for every event. So does a machine whose PATH holds no `empo`.
+ * It is deliberate and the generated files say so: a gate that blocks every edit on a machine where
+ * the tool is absent is a gate that gets deleted within a day.
  */
 
 // ---------------------------------------------------------------------------------------------
@@ -97,14 +96,8 @@ export interface HookGroup {
 /** Keyed by host event name, the shape `settings.json` gives its `hooks` value. */
 export type HookEntries = Record<string, HookGroup[]>;
 
-/**
- * The command word itself, without the path that may precede it. Still exported because it is the
- * one string both spellings below are built from.
- */
+/** The one spelling EmPo writes: a bare `empo`, resolved from PATH. */
 export const HOOK_COMMAND_PREFIX = "empo hook ";
-
-/** Repo-relative, and the same path for every teammate, which is why it can be committed. */
-export const LOCAL_BIN_PATH = "node_modules/.bin/empo";
 
 /**
  * There is no marker-comment trick available in JSON, so ownership is by content:
@@ -116,12 +109,16 @@ export const LOCAL_BIN_PATH = "node_modules/.bin/empo";
  * Everything else in the file, including a hook a human wrote on the same event with the same
  * matcher, is somebody else's and survives untouched.
  *
- * **Why this is a pattern and not the prefix it used to be.** EmPo now writes one of two spellings
- * depending on the target (`empoHooks` below), so a predicate that only knew the bare one would
- * stop recognizing entries a previous release wrote, and a regenerate would leave the old entry in
- * place and append the new one beside it. Two hooks would then fire on every edit. So the predicate
- * recognizes a superset of what the writer produces, and `test/host/claude.test.ts` pins both
- * halves: every entry EmPo writes is recognized, and both spellings are.
+ * **Why this is a pattern and not the prefix the writer uses.** EmPo once wrote a second spelling,
+ * `${CLAUDE_PROJECT_DIR}/node_modules/.bin/empo hook `, wherever npm had put a binary in the
+ * checkout. npm is gone as a channel and so is that branch (`empoHooks` below writes the bare
+ * command and nothing else), but the entries a previous release wrote are still in real
+ * `settings.json` files. Narrowing the predicate to what the writer produces would leave those
+ * unclaimed, so a regenerate would leave the old entry in place and append the new one beside it,
+ * and two hooks would fire on every edit from then on. So the predicate stays a superset of the
+ * writer, and `test/host/claude.test.ts` pins both halves: every entry EmPo writes is recognized,
+ * and so is every entry it used to write. Deleting a spelling from the writer is safe; deleting one
+ * from here is not, and is never the same change.
  *
  * The cost is that `./scripts/empo hook pre-edit`, a wrapper somebody wrote by hand, is now
  * indistinguishable from the repo-local form and is taken as EmPo's. That is unfixable here: it is
@@ -140,32 +137,14 @@ export function isEmpoHook(entry: unknown): boolean {
 }
 
 /**
- * Which spelling of the command this repository gets, decided by what is really on disk.
- *
- * A bare `empo` is a global install, which is per interpreter: switch Node version and it vanishes,
- * and the hooks fail open in silence from then on. That is measured, and it is what the standalone
- * binary is for. `node_modules/.bin/empo` is a fixed in-repo path, identical for every teammate,
- * safe to commit, and it resolves no interpreter of its own. So it is preferred wherever the target
- * really has EmPo as a dependency, and the bare form stays for every other target, unchanged.
- */
-export function hookCommandPrefix(repoRoot: string): string {
-  // Both spellings end in `empo hook `, which is what the predicate above matches: the local one
-  // because `LOCAL_BIN_PATH` ends in the binary's name, the bare one because it is only that name.
-  return existsSync(join(repoRoot, LOCAL_BIN_PATH))
-    ? `\${CLAUDE_PROJECT_DIR}/${LOCAL_BIN_PATH} hook `
-    : HOOK_COMMAND_PREFIX;
-}
-
-/**
  * `${CLAUDE_PROJECT_DIR}` is expanded by the host before the command runs, so a hook resolves the
- * repository it was configured for rather than whatever directory the session happens to sit in.
- * That is also what makes the repo-local path above work from a session whose working directory is
- * somewhere else entirely.
+ * repository it was configured for rather than whatever directory the session happens to sit in,
+ * which is the whole reason a hook can be committed and still work for a teammate.
  */
-function command(prefix: string, event: string, timeout: number): HookCommand {
+function command(event: string, timeout: number): HookCommand {
   return {
     type: "command",
-    command: `${prefix}${event} --repo "\${CLAUDE_PROJECT_DIR}"`,
+    command: `${HOOK_COMMAND_PREFIX}${event} --repo "\${CLAUDE_PROJECT_DIR}"`,
     timeout,
   };
 }
@@ -176,16 +155,15 @@ function command(prefix: string, event: string, timeout: number): HookCommand {
  * the two `PreToolUse` groups match on tool name. `pre-commit` gets the longer timeout because it
  * computes the same gate `empo check` does over a staged diff.
  *
- * A function of the repository rather than the constant it was, because which binary a hook should
- * reach for is a fact about the target and not about EmPo.
+ * The same three entries for every target: there is one channel left and it puts `empo` on PATH, so
+ * there is nothing about the repository left to branch on.
  */
-export function empoHooks(repoRoot: string): HookEntries {
-  const prefix = hookCommandPrefix(repoRoot);
+export function empoHooks(): HookEntries {
   return {
-    SessionStart: [{ hooks: [command(prefix, "session-start", 10)] }],
+    SessionStart: [{ hooks: [command("session-start", 10)] }],
     PreToolUse: [
-      { matcher: "Edit|Write", hooks: [command(prefix, "pre-edit", 10)] },
-      { matcher: "Bash", hooks: [command(prefix, "pre-commit", 20)] },
+      { matcher: "Edit|Write", hooks: [command("pre-edit", 10)] },
+      { matcher: "Bash", hooks: [command("pre-commit", 20)] },
     ],
   };
 }
@@ -809,7 +787,7 @@ function mapSkill(config: EmpoConfig): string[] {
 export function writeClaude(repoRoot: string, config: EmpoConfig): ClaudeFile[] {
   const settings = join(repoRoot, SETTINGS_PATH);
   const before = read(settings);
-  const merge = mergeSettings(before, empoHooks(repoRoot));
+  const merge = mergeSettings(before, empoHooks());
 
   const written = SKILL_NAMES.map((name) => {
     const path = skillPath(name);

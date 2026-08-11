@@ -389,10 +389,12 @@ own. There is no marker-comment trick available in JSON, so ownership is by cont
 > `command` string invokes `empo hook `, whether as the bare command or through a path ending in
 > `/empo`.
 
-That second clause exists because the wiring gained a second spelling when the binary landed, and a
-rule that recognized only the bare command would have left the old entry unclaimed beside the new one
-rather than replacing it. The section on the three hooks below states the trap in full; it is repeated
-here because this is the paragraph somebody edits when they add a third spelling.
+That second clause exists because the wiring once had a second spelling, and outlives it: EmPo writes
+only the bare command now, but a repository wired by the release that wrote
+`${CLAUDE_PROJECT_DIR}/node_modules/.bin/empo hook ` still carries that entry, and a rule that
+recognized only what the generator writes would leave it unclaimed beside the new one rather than
+replacing it. The section on the three hooks below states the trap in full; it is repeated here
+because this is the paragraph somebody edits when they add or drop a spelling.
 
 Regenerating means: parse, drop every entry matching that rule wherever it appears, insert the
 current entries under the right events, drop a matcher group and then an event that the removal left
@@ -518,18 +520,20 @@ the machine that ran the script. And `empo --version` still proves only that som
 shell, which was never the question the hooks pose. What has changed is that the question can now be
 asked at all, by one command, from inside the repository it is about.
 
-**The wiring is target-dependent, which is now a leftover rather than a route.** Where the target has
-a `${CLAUDE_PROJECT_DIR}/node_modules/.bin/empo`, the generator writes that in-repo path; where it
-does not, the entry is the bare `empo hook ...`. With npm dropped as a channel nothing puts an EmPo
-there any more, so in practice every wired entry is the bare command, and the local-path branch
-survives because it is harmless and because a repository wired before this change still carries one.
-One trap comes with it and it is the kind that produces a mess rather than an error. **`empo update`
-identifies
-its own hook entries by their command string** (`settings.json` is the repository's, above: ownership
-is by content, an entry whose `command` starts with `empo hook `). Widening what the generator
-**writes** without widening what it **recognizes** does not fix a wired repository, it doubles it: the
-old entry is not claimed, so it is not removed, and the new one is appended beside it. Both then fire
-on every event. The two halves are one change and must never be split across two.
+**The wiring is one spelling, and the rule that reads it is wider than that on purpose.** The
+generator writes the bare `empo hook ...` for every target. It used to write
+`${CLAUDE_PROJECT_DIR}/node_modules/.bin/empo hook ...` where the target had one, and that branch is
+gone: with npm dropped as a channel nothing puts an EmPo there, so the branch was dead and the
+condition merely a way to be surprised. What did not go with it is the recognizer, and that
+asymmetry is the whole point. One trap lives here and it is the kind that produces a mess rather than
+an error. **`empo update` identifies its own hook entries by their command string** (`settings.json`
+is the repository's, above: ownership is by content, an entry invoking `empo hook ` at the start of
+the command or after a path separator). Changing what the generator **writes** without keeping what
+it **recognizes** does not fix a wired repository, it doubles it: the old entry is not claimed, so it
+is not removed, and the new one is appended beside it. Both then fire on every event. So the
+predicate stays a superset of the writer, in both directions: adding a spelling to the writer means
+adding it here first, and dropping one from the writer means leaving it here. The two halves are one
+change and must never be split across two.
 
 The wiring is optional, which is what makes its absence survivable. Without it a developer still runs
 `empo query`, `empo review` and `empo check` from the terminal and CI, and every agent host that
