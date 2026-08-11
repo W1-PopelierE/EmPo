@@ -222,7 +222,7 @@ names      hook     2 of 2 resolved
 names      template 1 of 1 resolved
 ```
 
-It is the yield of the `short-name` and `observer` strategies
+It is the yield of the `short-name`, `observer` and `view` strategies
 ([04-language-packs](04-language-packs.md)): how many of the names those rules read became an edge,
 out of how many they read. It sits beside the counts rather than among the warnings below because a
 family that refuses is not a defect the way a duplicated node id is — a vendor component resolving to
@@ -256,7 +256,17 @@ Output (human-readable, and `--json` for machines):
 - **flows reached**: every flow this change can reach, across roots, not just the obvious one.
 - **blind flows**: the flows that reach this code but have no value-asserting test, printed in
   capitals, because a wrong result ships silently there.
-- **top consumers**: the highest-fan-in nodes that depend on this one.
+- **top consumers**: the highest-fan-in nodes that depend on this one, each row naming the
+  consumer's own kind and the edge family the reference was written in. The two columns are what
+  make the list readable once a template can be a sink: a changed Laravel layout is consumed both by
+  the controller that renders it and by the sibling blades that `@extends` it, the rows are ranked
+  by the consumer's own fan-in, and the sibling templates are themselves extended — so they can fill
+  the printed rows while the controller falls into the "and N more" below, and printed as bare ids
+  the two are the same shape. The **order is deliberately untouched**: a consumer that is itself
+  widely used is genuinely the one to read first, and the count saying so is in the same row. What
+  was missing was never the ranking, it was what each row is. The family is `template`, `import`,
+  `fqcn`, `hook` or `string`, and never the directive: a graph records which rule family matched,
+  not whether the php that matched wrote `@extends` or `view(`.
 - **cross-language reach**: any bridge edge, e.g. "a mobile screen calls a route this file
   defines," so a backend change's mobile blast radius is visible. **Both ends of the join are
   printed**, the consuming side and the producing side, because either one can be the file you
@@ -292,12 +302,22 @@ is not wrong, it is thin — the caveat at the foot of every answer already says
 Modes:
 
 ```bash
-empo query --gods          # the 20 widest-blast-radius nodes, and a count of the rest
+empo query --gods          # the 20 widest-blast-radius nodes and their kinds, and a count of the rest
 empo query --blind         # flows where no test asserts on a produced value
 empo query --orphans       # code with zero consumers, minus what a framework resolves by name
 empo query --orphans --all # ... and the framework-resolved ones too
 empo query --hazards       # jobs queued inside a database transaction, before it commits
 ```
+
+`--gods` names each row's kind, and it exists because the ranking is right and was unreadable
+without it. Once the `view` strategy made a template a sink, the widest fan-in in a php repository is
+often a Laravel layout, and it deserves to be: a change to the file every page `@extends` really does
+reach every page. What a reader could not do was tell that from a list printing a count, an id and a
+path. Neither of the two alternatives was taken: holding framework-resolved kinds back would hide the
+very fact the list exists to show, and capping the rows one kind may take would make the top 20
+something other than the widest 20. The path is dropped from a row whose id already is its path,
+which is every node a pack ids by path — the `--json` form keeps both fields either way, since an
+agent reading it should not have to know which strategy ided the node.
 
 `--blind` carries its denominator as `flowsConsidered` in the JSON, always: how many flows the graph
 holds, how many of them a test reaches at all, and how many have a reaching test that asserts a
@@ -316,22 +336,26 @@ the reason line carries the whole answer instead.
 
 `--orphans` is fan-in zero, minus every kind its pack marks `resolvedBy: "framework"`
 ([04-language-packs](04-language-packs.md)). A blade view is rendered by name, a migration is
-discovered by the runner, a policy is found by its class name: none of these can ever gain an edge,
-so a fan-in of zero is not evidence about them either way. Measured over a Laravel application the
-unfiltered rule returned a few hundred candidates and almost none of them were dead code: blade views
-and migrations dominated the list, then the config and bootstrap files the framework loads by path,
-then the policies, factories, seeders and console commands. An agent handed that list proposes
-deleting `UserPolicy`, which is precisely the false answer this tool exists to prevent, so the filter
-is load-bearing rather than cosmetic.
+discovered by the runner, a policy is found by its class name: the framework is the caller and no
+rule here can see the call, so a fan-in of zero is not evidence about them either way. The mark says
+who resolves the kind, not that an instance can never gain an edge — the php `view` rules do read
+`view('orders.show')` and `@extends`, so the blade file they name leaves this list through the
+fan-in test rather than through the filter, while the one rendered by `view($name)`, a view composer
+or a computed `@include` looks exactly like a view nobody renders at all and is still held back.
+Measured over a Laravel application the unfiltered rule returned a few hundred candidates and almost
+none of them were dead code: blade views and migrations dominated the list, then the config and
+bootstrap files the framework loads by path, then the policies, factories, seeders and console
+commands. An agent handed that list proposes deleting `UserPolicy`, which is precisely the false
+answer this tool exists to prevent, so the filter is load-bearing rather than cosmetic.
 
 **What it leaves out, it names.** The answer states how many nodes were excluded and under which
-kinds, why a fan-in of zero means nothing for them, and the command that lists them anyway. A
-filtered list that says nothing about its filter reads as the whole list, which is the same defect
-one level up. `--all` prints them alongside the real orphans, each marked with what resolves it, so
-nobody scanning for something to delete has to remember a header. Under `--json` those facts ride in
-a `frameworkResolved` object (`listed`, `total`, `byKind`, `reason`, `listWith`) and each row carries
-its own `resolvedBy`, because the agent reading the machine form never sees the printed line and is
-the reader who would act on it.
+kinds, why a fan-in of zero is not evidence that they are dead, and the command that lists them
+anyway. A filtered list that says nothing about its filter reads as the whole list, which is the
+same defect one level up. `--all` prints them alongside the real orphans, each marked with what
+resolves it, so nobody scanning for something to delete has to remember a header. Under `--json`
+those facts ride in a `frameworkResolved` object (`listed`, `total`, `byKind`, `reason`,
+`listWith`) and each row carries its own `resolvedBy`, because the agent reading the machine form
+never sees the printed line and is the reader who would act on it.
 
 `--all` with any other mode is a config error rather than a no-op. `--orphans` is the one mode that
 holds rows back, and a flag that quietly does nothing elsewhere teaches a reader that some other mode
@@ -867,13 +891,13 @@ names      hook     2 of 2 resolved
 names      template 1 of 1 resolved
 ```
 
-Only the `short-name` and `observer` strategies resolve a bare name
-([04-language-packs](04-language-packs.md)), and both refuse a name carried by more than one node.
-Until this landed they refused it **silently**: one duplicate basename anywhere in a root removes
-every edge to that name, including the ones written in a file whose own import says which is meant,
-and nothing counted or printed that, so a family whose yield had gone to zero read exactly like a
-family with nothing to find. The block counts that refusal. **It does not narrow it** — the same
-names are refused as before, and the change is that the ratio is now on the record.
+Only the `short-name`, `observer` and `view` strategies resolve a name the source wrote rather than
+a path the filesystem answers ([04-language-packs](04-language-packs.md)), and all three refuse a
+name carried by more than one node. Until this landed the first two refused it **silently**: one duplicate basename anywhere in a
+root removes every edge to that name, including the ones written in a file whose own import says
+which is meant, and nothing counted or printed that, so a family whose yield had gone to zero read
+exactly like a family with nothing to find. The block counts that refusal. **It does not narrow
+it** — the same names are refused as before, and the change is that the ratio is now on the record.
 
 `short-name` consults the index twice: the exact spelling first, and only where no node carries it,
 the index again with the name lower-cased. A file naming convention is not a language — `<Badge />`

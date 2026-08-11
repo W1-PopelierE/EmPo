@@ -598,8 +598,8 @@ const ARRIVED_BY_USER = "arrived by user";
  * Where a journey starts: a node nothing in the graph references.
  *
  * Zero fan-in alone is the wrong list, for the reason `empo query --orphans` does not use it
- * either. A framework reaches a view, a migration or a policy by name, so those sit at zero
- * whether anybody uses them or not. Measured on one real Laravel repository this section held 285
+ * either. A framework reaches a view, a migration or a policy by name, so those can sit at zero
+ * while being used every day. Measured on one real Laravel repository this section held 285
  * rows of which 278 were framework-resolved kinds, and **the five route files sat at positions
  * 280 to 284 and never printed**, under a heading that says a journey starts here while
  * `discipline/map.md` tells the agent a route is the strongest flow signal there is.

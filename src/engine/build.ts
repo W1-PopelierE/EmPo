@@ -82,7 +82,7 @@ export function buildRoot(options: BuildRootOptions): RootGraph {
     if (result !== null) extracted.push(result);
   }
 
-  const index = buildNodeIndex(extracted);
+  const index = buildNodeIndex(extracted, options.pack.views);
   const packages = readPackages(options.repoRoot, options.pack.packages, options.ignore);
   const context: ResolveContext = {
     extensions: options.pack.match.extensions,

@@ -14,7 +14,7 @@ describe("php pack", () => {
 
   test("loads with its declared identity", () => {
     expect(pack.name).toBe("php");
-    expect(pack.version).toBe("1.5.0");
+    expect(pack.version).toBe("1.6.0");
   });
 
   test("reproduces the expected nodes", () => {
@@ -419,6 +419,10 @@ describe("php pack", () => {
         "Acme\\View\\Components\\Layout\\AppShell",
         // <x-price-badge />, the plain kebab-cased form.
         "Acme\\View\\Components\\PriceBadge",
+        // @extends('layouts.app') and @include('orders.row'): the `view` strategy, which is the
+        // only thing here whose target is a template rather than a class.
+        "resources/views/layouts/app.blade.php",
+        "resources/views/orders/row.blade.php",
       ]);
     });
 
@@ -437,9 +441,66 @@ describe("php pack", () => {
     });
 
     test("cites the line the tag is on, in the file that wrote it", () => {
-      const badge = actual.edges.find((edge) => edge.to === "Acme\\View\\Components\\PriceBadge");
+      const badge = actual.edges.find(
+        (edge) => edge.to === "Acme\\View\\Components\\PriceBadge" && edge.from === VIEW,
+      );
 
-      expect(badge?.evidence).toEqual({ file: VIEW, line: 11 });
+      expect(badge?.evidence).toEqual({ file: VIEW, line: 30 });
+    });
+  });
+
+  /**
+   * The direction the graph could not express at all until the `view` strategy landed: every
+   * template edge ran out of a blade file and none ran into one, so a change to a controller never
+   * reported the page it renders. Measured on a real Laravel repository, 69 blade files on one
+   * journey had zero incoming edges.
+   */
+  describe("view edges into a template", () => {
+    function viewTargets(from: string): string[] {
+      return actual.edges
+        .filter((edge) => edge.kind === "template" && edge.from === from)
+        .map((edge) => edge.to)
+        .sort();
+    }
+
+    test("runs an edge from the controller that renders a view to the blade file", () => {
+      expect(viewTargets("Acme\\Http\\Controllers\\OrderController")).toEqual([
+        "resources/views/orders/show.blade.php",
+      ]);
+    });
+
+    test("reads the facade spelling and refuses every near-miss beside it", () => {
+      // ReceiptController holds one real render and five things shaped like one, so a single
+      // assertion holds all four lookbehinds in place. `\View::make('layouts.app')` resolves.
+      // `$mail->view(...)` is a method on somebody's object; `TextView::make(...)` is a class whose
+      // name merely ends in the facade's; and `Acme\View::make(...)`, `Acme\Route::view(...)` and
+      // `Acme\view(...)` name this application's own class and function rather than Laravel's,
+      // since the framework's are reachable unqualified or behind the one leading separator that
+      // means the global namespace.
+      //
+      // What the last of those costs is the fully-qualified inline facade,
+      // `Illuminate\Support\Facades\View::make(...)`, which real code writes as a `use` plus a bare
+      // `View::make(...)`. A missed edge is the acceptable direction here and an invented one is
+      // not, which is the same trade every refusal in this pack makes.
+      expect(viewTargets("Acme\\Http\\Controllers\\ReceiptController")).toEqual([
+        "resources/views/layouts/app.blade.php",
+      ]);
+    });
+
+    test("runs an edge from a route file straight to the template it renders", () => {
+      // `Route::view('/layout-preview', 'layouts.app')`: the view name is the SECOND argument, so
+      // the global `view(` rule refuses the line (its lookbehind excludes `:`) and a rule of its
+      // own reads it. Capturing the first argument would have named the URL, which is a lookup
+      // that resolves to nothing and reports a loss nobody can repair.
+      expect(viewTargets("routes/api.php")).toEqual(["resources/views/layouts/app.blade.php"]);
+    });
+
+    test("counts the view name no file in the corpus carries", () => {
+      // @include('orders.archived'). A strategy that can silently resolve nothing is not one
+      // anybody can call proven, so the miss is a number rather than an absence.
+      const template = actual.names.find((record) => record.family === "template");
+
+      expect(template?.unknown).toBe(1);
     });
   });
 

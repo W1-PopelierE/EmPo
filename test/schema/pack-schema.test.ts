@@ -536,6 +536,75 @@ describe("packSchema", () => {
     );
   });
 
+  test("rejects a view rule in a pack that declares no view roots", () => {
+    // Without a `views` block the strategy resolves every name it reads against an empty index, so
+    // the pack ships a family that produces nothing and looks exactly like a corpus with nothing to
+    // find. Same remedy as every other gap in this schema: answer at load, where the message can
+    // name the pack, rather than as an edge nobody can explain the absence of.
+    const rule = {
+      pattern: "@include\\(\\s*['\"]([A-Za-z0-9._/-]+)['\"]",
+      resolve: "view",
+      normalize: ["dot-to-slash"],
+    };
+
+    const { success, issues } = parse(pack({ edges: { template: [rule] } }));
+
+    expect(success).toBe(false);
+    expect(issues).toContain(
+      'edges.template.0.resolve: the "view" strategy needs a views block naming the roots to resolve against',
+    );
+  });
+
+  test("accepts the same rule once the pack says where its templates live", () => {
+    const rule = {
+      pattern: "@include\\(\\s*['\"]([A-Za-z0-9._/-]+)['\"]",
+      resolve: "view",
+      normalize: ["dot-to-slash"],
+    };
+
+    const { success, issues } = parse(
+      pack({
+        edges: { template: [rule] },
+        views: { roots: ["resources/views"], extensions: [".blade.php"] },
+      }),
+    );
+
+    expect(issues).toBe("");
+    expect(success).toBe(true);
+  });
+
+  test("rejects a view extension the scanner would never admit", () => {
+    // `scanRoot` globs `**/*<extension>` per entry in `match.extensions`, so a template whose name
+    // ends in none of them is never read, never indexed, and every view name resolves against an
+    // empty map. The pack passes every other check and ships a family that cannot produce an edge,
+    // which is the silence the missing-`views` case one test up is refused for.
+    const { success, issues } = parse(
+      pack({
+        match: { extensions: [".php"] },
+        views: { roots: ["resources/views"], extensions: [".twig"] },
+      }),
+    );
+
+    expect(success).toBe(false);
+    expect(issues).toContain(
+      'views.extensions.0: ".twig" ends in none of the extensions this pack scans (.php)',
+    );
+  });
+
+  test("accepts a compound view extension that ends in one the pack scans", () => {
+    // The case the check must not break: `.blade.php` is admitted through its plain `.php` tail,
+    // exactly as a compound `commentsByExtension` key is.
+    const { success, issues } = parse(
+      pack({
+        match: { extensions: [".php"] },
+        views: { roots: ["resources/views"], extensions: [".blade.php", ".php"] },
+      }),
+    );
+
+    expect(issues).toBe("");
+    expect(success).toBe(true);
+  });
+
   test("rejects a normalizer the engine has no verb for", () => {
     // The vocabulary is engine-side and closed: a pack orders the verbs, it cannot invent one. A
     // typo that parsed would be a no-op, and a no-op normalizer is a capture that resolves to

@@ -202,6 +202,59 @@ function frameworkGraph(): Graph {
 }
 
 /**
+ * The shape the `view` resolve strategy made possible and no fixture had before it: a template that
+ * is a sink. One layout, consumed by the page that `@extends` it and by the controller that renders
+ * it, and the page itself consumed by nothing much — so the page outranks the controller on its own
+ * fan-in and the layout outranks both. Every consumer edge is `template`, which is the point: the
+ * family cannot tell these two rows apart and the node kinds can.
+ */
+function renderedLayoutGraph(): Graph {
+  const LAYOUT = "resources/views/layouts/app.blade.php";
+  const PAGE = "resources/views/orders/index.blade.php";
+
+  const node = (id: string, kind: string): GraphNode => ({
+    id,
+    file: id.includes("\\") ? "apps/api/app/Http/Controllers/OrderController.php" : id,
+    root: "apps/api",
+    lang: "php",
+    kind,
+    name: id.split(/[\\/]/).at(-1) ?? id,
+    produces: [],
+    consumes: [],
+    isTest: false,
+    assertsValue: false,
+  });
+  const edge = (from: string, to: string, line: number): GraphEdge => ({
+    from,
+    to,
+    kind: "template",
+    symbol: null,
+    evidence: { file: node(from, "").file, line },
+  });
+
+  return {
+    schema: GRAPH_SCHEMA,
+    builtAgainst: "",
+    builtAtCommitSubject: "",
+    roots: [{ path: "apps/api", lang: "php" }],
+    packs: { php: PHP_INSTALLED },
+    stats: { files: 3, nodes: 3, edges: 3, bridgedEdges: 0 },
+    nodes: [node(LAYOUT, "view"), node(PAGE, "view"), node(ORDER_CONTROLLER, "class")],
+    edges: [
+      edge(PAGE, LAYOUT, 1),
+      edge(ORDER_CONTROLLER, LAYOUT, 26),
+      edge(ORDER_CONTROLLER, PAGE, 12),
+    ],
+    flows: {},
+    fanin: { [LAYOUT]: 2, [PAGE]: 1 },
+    coverage: {},
+    hazards: [],
+    hazardsScanned: [],
+    names: [],
+  };
+}
+
+/**
  * A graph with `count` nodes all of non-zero fan-in, for the one thing `--gods` does that no
  * fixture is large enough to exercise: cap the list and say how many it left out. Fan-in descends
  * with the index so the order is deterministic and the top-20 is a known slice.
@@ -681,6 +734,51 @@ describe("queryCommand", () => {
     expect(answer.rows).toHaveLength(20);
   });
 
+  test("--gods names each row's kind, because the widest fan-in is often a layout", () => {
+    // The ranking is right and was unreadable. Once `view` made a template a sink, a Laravel
+    // layout `@extends`-ed by every page in the application takes the top of this list on merit,
+    // and the row printed a count, an id and a path — enough to tell a class from a template only
+    // if the reader recognizes the naming convention. Nothing here holds a view back or reorders
+    // one: it says what each row is and leaves the widest 20 the widest 20.
+    const repoDir = repoWithGraph(renderedLayoutGraph());
+    const printed = capture(() => queryCommand(repoDir, undefined, { gods: true }));
+
+    expect(printed).toMatch(/resources\/views\/layouts\/app\.blade\.php\s+view/);
+    // The id of a path-ided node IS its file, so the row names it once. A red here means the two
+    // columns went back to printing the same string twice, which on this list is now the widest
+    // thing on the line.
+    expect(printed).not.toMatch(/layouts\/app\.blade\.php\s+view\s+resources/);
+    // The order is untouched: the layout outranks the controller because it really does have the
+    // wider fan-in, and a red here means somebody started filtering this list.
+    const rows = JSON.parse(
+      capture(() => queryCommand(repoDir, undefined, { gods: true, json: true })),
+    ).rows;
+    expect(rows[0]).toMatchObject({ id: "resources/views/layouts/app.blade.php", kind: "view" });
+  });
+
+  test("names the kind of every consumer, so a controller does not read like a sibling blade", () => {
+    // The row a changed layout answers with. `consumers` is ranked by the consumer's own fan-in, so
+    // the sibling template that is itself extended outranks the controller that renders the page,
+    // and printed as bare ids the two are the same shape. A reviewer given five identical-looking
+    // rows cannot tell that the controller is the sixth; given `view template` five times, they can.
+    const repoDir = repoWithGraph(renderedLayoutGraph());
+    const printed = capture(() =>
+      queryCommand(repoDir, "resources/views/layouts/app.blade.php", {}),
+    );
+
+    expect(printed).toMatch(/resources\/views\/orders\/index\.blade\.php\s+view template\s/);
+    expect(printed).toMatch(/Acme\\Http\\Controllers\\OrderController\s+class template\s/);
+
+    const answer = JSON.parse(
+      capture(() => queryCommand(repoDir, "resources/views/layouts/app.blade.php", { json: true })),
+    );
+    // The edge family and not the directive: a graph records which rule family matched, never
+    // whether the php said `@extends` or `view(`, and a column claiming the second would invent it.
+    expect(answer.consumers).toContainEqual(
+      expect.objectContaining({ id: ORDER_CONTROLLER, kind: "class", edge: "template" }),
+    );
+  });
+
   test("--gods adds no not-shown line when nothing was left out", () => {
     const repoDir = repoWithGraph(manyGodsGraph(12));
     const printed = capture(() => queryCommand(repoDir, undefined, { gods: true }));
@@ -1034,8 +1132,10 @@ describe("queryCommand --blind", () => {
 /**
  * The point of the whole mode: a zero fan-in is evidence of dead code only for a kind something in
  * the repository would have had to reference. A view, a migration and a policy are reached by the
- * framework, by name, and can never gain an edge, so listing them taught an agent to propose
- * deleting working code. What is left out is counted and named, because an omitted list that says
+ * framework, by name, so they can sit at zero while being used every day, and listing them taught
+ * an agent to propose deleting working code. The `view` strategy narrowed that set without closing
+ * it: a blade file named by `view('orders.show')` now has a fan-in and leaves this list through the
+ * fan-in test, while the one rendered by `view($name)` beside it is as invisible as ever. What is left out is counted and named, because an omitted list that says
  * nothing about its omission reads as the whole list.
  */
 describe("queryCommand --orphans", () => {

@@ -141,7 +141,7 @@ export function buildProgram(): Command {
     .option("--orphans", "nodes nothing references, dead-code candidates", false)
     .option("--hazards", "jobs dispatched inside a transaction, before it commits", false)
     // --orphans hides the kinds a pack marks framework-resolved, because a view rendered by name
-    // has no fan-in whether it is used or not. This is how to see them anyway.
+    // can sit at a fan-in of zero while being used every day. This is how to see them anyway.
     .option("--all", "with --orphans, list the framework-resolved kinds too", false)
     .action(
       (

@@ -45,7 +45,7 @@ exactly the honesty this tradeoff requires.
       "indexNames": ["index"]                // module-path only: a basename that stands for its dir
     },
     "kindRules": [
-      // resolvedBy:  the framework reaches this kind by name, so it has no fan-in, ever
+      // resolvedBy:  the framework reaches this kind by name, so a fan-in of zero is no evidence
       // arrivedBy:   somebody outside the code arrives here, so a journey starts at it
       // maskStrings: read the file with string contents blanked before contentPattern runs, for a
       //              pattern that describes code; php declares it nowhere, the typescript pack's
@@ -98,6 +98,14 @@ exactly the honesty this tradeoff requires.
     "file": "package.json",                  // manifest basename, matched anywhere under the repo
     "name": "name",                          // field holding this package's own name
     "dependencies": ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]
+  },
+
+  // 4d. optional: where this framework keeps its templates. Read by the "view" resolve strategy and
+  //     by nothing else, and REQUIRED by a pack that names it, since a view name is resolved as a
+  //     path below one of these roots rather than as a name in the index (section 4)
+  "views": {
+    "roots": ["resources/views"],            // matched anywhere in a repo-relative path
+    "extensions": [".blade.php", ".php"]     // first one a template's name ends in wins
   },
 
   // 5. cross-language symbol tables (level 2)
@@ -194,8 +202,8 @@ The strategy list is engine-side and closed here too, and only two of the three 
 and `module-path` are implemented; `symbol` is declared and throws a "not implemented yet"
 configuration error from `engine/extractor.ts`, and it lands with the first pack that wants
 per-export granularity. A pack naming it fails loudly instead of quietly handing back the file-level
-node the other two strategies produce, which is the same bargain the unimplemented `view` resolve
-strategy makes below.
+node the other two strategies produce, which is the same bargain every unbuilt strategy in this
+contract has made: a pack naming one fails loudly rather than silently resolving nothing.
 
 `fallback: "path"` covers the files the strategy cannot name: a route file, a bootstrap script,
 anything with no class declaration in it. Without it those files yield no node at all, and
@@ -215,10 +223,10 @@ glob or content pattern, first match wins. Kinds drive both flow mapping and the
 project-specific red flags.
 
 `resolvedBy: "framework"` marks a kind the framework reaches by name or by convention, and not
-through any edge the pack's rules could see: a blade view rendered by `view('orders.index')`, a
-migration the runner discovers, a policy found by its class name. Those nodes have a fan-in of zero
-whether they are used or not, so **the absence of an edge is not evidence about them**, and `empo
-query --orphans` excludes them rather than offering them as dead code. Left unmarked, a Laravel
+through any edge the pack's rules could see: a blade view rendered by `view($name)`, a
+migration the runner discovers, a policy found by its class name. Those nodes can sit at a fan-in of
+zero whether they are used or not, so **the absence of an edge is not evidence about them**, and
+`empo query --orphans` excludes them rather than offering them as dead code. Left unmarked, a Laravel
 repository answered `--orphans` with 296 nodes of which essentially none were dead: 142 of
 them views. This is the whole promise failing in one command, and it is fixed in pack data rather
 than in the engine because which conventions a framework resolves is exactly the kind of knowledge
@@ -233,10 +241,18 @@ rebuild.
 
 Mark a kind here only when the framework really is the caller. A model is imported, a job is
 dispatched, and a service provider is named as a string in `bootstrap/providers.php`, which the
-`string` edge family already catches. Each of those has a visible edge, so a fan-in of zero on one
-of them is a genuine dead-code candidate, and marking it would hide a true positive. The question to
-ask is whether deleting the file would break the application even though nothing in the repository
-names it.
+`string` edge family already catches. Nothing reaches one of those except through an edge a rule can
+see, so a fan-in of zero on it is a genuine dead-code candidate, and marking it would hide a true
+positive. The question to ask is whether deleting the file would break the application even though
+nothing in the repository names it.
+
+The mark says **who** resolves the kind, not how many edges an instance of it has, which is why a
+rule that sees some of a kind does not unmark it. The `view` strategy reads the literal spellings
+(`view('orders.show')`, `@extends`), so those blade files now carry a fan-in and leave the candidate
+list through the fan-in test rather than through this one; the ones reached by `view($name)`, a view
+composer or a computed `@include` are reached by nothing any rule can see and stay exactly as
+invisible as they were. A count could not tell those two apart, and calling the second kind dead is
+the mistake the mark exists to prevent.
 
 Ordering matters more once these exist, because kindRules are first match and the default `class`
 rule has no glob and therefore matches everything. Every framework glob in the php pack sits ahead
@@ -326,9 +342,9 @@ kinds nobody arrives at ([06-cli](06-cli.md)).
 Neither axis can be derived from the other, which is why there are two. All three kinds the php pack
 marks `arrivedBy` also carry `resolvedBy`, and that is not a contradiction: the framework reaches
 the file by name **and** a user walks in through it. Reading one field as the other is what made this
-worth building. `--orphans` asks "is this dead?", where framework-resolved means there is no evidence
-either way and so hide it; the brief asks "does a journey start here?", where a route file is
-emphatically yes. Reusing the first answer for the second question throws away every route file,
+worth building. `--orphans` asks "is this dead?", where framework-resolved means a fan-in of zero is
+no evidence either way and so hide it; the brief asks "does a journey start here?", where a route
+file is emphatically yes. Reusing the first answer for the second question throws away every route file,
 console command and Livewire component, which on a Laravel repository is very nearly the whole
 entrypoint list: on one census of 285 entrypoints it would have left 7.
 
@@ -534,12 +550,67 @@ leaves the ambiguous case exactly as `short-name` already had it. Which kinds a 
 fact about the language, so it stays pack data like every other language fact, and the kind and the
 rule are declared in the same file.
 
-The strategy list is engine-side and closed: a pack selects one, it cannot define one. Implemented
-today are `fqcn`, `fqcn-string`, `observer`, `module-path` and `short-name`. `view` is declared and
-throws a "not implemented yet" error from `engine/resolver.ts`. A pack naming it fails loudly instead
-of quietly producing no edges. Note that `view` and `short-name` are different strategies for
-different jobs and neither replaces the other: `short-name` is template-to-**class**, and `view` is
-template-to-**template**, resolving `@include('orders.row')` against the framework's view roots.
+The strategy list is engine-side and closed: a pack selects one, it cannot define one. All six are
+built. Note that `view` and `short-name` are different strategies for different jobs and neither
+replaces the other: `short-name` is template-to-**class**, and `view` resolves a view **name**
+against the framework's view roots, which is the only thing in the model whose target is a template.
+
+**`view` is what makes a template a sink.** Before it, every rule that mentioned a template made it
+a source: a blade file named the component classes it rendered and nothing named the blade file, so
+a change to a controller or a route never reported the page it draws — the direction a reviewer
+actually asks about. Measured on a real Laravel repository, 69 blade files on one journey had zero
+incoming edges. Every spelling lands on the same strategy, because they are one question: a template
+naming another (`@extends('layouts.app')`, `@include('orders.row')`), a class naming one
+(`view('orders.show')`, `View::make(...)`) and a route naming one with no controller in between
+(`Route::view('/about', 'pages.about')`, whose **second** argument is the template).
+
+What each of those looks like as a pattern is pack data and stays there, and three of the four rules
+carry a lookbehind for the same reason `short-name`'s refusals exist. `$mail->view(...)` is a method
+on somebody's object and `TextView::make(...)` is a class whose name merely ends in the facade's, and
+a rule that read every `view(` in the language would invent an edge out of either. So is a **name
+qualified by a namespace**: `Acme\View::make(...)` and `Acme\view(...)` are an application's own
+class and function, and the framework's are reachable unqualified or behind the one leading separator
+that means the global namespace, so each lookbehind excludes the separator while the pattern admits
+an optional leading one. What that last refusal costs is the fully-qualified inline facade,
+`Illuminate\Support\Facades\View::make(...)`, which real code writes as a `use` and a bare
+`View::make(...)`; a missed edge is the acceptable direction and an invented one is not.
+
+The `views` block is checked against `match.extensions` at load for the same reason the block is
+required at all. `scanRoot` globs `**/*<extension>` per entry in `match.extensions`, so a template
+whose name ends in none of them is never read and never indexed, and a pack declaring `.twig` beside
+a php `match` block would pass every other check and ship a family that cannot produce an edge.
+`.blade.php` qualifies through its plain `.php` tail, exactly as a compound `commentsByExtension`
+key does.
+
+What it resolves is a **path below a root**, never a name looked up in the index of node names. A
+view name is not a short name: `orders/show` is where the file sits, and the only thing no line of
+the repository writes down is which directory that is, which is what the `views` block below says.
+So the strategy shares none of `resolveName`'s four post-uniqueness questions — the kind, the
+reading file's own declarations, its imports, its workspace packages — because not one of them can
+say anything about a path. What it does share is the refusal: a name in no template and a name in
+several both yield nothing, and both are counted in `names` beside the `short-name` verdicts, since
+a strategy whose yield can quietly be zero is not one anybody can call proven.
+
+The name is spelled with dots at the call site and with slashes on disk, and that is a Blade fact
+rather than a graph one, so it is the pack's `dot-to-slash` normalizer that closes it and no engine
+code learns the word Blade.
+
+The roots come from the pack's optional **`views`** block, which the `view` strategy is the only
+reader of and which a pack naming that strategy must declare — without it the strategy would resolve
+every name against an empty index and the family would ship producing nothing, so it is refused at
+load like every other such gap in this contract.
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `roots` | yes | Directory a view name is relative to (`resources/views`). |
+| `extensions` | yes | Suffixes a template carries (`.blade.php`, `.php`). The first one the file's name ends in is the one taken off, so declaring the compound suffix before the plain one is what keeps `orders/show.blade.php` from being named `orders/show.blade`. |
+
+A root is matched **anywhere in a repo-relative path**, not only at its start, so one entry covers
+both `resources/views/orders/show.blade.php` and a monorepo's
+`apps/api/resources/views/orders/show.blade.php`. The cost of that reach is the ambiguity it can
+create: two applications in one repository each holding `orders/show` make the name ambiguous and it
+resolves to neither, which is the same refusal `short-name` makes and the same reason — a plausible
+pick is a confident wrong `file:line` where the honest answer is that nothing here can tell.
 
 `short-name` is the plain form of `observer`: capture one name, look it up in the index of node
 names, emit an edge from the file that wrote it. It shares `observer`'s refusal rather than
@@ -549,7 +620,9 @@ nothing (a vendor component, or a Blade built-in like `<x-slot>`), and so does a
 ambiguity bites harder here than it does for observers: `forms.text-input` and `fields.text-input`
 both fold to `TextInput`, and a component library with namespaced folders is the normal case rather
 than the odd one. **Resolved against refused is counted rather than assumed**, on whatever repository
-the pack is pointed at. Every name these two strategies read reaches one of six verdicts:
+the pack is pointed at. Every name these two strategies read reaches one of six verdicts, and a
+`view` name reaches three of the same six (`resolved`, `unknown`, `ambiguous`), counted into the same
+per-family record for the same reason:
 `resolved`, `unknown` (the name is in no node at all — a vendor component, a Blade built-in like
 `<x-slot>`), `ambiguous` (the name is in several nodes, so no edge is emitted to any of them),
 `wrong-kind` (the name is in exactly one node, of a kind the rule's `targetKinds` does not list),
@@ -936,6 +1009,7 @@ composes it in the order it lists:
 | `strip-leading-slash` | drops leading `/`, so `/v1/orders` and `v1/orders` are one route |
 | `last-dot-segment` | everything after the last dot, so `forms.text-input` is `text-input`; a value with no dot is returned whole |
 | `pascal-case` | capitalizes each `-` or `_` separated segment and drops the separators, so `text-input` is `TextInput` |
+| `dot-to-slash` | every dot becomes a `/`, so the view name `orders.show` is the path `orders/show`; a value already written with slashes passes through |
 
 `pascal-case` leaves the rest of every segment exactly as written rather than lowercasing and
 rebuilding it, so a name that already arrives in PascalCase survives the trip instead of being
@@ -1338,7 +1412,7 @@ silent-failure shape this document argues against everywhere else. Neither shipp
 so nothing is broken today, and this is unscheduled work rather than a regression: a pack `module`
 is where AST-level precision would go if a repository ever genuinely needed it, and nothing
 schedules the loader. Whoever builds it should make an unloadable `module` fail
-loudly, the way a pack naming an unimplemented `resolve` strategy already does.
+loudly, the way a pack naming a `resolve` strategy the engine does not implement already does.
 
 The design constraint stands for whoever gets there. Keep it small; every line in such a module is
 language-specific code the declarative rules were meant to avoid. If a pack's `module` grows large,
@@ -1373,9 +1447,13 @@ whoever follows the citation, and citations are the whole contract.
 
 Two, deliberately different, to keep the interface honest:
 
-- **php** (`strategy: fqcn`, all five edge families, Laravel extractors for routes, observers and
-  Blade component tags, `produces` http-routes, `consumes` both http-routes and the Inertia page
-  names the typescript pack produces). It is the one pack that declares a `hazards` block, covering
+- **php** (`strategy: fqcn`, all five edge families, Laravel extractors for routes, observers,
+  Blade component tags and the four rules that render a view by name — the directives whose first
+  argument is a template (`@extends`, `@include`, `@includeIf`, `@component`, `@each`), a global
+  `view('x')`, `View::make` and `Route::view`'s second argument — `produces`
+  http-routes, `consumes` both http-routes and the Inertia page
+  names the typescript pack produces). It is the one pack that declares a `views` block, which those
+  four rules are the only reader of, the one pack that declares a `hazards` block, covering
   both Laravel
   transaction forms, the three spellings of a dispatch, `->afterCommit()` at the site and
   `public $afterCommit = true` on the job, and the one that declares a compound-extension comment

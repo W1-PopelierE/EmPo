@@ -43,6 +43,7 @@ const normalizerSchema = z.enum([
   "strip-leading-slash",
   "last-dot-segment",
   "pascal-case",
+  "dot-to-slash",
 ]);
 
 /** Every strategy reads group 1 as the target; observer reads a second group as the listener. */
@@ -304,6 +305,16 @@ const aliasSourceSchema = z.object({
   extends: z.string().min(1).optional(),
 });
 
+/**
+ * Where this framework keeps its templates, which is what the `view` strategy resolves a name
+ * against. `roots` is matched anywhere in a repo-relative path, so one entry covers both a
+ * single-application repository and a monorepo's `apps/api/resources/views`.
+ */
+const viewsSchema = z.object({
+  roots: z.array(z.string().min(1)).min(1),
+  extensions: z.array(z.string().min(1)).min(1),
+});
+
 /** Everything the `maskStrings` check needs to know about one declared comment syntax. */
 type QuoteBearingSyntax = { stringQuotes: string[] };
 
@@ -448,10 +459,17 @@ export const packSchema = z
                */
               maskStrings: z.boolean().optional(),
               /**
-               * Marks a kind the framework reaches by name or by convention rather than through an edge
-               * any rule in this pack can see: a Laravel view rendered by `view('orders.index')`, a
-               * migration the runner discovers, a policy found by its class name. Those nodes have a
-               * fan-in of zero forever, so `empo query --orphans` must not offer them as dead code.
+               * Marks a kind the framework reaches by name or by convention rather than through a call
+               * any rule in this pack can see: a Laravel view rendered by `view($name)`, a migration
+               * the runner discovers, a policy found by its class name. Such a node can sit at a
+               * fan-in of zero while being used every day, so `empo query --orphans` must not offer it
+               * as dead code.
+               *
+               * The mark is about the resolver and not about a count, which is why a rule may see some
+               * of a kind and the mark still stands: the `view` strategy reads the literal spellings
+               * (`view('orders.index')`, `@extends`), so those blade files have a fan-in and never
+               * reach the candidate list, while the computed ones next to them are exactly as
+               * invisible as they always were.
                *
                * An enum and not a boolean, because the useful fact is *who* resolves the node, and the
                * next value to want (a DI container, a plugin registry) is a sibling rather than a
@@ -529,6 +547,13 @@ export const packSchema = z
      * --hazards` prints that difference rather than showing an empty list either way.
      */
     hazards: hazardsSchema.optional(),
+    /**
+     * Read by the `view` resolve strategy and by nothing else. A pack that names that strategy must
+     * declare it, or the strategy resolves every name it reads against an empty index and the pack
+     * ships a family that quietly produces no edges — which is the failure the whole "fail at load"
+     * habit in this file exists to prevent.
+     */
+    views: viewsSchema.optional(),
     /**
      * Patterns whose first capture group is a name the file **declares itself**, one per shape the
      * language spells a declaration in. The two name-resolving strategies read the result and
@@ -626,6 +651,39 @@ export const packSchema = z
           path: ["edges", family, position, "maskStrings"],
           message: quotelessMessage(offender),
         });
+      }
+    }
+
+    // A view extension the scanner never admits indexes no template, and the strategy then resolves
+    // every name it reads against an empty map. `scanRoot` globs `**/*<extension>` per entry in
+    // `match.extensions` (src/engine/scanner.ts), so a file reaches `buildNodeIndex` only if its
+    // name ends in one of those, and `.blade.php` qualifies through its plain `.php` tail exactly as
+    // `commentsByExtension`'s compound keys do. A pack declaring `.twig` beside a php `match` block
+    // passes every other check here and ships a family that can never produce an edge, which is the
+    // same silence the missing-`views` case above is refused for.
+    for (const [position, extension] of (pack.views?.extensions ?? []).entries()) {
+      if (pack.match.extensions.some((scanned) => extension.endsWith(scanned))) continue;
+      ctx.addIssue({
+        code: "custom",
+        path: ["views", "extensions", position],
+        message:
+          `"${extension}" ends in none of the extensions this pack scans ` +
+          `(${pack.match.extensions.join(", ")}), so no template carrying it is ever read`,
+      });
+    }
+
+    // A `view` rule with no view roots to resolve against reads every name and resolves none, and
+    // a family whose yield is zero looks exactly like a corpus with nothing to find. Answer at load.
+    if (pack.views === undefined) {
+      for (const [family, rules] of Object.entries(pack.edges)) {
+        for (const [position, rule] of (rules ?? []).entries()) {
+          if (rule.resolve !== "view") continue;
+          ctx.addIssue({
+            code: "custom",
+            path: ["edges", family, position, "resolve"],
+            message: 'the "view" strategy needs a views block naming the roots to resolve against',
+          });
+        }
       }
     }
 

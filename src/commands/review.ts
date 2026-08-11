@@ -1155,7 +1155,14 @@ function printBlastRadius(facts: FileFacts[]): void {
       console.log(`    flow ${flow.flow}  ${state}  via ${flow.evidence}`);
     }
     for (const consumer of radius.consumers.slice(0, 5)) {
-      console.log(`    consumer ${consumer.id}  ${consumer.evidence}`);
+      // The two kinds, for the reason `empo query` prints them: a changed Laravel layout is
+      // consumed both by the controller that renders it and by the sibling blades that extend it,
+      // and the rows are ranked by the consumer's own fan-in, so the templates can fill all five
+      // while the controller falls into the count below. A reviewer reading five identical-looking
+      // rows cannot tell that happened; a reviewer reading `view template` five times can.
+      console.log(
+        `    consumer ${consumer.id}  ${consumer.kind} ${consumer.edge}  ${consumer.evidence}`,
+      );
     }
     // Both lists say what they held back. A brief is read by an agent that quotes it, and five
     // consumers of five hundred printed as a bare list is the same "reads as all of it" failure the

@@ -98,21 +98,25 @@ Every edge carries `evidence` (file and line) so `empo query` can cite where a c
 and so a human can go read it. A finding with no `file:line` is not allowed anywhere in EmPo; this
 is where the citations start.
 
-A `template` edge runs from the file that wrote the tag to the node the tag names, and both shipped
-packs fill it. The php pack fills it from Blade's `<x-component>`, `<livewire:component>` and
-`@livewire('component')` forms; the typescript pack from a PascalCase JSX tag and from the same tag
-in a Vue SFC template, closing or self-closing in either language
-([04-language-packs](04-language-packs.md) section 4 has the rules and why an opening tag is not one
-of them). The typescript rules are scoped twice over, and both halves are pack data: `pathGlob`
-confines them to the `.tsx`, `.jsx` and `.vue` files that can hold a tag, so no `.ts` module produces
-one, and `targetKinds` lets them land only on a node kinded `component` or `screen`, so a tag whose
-name belongs to a package cannot fall onto the lone local file that happens to share the basename.
-That filter is applied to the survivor of the uniqueness test and not before it, so where two local
-files carry the name the tag resolves to nothing, which is what `short-name` already did. Section 4
-carries what each was measured to cost, what it did not, and why the other order invents an edge.
-Two further refusals are asked of the survivor of both tests, out of the pack's `declares` patterns
-and its `packages` block: a tag naming something the rendering file declares itself, and a tag naming
-something that file imports from a package the repository depends on, produce no edge either.
+A `template` edge runs from the file that wrote the reference to the node that reference names, and
+both shipped packs fill it. The reference is usually a tag and it is not always one: the php pack
+fills the family from Blade's `<x-component>`, `<livewire:component>` and
+`@livewire('component')` tags, which name a class, and from the view names in `@extends`,
+`@include`, `@includeIf`, a global `view('orders.show')`, `View::make(...)` and `Route::view`
+(whose **second** argument is the view), which name a template; the typescript pack from a
+PascalCase JSX tag and from the same tag in a Vue SFC template, closing or self-closing in either
+language ([04-language-packs](04-language-packs.md) section 4 has the rules and why an opening tag
+is not one of them). The typescript rules are scoped twice over, and both halves are pack data:
+`pathGlob` confines them to the `.tsx`, `.jsx` and `.vue` files that can hold a tag, so no `.ts`
+module produces one, and `targetKinds` lets them land only on a node kinded `component` or `screen`,
+so a tag whose name belongs to a package cannot fall onto the lone local file that happens to share
+the basename. That filter is applied to the survivor of the uniqueness test and not before it, so
+where two local files carry the name the tag resolves to nothing, which is what `short-name` already
+did. Section 4 carries what each was measured to cost, what it did not, and why the other order
+invents an edge. Two further refusals are asked of the survivor of both tests, out of the pack's
+`declares` patterns and its `packages` block: a tag naming something the rendering file declares
+itself, and a tag naming something that file imports from a package the repository depends on,
+produce no edge either.
 
 **Where no file carries the name as written, the spelling is folded before it is given up on.** A
 file naming convention is not a language: `<Badge />` is `Badge.tsx` in one React repository and
@@ -149,11 +153,17 @@ React Native application, where the tags really do name those files, **12 of 12*
 survive and each was opened at its cited line and confirmed real.
 
 It is worth knowing that all of this makes template files **sources** at scale where they used to be
-isolated, so it moves `--gods` and a blast radius and not only a fan-in. Nothing yet produces an edge
-*into* a template file: `view('orders.index')`, `@include`, `@extends` and an anonymous component are
-all still invisible, which is the unbuilt `view` resolve strategy and not this one. Coverage and
-`--blind` do not move for the same reason, because a template-to-class edge carries reach only if
-something reaches the template first.
+isolated, so it moves `--gods` and a blast radius and not only a fan-in. What produces an edge
+*into* a template file is the `view` resolve strategy and not this one, and that strategy is now
+built: on the php side `view('orders.index')`, `View::make`, `Route::view` and Blade's
+`@extends`/`@include`/`@includeIf` land on the template they name, so a blade file now carries a
+fan-in out of controllers, out of route files and out of other blade files. What stays invisible is
+the name no rule can read — `view($name)`, a view composer, a computed `@include` — and an
+anonymous component, which is named by a tag and has no class for `short-name` to land on. Coverage
+and `--blind` moved with it, and only on the php side, since a `views` block is what the strategy
+reads and the typescript pack declares none: reach now runs the two hops from a test through a
+controller to the page it draws, where before a template-to-class edge carried reach only if
+something reached the template first and nothing did.
 
 **One thing about the typescript side is genuinely new, and it is the overlap.** A blade file writes
 no imports, so its template edge was the only edge between that pair. In React and in Vue the tag's
@@ -288,12 +298,16 @@ input. A missing `flows.json` is not an error: the repo indexes with no flows.
   query --gods` (the widest-blast-radius nodes in the repo). Only non-zero counts are stored, so a
   node absent from the map has a fan-in of zero. That absence is where `empo query --orphans` comes
   from, though absence alone is not the answer it gives: a kind its pack marks `resolvedBy:
-  "framework"` is reached by name and its fan-in is zero whether it is used or not, so `--orphans`
-  filters those out and names what it filtered ([06-cli](06-cli.md)). Test nodes are filtered too,
-  and unlike the framework-resolved kinds they go in silence: a test nothing imports has a fan-in of
-  zero by construction, so listing it would be the same false positive, but nothing counts the tests
-  dropped this way and `--all` does not bring them back. What `--orphans` names as filtered is
-  therefore only the framework-resolved half.
+  "framework"` is reached by name, so a fan-in of zero is not evidence about it either way and
+  `--orphans` filters those out and names what it filtered ([06-cli](06-cli.md)). The mark says who
+  resolves the kind rather than how many edges an instance has: the php `view` rules do give a blade
+  file named by `view('orders.show')` a fan-in, and that one leaves the candidate list through the
+  fan-in test instead, while the one reached by `view($name)` or a view composer is reached by
+  nothing any rule can see and stays held back. Test nodes are filtered too, and unlike the
+  framework-resolved kinds they go in silence: a test nothing imports has a fan-in of zero by
+  construction, so listing it would be the same false positive, but nothing counts the tests dropped
+  this way and `--all` does not bring them back. What `--orphans` names as filtered is therefore
+  only the framework-resolved half.
 - **`flows`**: for each flow (from `flows.json`), the set of node ids assigned to it by longest
   path-prefix match, across roots, minus every test node, which no prefix ever claims. A node can
   belong to more than one flow.
@@ -432,21 +446,22 @@ repair, the same as above.
 }
 ```
 
-`names` holds one of these per edge family, sorted by family name. Only the `short-name` and
-`observer` resolve strategies contribute, because they are the two whose entire input is a bare name
+`names` holds one of these per edge family, sorted by family name. Three of the six resolve
+strategies contribute — `short-name`, `observer` and `view` — because they are the ones whose
+entire input is a bare name: a class name for the first two, a view name for the third
 ([04-language-packs](04-language-packs.md)). A `module-path` that resolves to nothing named a
 package and a `fqcn` that does named a class in a vendor tree, and neither of those is a refusal a
 repository can repair, so neither is worth a denominator. An ambiguous short name is.
 
-**The field exists because the refusal was silent, and the silence was measured.** Both strategies
-already declined a bare name carried by more than one node, and declined it without counting or
-printing anything. On a synthetic 16-file React tree, adding a second `OrderTable.tsx` under a
-second feature directory took the build from 12 template edges to 7, with no warning and with `empo
-doctor` reporting OK; on a 640-file copy where every component name was 40-way ambiguous, not one
-template edge resolved and the run looked exactly like a run against a repository that renders no
-components. This field does not narrow the refusal, which is a separate and larger change: a family
-that resolves nothing still resolves nothing. It now says so, which is what lets a reader tell
-"found nothing" from "there was nothing to find".
+**The field exists because the refusal was silent, and the silence was measured.** `short-name` and
+`observer` already declined a bare name carried by more than one node, and declined it without
+counting or printing anything. On a synthetic 16-file React tree, adding a second `OrderTable.tsx`
+under a second feature directory took the build from 12 template edges to 7, with no warning and
+with `empo doctor` reporting OK; on a 640-file copy where every component name was 40-way ambiguous,
+not one template edge resolved and the run looked exactly like a run against a repository that
+renders no components. This field does not narrow the refusal, which is a separate and larger
+change: a family that resolves nothing still resolves nothing. It now says so, which is what lets a
+reader tell "found nothing" from "there was nothing to find".
 
 **The counts are per reference, not per edge.** Two files rendering `<OrderCard />` are two resolved
 references and, after `dedupeEdges`, two edges; one file rendering it twice is also two resolved
@@ -496,7 +511,11 @@ that separates them. A denominator that appears only in the bad case is one nobo
 for.
 Returned as a bare null downstream, as they were, all five failures were one fact, which is how a
 family whose yield had gone to zero went on producing the same silence as a family with nothing to
-find.
+find. A `view` name reaches three of the six and not all six, and that is the strategy rather than a
+gap: it resolves a path below a root and never a class name, so `wrongKind`, `local` and `vendor` —
+the three questions asked of a name the node index answered — cannot be asked of it at all, and
+`resolved`, `unknown` and `ambiguous` are the whole of its ledger, counted into the same per-family
+record for the same reason the others are.
 
 **The denominator is every verdict, `local` and `vendor` included, and the printed line names the
 refusals that happened.** `nameLines` sums `resolved + unknown + ambiguous + wrongKind + local +
@@ -572,8 +591,8 @@ actually find the most copies in, and it is the number the worst refusal weighed
 
 **Absent and empty are different claims, and the distinction is sharper here than it is for
 `hazards`.** An empty list means a build counted and nothing read a bare name, which has two causes
-and the record does not separate them: the configured roots' packs declare no `short-name` and no
-`observer` family at all, or they declare some and none of them matched a file. EmPo's own
+and the record does not separate them: the configured roots' packs declare no `short-name`,
+`observer` or `view` family at all, or they declare some and none of them matched a file. EmPo's own
 repository is the second — its typescript pack's two `short-name` template rules carry
 `pathGlob: "**/*.{tsx,jsx,vue}"`, which matches nothing in a repository with no components in it —
 and a surface that reported "these packs resolve no names" over it would be inventing a fact about

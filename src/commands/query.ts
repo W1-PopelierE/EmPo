@@ -10,7 +10,14 @@ import {
 import { nameLines } from "../engine/names";
 import { compareStrings } from "../engine/order";
 import { configError } from "../errors";
-import type { Graph, GraphEdge, GraphNode, Hazard, NameResolution } from "../schema/types";
+import type {
+  EdgeKind,
+  Graph,
+  GraphEdge,
+  GraphNode,
+  Hazard,
+  NameResolution,
+} from "../schema/types";
 import { columnWidth } from "../term";
 
 /**
@@ -89,7 +96,26 @@ export interface BlastRadius {
     flowNodes: number;
     evidence: string;
   }[];
-  consumers: { id: string; fanin: number; evidence: string }[];
+  /**
+   * Who references this node, one row per referencing node.
+   *
+   * `kind` is the consumer's own kind and `edge` is the family the reference was written in, and
+   * both are here for one reason: the row used to be a count, an id and a coordinate, which is
+   * enough to tell two consumers apart only if the reader recognizes the id. Once a template can be
+   * a sink, a changed Laravel layout answers with a list where a controller that renders it and a
+   * sibling blade that extends it are the same shape, and the rows are sorted by the consumer's own
+   * fan-in, so the sibling templates — which are themselves extended — can fill the printed rows
+   * while the controller falls past the cap into "and N more".
+   *
+   * Naming the two kinds is the repair, and the sort is deliberately left alone: a consumer that is
+   * itself widely used is genuinely the one to read first, and the count that says so is printed in
+   * the same row. What was missing was never the order, it was what each row is.
+   *
+   * `edge` is the family (`template`, `import`, `fqcn`, `hook`, `string`) and not the directive. A
+   * graph records which rule family matched, not whether the php that matched said `@extends` or
+   * `view(`, and a column that claimed the second would be inventing a fact the build never kept.
+   */
+  consumers: { id: string; fanin: number; kind: string; edge: EdgeKind; evidence: string }[];
   bridges: BridgeReach[];
   /**
    * How many bridge edges the whole graph holds, so an empty `bridges` can say which of the two
@@ -238,6 +264,8 @@ export function blastRadius(graph: Graph, node: GraphNode): BlastRadius {
       .map((edge) => ({
         id: edge.from,
         fanin: graph.fanin[edge.from] ?? 0,
+        kind: graph.nodes.find((candidate) => candidate.id === edge.from)?.kind ?? "",
+        edge: edge.kind,
         evidence: `${edge.evidence.file}:${edge.evidence.line}`,
       }))
       .sort((a, b) => b.fanin - a.fanin || compareStrings(a.id, b.id)),
@@ -308,7 +336,19 @@ const BRIDGES_SHOWN = 10;
 
 interface GodsAnswer {
   mode: "gods";
-  rows: { id: string; fanin: number; file: string }[];
+  /**
+   * `kind` is on the row because the ranking is right and was unreadable without it. A Laravel
+   * layout is `@extends`-ed by every page in the application, so once the `view` strategy landed the
+   * widest fan-in in a php repository is often a template, and it deserves to be: a change to that
+   * file really does reach 40 pages. What the reader could not do was tell that from the list, which
+   * printed a count, an id and a path and left "is this a class or the layout every page extends?"
+   * to whoever recognized the file naming convention.
+   *
+   * The order is deliberately untouched. Holding views back would hide the fact this list exists to
+   * show, and a per-kind cap would make the top 20 something other than the widest 20; both invent a
+   * policy where the honest repair was to say what each row is.
+   */
+  rows: { id: string; fanin: number; file: string; kind: string }[];
   /**
    * How many nodes have a non-zero fan-in in all, so the printed and JSON forms can say how many
    * the top-20 left out. A cap that does not say what it dropped reads as "all of it", the same
@@ -321,11 +361,10 @@ function gods(graph: Graph): GodsAnswer {
   const ranked = Object.entries(graph.fanin).sort(
     (a, b) => b[1] - a[1] || compareStrings(a[0], b[0]),
   );
-  const rows = ranked.slice(0, GODS_SHOWN).map(([id, fanin]) => ({
-    id,
-    fanin,
-    file: graph.nodes.find((node) => node.id === id)?.file ?? "",
-  }));
+  const rows = ranked.slice(0, GODS_SHOWN).map(([id, fanin]) => {
+    const node = graph.nodes.find((candidate) => candidate.id === id);
+    return { id, fanin, file: node?.file ?? "", kind: node?.kind ?? "" };
+  });
   return { mode: "gods", rows, total: ranked.length };
 }
 
@@ -410,8 +449,15 @@ export interface OrphansAnswer {
 
 /**
  * Nodes nothing references. Zero fan-in alone is not the answer: a Laravel view, a migration or a
- * policy is reached by the framework, by name, and can never gain an edge, so a list built on
- * fan-in alone is mostly false positives and an agent acting on it deletes working code.
+ * policy is reached by the framework, by name, so a list built on fan-in alone is mostly false
+ * positives and an agent acting on it deletes working code.
+ *
+ * A view is the kind where that is now a judgement rather than an impossibility. The php pack reads
+ * `view('orders.index')` and `@extends`, so a rendered blade file has a fan-in and never reaches
+ * this list; what is left marked is the view reached through `view($name)`, a composer or a
+ * computed include, which no rule can see and which therefore still looks exactly like a view
+ * nobody renders. The mark says who resolves the kind, not how many edges an instance of it has
+ * (engine/kinds.ts).
  *
  * Excluding them silently would be the other failure, so nothing here is dropped without being
  * counted, named by kind and reachable through `--all`.
@@ -641,10 +687,13 @@ function printBlastRadius(answer: BlastRadius): void {
 
   console.log("top consumers");
   if (answer.consumers.length === 0) console.log("  none: nothing in the graph references it");
-  const idWidth = columnWidth(answer.consumers.slice(0, 10), (row) => row.id);
-  for (const consumer of answer.consumers.slice(0, 10)) {
+  const topConsumers = answer.consumers.slice(0, 10);
+  const idWidth = columnWidth(topConsumers, (row) => row.id);
+  const consumerKindWidth = columnWidth(topConsumers, (row) => `${row.kind} ${row.edge}`);
+  for (const consumer of topConsumers) {
     console.log(
-      `  ${String(consumer.fanin).padStart(4)}  ${consumer.id.padEnd(idWidth)}  ${consumer.evidence}`,
+      `  ${String(consumer.fanin).padStart(4)}  ${consumer.id.padEnd(idWidth)}  ` +
+        `${`${consumer.kind} ${consumer.edge}`.padEnd(consumerKindWidth)}  ${consumer.evidence}`,
     );
   }
   if (answer.consumers.length > 10) {
@@ -783,8 +832,19 @@ function printMode(answer: Exclude<Answer, BlastRadius>): void {
   if (answer.mode === "gods") {
     console.log("widest blast radius");
     if (answer.rows.length === 0) console.log("  none: the graph has no edges");
+    const godWidth = columnWidth(answer.rows, (row) => row.id);
+    const kindWidth = columnWidth(answer.rows, (row) => row.kind);
     for (const row of answer.rows) {
-      console.log(`  ${String(row.fanin).padStart(4)}  ${row.id}  ${row.file}`);
+      // The path is dropped where the id already is it, which is every node a pack ids by path: a
+      // blade file, a route file, every typescript module. It was always a repeat and it was always
+      // harmless, and it stopped being either once `view` put templates at the top of this list,
+      // where the repeat is now the widest thing on the line. The JSON keeps both fields, because
+      // an agent reading it should not have to know which strategy ided the node.
+      const path = row.file === row.id ? "" : `  ${row.file}`;
+      console.log(
+        `  ${String(row.fanin).padStart(4)}  ${row.id.padEnd(godWidth)}  ` +
+          `${row.kind.padEnd(kindWidth)}${path}`,
+      );
     }
     const rest = answer.total - answer.rows.length;
     if (rest > 0) {

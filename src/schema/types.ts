@@ -250,7 +250,8 @@ export type Normalizer =
   | "lower"
   | "strip-leading-slash"
   | "last-dot-segment"
-  | "pascal-case";
+  | "pascal-case"
+  | "dot-to-slash";
 
 export interface SymbolRule {
   symbol: string; // "http-route", "event", ...
@@ -318,8 +319,11 @@ export interface PackKindRule {
   maskStrings?: boolean;
   /**
    * Set when the framework resolves this kind by name or convention (a view, a migration, a
-   * policy). Such a node's fan-in is zero whether it is used or not, which is what keeps
-   * `empo query --orphans` from calling it dead code. See src/schema/pack.schema.ts.
+   * policy). Such a node can sit at a fan-in of zero while being used every day, which is what
+   * keeps `empo query --orphans` from calling it dead code. It says who resolves the kind, not how
+   * many edges an instance has: a blade file the php pack's `view` rules can see is named by an
+   * edge and still carries the mark, because the one beside it reached through `view($name)` is
+   * not. See src/schema/pack.schema.ts.
    */
   resolvedBy?: KindResolver;
   /**
@@ -415,11 +419,30 @@ export interface Pack {
    * every pack did before the field existed. See src/schema/pack.schema.ts.
    */
   packages?: PackPackageSource;
+  /**
+   * Where this framework keeps its templates, read by the `view` resolve strategy and by nothing
+   * else. Required by the schema for a pack that names that strategy, absent everywhere else.
+   */
+  views?: PackViews;
   /** Optional: a pack that declares none makes no hazard claim at all. See PackHazards. */
   hazards?: PackHazards;
   /** Optional: where this toolchain writes import aliases, read by `empo init` only. */
   aliasSources?: PackAliasSource[];
   module?: string; // path to optional refine() escape hatch
+}
+
+/**
+ * The template roots a `view` name is resolved against, which is the one thing about a rendered
+ * template no line of the repository writes down: `view('orders.show')` names
+ * `resources/views/orders/show.blade.php` only because Laravel knows where views live and what they
+ * are called. So the pack says it, exactly as `indexNames` says what "index" means for a module
+ * path, and the engine goes on doing nothing but path arithmetic.
+ */
+export interface PackViews {
+  /** Directory a view name is relative to, matched anywhere in a repo-relative path. */
+  roots: string[];
+  /** Suffixes a template carries, longest-first is not assumed: the first that matches wins. */
+  extensions: string[];
 }
 
 /**
