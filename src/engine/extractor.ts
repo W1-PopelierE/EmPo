@@ -54,6 +54,15 @@ export interface ExtractedFile {
   consumes: SymbolRef[];
   captures: Capture[];
   /**
+   * Names this file declares itself, from the pack's `declares` patterns. Empty for a pack that
+   * declares none, which is every pack before the field existed.
+   *
+   * It is a property of the file rather than of a capture because that is the question it answers:
+   * a name-resolving strategy asks the root's index who carries a name, and the one place that never
+   * gets asked is the file doing the asking. See resolveName in engine/resolver.ts.
+   */
+  declares: string[];
+  /**
    * Jobs this file dispatches from inside a transaction, unresolved: the job is still the name as
    * written at the call site. Turning that name into a node id needs the whole root's index, which
    * one file's extraction does not have (engine/build.ts does it).
@@ -104,6 +113,8 @@ export interface CompiledPack {
   edgeRules: CompiledEdgeRule[];
   produces: CompiledSymbolRule[];
   consumes: CompiledSymbolRule[];
+  /** The pack's `declares` patterns. Empty where the pack declares none. */
+  declares: RegExp[];
   testPaths: ((relPath: string) => boolean)[];
   /** null when the pack declares no hazards block at all, which is not the same as declaring none. */
   hazards: CompiledHazards | null;
@@ -138,6 +149,7 @@ export function compilePack(pack: Pack): CompiledPack {
     edgeRules,
     produces: pack.produces.map(compileSymbolRule),
     consumes: pack.consumes.map(compileSymbolRule),
+    declares: (pack.declares ?? []).map((pattern) => new RegExp(pattern, "gm")),
     testPaths: pack.tests.paths.map(compileTestPath),
     hazards: compileHazards(pack),
   };
@@ -194,6 +206,9 @@ export function extractFile(compiled: CompiledPack, scanned: ScannedFile): Extra
     produces: extractSymbols(compiled.produces, source, scanned.relPath, starts),
     consumes: extractSymbols(compiled.consumes, source, scanned.relPath, starts),
     captures: extractCaptures(compiled.edgeRules, source, codeOnly, scanned.relPath, starts),
+    // Read from the string-blanked view where the pack asked any rule for one, on the same argument
+    // the tag rules make: a name inside a quoted example is prose about a declaration, not one.
+    declares: declaredNames(compiled.declares, codeOnly),
     // The masked source, like every other rule: a dispatch inside a commented-out block is not a
     // dispatch, and a pack whose rules read the raw text would report hazards nobody can run.
     dispatches: compiled.hazards === null ? [] : findEnclosedDispatches(compiled.hazards, source),
@@ -288,7 +303,11 @@ function kindOf(compiled: CompiledPack, source: string, codeOnly: string, relPat
 function wantsCodeOnly(compiled: CompiledPack): boolean {
   return (
     compiled.edgeRules.some((rule) => rule.maskStrings) ||
-    compiled.kindRules.some((rule) => rule.maskStrings)
+    compiled.kindRules.some((rule) => rule.maskStrings) ||
+    // `declares` reads this view unconditionally, so a pack declaring it and no `maskStrings` rule
+    // would otherwise read the raw source: `"const Badge = ..."` inside a string would declare
+    // `Badge` locally and suppress a real edge the tag rules resolve.
+    compiled.declares.length > 0
   );
 }
 
@@ -315,6 +334,26 @@ function assertsValue(pack: Pack, source: string): boolean {
     source,
   );
   return pack.tests.assertionTerms.some((term) => readable.includes(term));
+}
+
+/**
+ * Every name the pack's `declares` patterns find in one file, sorted and without duplicates so two
+ * runs over the same bytes write the same `graph.json`.
+ *
+ * A pattern that matches and captures nothing contributes nothing: a pack's own bug is not a
+ * declaration, and admitting the empty string here would make every name-resolving strategy in that
+ * pack refuse every name it read.
+ */
+function declaredNames(patterns: RegExp[], source: string): string[] {
+  const names = new Set<string>();
+  for (const pattern of patterns) {
+    pattern.lastIndex = 0;
+    for (const match of source.matchAll(pattern)) {
+      const name = match[1];
+      if (name !== undefined && name !== "") names.add(name);
+    }
+  }
+  return [...names].sort(compareStrings);
 }
 
 function extractCaptures(

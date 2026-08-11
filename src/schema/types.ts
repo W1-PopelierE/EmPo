@@ -92,18 +92,28 @@ export interface NameOutcome {
   /** The name as the rule's `normalize` chain left it, which is the spelling the index is keyed by. */
   name: string;
   outcome: NameVerdict;
-  /** Nodes carrying the name: 0 for `unknown`, 1 for `resolved` and `wrong-kind`, 2+ for `ambiguous`. */
+  /**
+   * Nodes carrying the name: 0 for `unknown`, 1 for `resolved`, `wrong-kind`, `local` and `vendor`,
+   * 2+ for `ambiguous`. The last two are 1 because they are asked of a name the index had already
+   * answered: what they refuse is an edge that was about to be written, not a name nothing carried.
+   */
   candidates: number;
 }
 
 /**
- * Why a name did or did not become a node id. Three ways to fail rather than one, because they call
- * for three different reactions: `unknown` is the normal cost of reading a language whose vendor
+ * Why a name did or did not become a node id. Five ways to fail rather than one, because they call
+ * for five different reactions: `unknown` is the normal cost of reading a language whose vendor
  * components are spelled exactly like local ones, `wrong-kind` is a rule's own `targetKinds` doing
- * what it was declared for, and `ambiguous` is the only one of the three that hides a coupling this
- * repository really has.
+ * what it was declared for, `local` is the reference answering itself, `vendor` is the reference
+ * answered by a package this repository installs, and `ambiguous` is the only one of the five that
+ * hides a coupling this repository really has.
+ *
+ * `local` is a refusal that prevents a wrong edge rather than losing a right one: the file rendering
+ * the tag declares that name itself, so whatever a file of the same basename elsewhere holds, it is
+ * not what this line renders. Measured on marmelab/react-admin, 139 of 2715 template edges pointed
+ * at a file the rendering file was shadowing with its own declaration.
  */
-export type NameVerdict = "resolved" | "unknown" | "ambiguous" | "wrong-kind";
+export type NameVerdict = "resolved" | "unknown" | "ambiguous" | "wrong-kind" | "local" | "vendor";
 
 /**
  * What one edge family's name-resolving rules did with every name they read, counted per **reference
@@ -120,6 +130,13 @@ export interface NameResolution {
   ambiguous: number;
   /** The name is in exactly one node, of a kind the rule does not list in `targetKinds`. */
   wrongKind: number;
+  /** The file that wrote the reference declares the name itself, so no other node can be meant. */
+  local: number;
+  /**
+   * The file that wrote the reference imports the name from a package it declares a dependency on,
+   * so the node carrying that name is a basename collision and not what the line renders.
+   */
+  vendor: number;
   /** The distinct names behind `ambiguous`, so the count names something a reader can go and fix. */
   ambiguousNames: AmbiguousName[];
 }
@@ -386,11 +403,40 @@ export interface Pack {
     /** Removed from the source before assertionTerms are matched. See pack.schema.ts. */
     assertionExcludes: string[];
   };
+  /**
+   * Patterns whose first group is a name **this file declares itself**, read by the two
+   * name-resolving strategies and by nothing else. A pack that declares none behaves exactly as
+   * every pack did before the field existed. See src/schema/pack.schema.ts.
+   */
+  declares?: string[];
+  /**
+   * Where this language's manifest names the packages a repository depends on, so a bare specifier
+   * can be told from a path into this repository. Optional; a pack that declares none behaves as
+   * every pack did before the field existed. See src/schema/pack.schema.ts.
+   */
+  packages?: PackPackageSource;
   /** Optional: a pack that declares none makes no hazard claim at all. See PackHazards. */
   hazards?: PackHazards;
   /** Optional: where this toolchain writes import aliases, read by `empo init` only. */
   aliasSources?: PackAliasSource[];
   module?: string; // path to optional refine() escape hatch
+}
+
+/**
+ * A manifest this language's package manager writes, described by field names rather than by values
+ * so the engine needs no knowledge of the language it belongs to.
+ *
+ * Two facts come out of it and both are needed: which packages a repository **declares a dependency
+ * on**, and which package names the repository **is** — a monorepo's own workspaces are spelled
+ * exactly like third-party ones at an import site, and only the manifests say which is which.
+ */
+export interface PackPackageSource {
+  /** Manifest basename, matched anywhere under the repository ("package.json", "composer.json"). */
+  file: string;
+  /** Field holding this package's own name ("name"). */
+  name: string;
+  /** Fields whose **keys** are dependency names ("dependencies", "require"). */
+  dependencies: string[];
 }
 
 /**

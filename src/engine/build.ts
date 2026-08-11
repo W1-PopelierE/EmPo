@@ -9,6 +9,7 @@ import type {
 import { compilePack, type ExtractedFile, extractFile } from "./extractor";
 import { tallyNames } from "./names";
 import { byEdgeOrder, byNodeId, compareStrings } from "./order";
+import { readPackages } from "./packages";
 import {
   buildNodeIndex,
   compileAliases,
@@ -82,10 +83,20 @@ export function buildRoot(options: BuildRootOptions): RootGraph {
   }
 
   const index = buildNodeIndex(extracted);
+  const packages = readPackages(options.repoRoot, options.pack.packages, options.ignore);
   const context: ResolveContext = {
     extensions: options.pack.match.extensions,
     indexNames: options.pack.node.id.indexNames ?? [],
     aliases: compileAliases(options.root.aliases),
+    // Read per pack rather than once for the repository: the manifest that says what a package is
+    // belongs to the language the pack speaks, so a repository whose php and TypeScript halves both
+    // declared a `packages` block would get two sets and neither could refuse a name in the other's
+    // files. Two roots of the same language read the same manifests and get the same set, which is
+    // the same answer computed twice and not a per-root fact. Both halves come out of one read
+    // because they are one subtraction seen from either side: what the manifests declare is what
+    // `internalPackages` maps and what `vendorPackages` has had taken out of it.
+    vendorPackages: packages.vendor,
+    internalPackages: packages.internal,
   };
   const edges: GraphEdge[] = [];
   const names: NameOutcome[] = [];

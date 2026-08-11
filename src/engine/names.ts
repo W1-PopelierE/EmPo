@@ -43,6 +43,8 @@ export function tallyNames(outcomes: NameOutcome[]): NameResolution[] {
         unknown: 0,
         ambiguous: 0,
         wrongKind: 0,
+        local: 0,
+        vendor: 0,
         ambiguousNames: [],
       };
       byFamily.set(outcome.family, report);
@@ -51,6 +53,8 @@ export function tallyNames(outcomes: NameOutcome[]): NameResolution[] {
     if (outcome.outcome === "resolved") report.resolved += 1;
     else if (outcome.outcome === "unknown") report.unknown += 1;
     else if (outcome.outcome === "wrong-kind") report.wrongKind += 1;
+    else if (outcome.outcome === "local") report.local += 1;
+    else if (outcome.outcome === "vendor") report.vendor += 1;
     else {
       report.ambiguous += 1;
       const names = ambiguous.get(outcome.family) ?? new Map<string, AmbiguousName>();
@@ -98,6 +102,8 @@ export function mergeNames(reports: NameResolution[]): NameResolution[] {
       existing.unknown += report.unknown;
       existing.ambiguous += report.ambiguous;
       existing.wrongKind += report.wrongKind;
+      existing.local += report.local;
+      existing.vendor += report.vendor;
     }
 
     const names = ambiguous.get(report.family) ?? new Map<string, AmbiguousName>();
@@ -167,13 +173,21 @@ export function nameLines(names: NameResolution[] | null): string[] {
 
   const lines: string[] = [];
   for (const report of names) {
-    const total = report.resolved + report.unknown + report.ambiguous + report.wrongKind;
+    const total =
+      report.resolved +
+      report.unknown +
+      report.ambiguous +
+      report.wrongKind +
+      report.local +
+      report.vendor;
     const clauses = [`${report.resolved} of ${total} resolved`];
     // Only the non-zero refusals get a clause. The zero is already stated by the denominator above,
-    // and three "0 ..." clauses on every healthy family is the noise that gets a line skimmed.
+    // and five "0 ..." clauses on every healthy family is the noise that gets a line skimmed.
     if (report.ambiguous > 0) clauses.push(`${report.ambiguous} ambiguous`);
     if (report.unknown > 0) clauses.push(`${report.unknown} in no node`);
     if (report.wrongKind > 0) clauses.push(`${report.wrongKind} of the wrong kind`);
+    if (report.local > 0) clauses.push(`${report.local} declared where they are used`);
+    if (report.vendor > 0) clauses.push(`${report.vendor} imported from a package`);
     lines.push(`names      ${report.family.padEnd(9)}${clauses.join(", ")}`);
 
     if (report.ambiguousNames.length === 0) continue;

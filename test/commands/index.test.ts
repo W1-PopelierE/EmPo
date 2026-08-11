@@ -244,7 +244,7 @@ describe("indexCommand", () => {
     // `names`, and it is 3's case rather than 4's: an added field announces itself only where its
     // absence and its emptiness mean the same thing, and those are the two answers this one exists
     // to tell apart.
-    expect(graph.schema).toBe(5);
+    expect(graph.schema).toBe(6);
     expect(graph.roots).toEqual([
       { path: "apps/api", lang: "php" },
       { path: "apps/mobile", lang: "typescript" },
@@ -391,13 +391,24 @@ describe("indexCommand", () => {
     // it, because `empo doctor` reads the graph and nothing else, and a count that lived only in
     // this command's output would have left doctor exactly as silent as it was.
     expect(graphOnDisk().names).toEqual([
-      { family: "hook", resolved: 2, unknown: 0, ambiguous: 0, wrongKind: 0, ambiguousNames: [] },
+      {
+        family: "hook",
+        resolved: 2,
+        unknown: 0,
+        ambiguous: 0,
+        wrongKind: 0,
+        local: 0,
+        vendor: 0,
+        ambiguousNames: [],
+      },
       {
         family: "template",
         resolved: 1,
         unknown: 0,
         ambiguous: 0,
         wrongKind: 0,
+        local: 0,
+        vendor: 0,
         ambiguousNames: [],
       },
     ]);

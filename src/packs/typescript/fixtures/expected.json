@@ -130,6 +130,18 @@
       "assertsValue": false
     },
     {
+      "id": "src/browser/widgets/priceRow.jsx",
+      "file": "src/browser/widgets/priceRow.jsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "priceRow",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
       "id": "src/components/CartBadge.vue",
       "file": "src/components/CartBadge.vue",
       "root": ".",
@@ -286,6 +298,30 @@
       "assertsValue": false
     },
     {
+      "id": "src/react/cards/CardShelf.tsx",
+      "file": "src/react/cards/CardShelf.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "CardShelf",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/cards/CardStory.tsx",
+      "file": "src/react/cards/CardStory.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "CardStory",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
       "id": "src/react/cards/CardTemplates.tsx",
       "file": "src/react/cards/CardTemplates.tsx",
       "root": ".",
@@ -340,6 +376,42 @@
       "lang": "typescript",
       "kind": "component",
       "name": "Total",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/cards/VendorCard.tsx",
+      "file": "src/react/cards/VendorCard.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "VendorCard",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/cards/WidgetShelf.tsx",
+      "file": "src/react/cards/WidgetShelf.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "WidgetShelf",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/cards/cardFooter.tsx",
+      "file": "src/react/cards/cardFooter.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "cardFooter",
       "produces": [],
       "consumes": [],
       "isTest": false,
@@ -846,6 +918,46 @@
       }
     },
     {
+      "from": "src/react/cards/CardShelf.tsx",
+      "to": "src/react/cards/cardFooter.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/CardShelf.tsx",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/react/cards/CardShelf.tsx",
+      "to": "src/react/cards/cardFooter.tsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/CardShelf.tsx",
+        "line": 15
+      }
+    },
+    {
+      "from": "src/react/cards/CardStory.tsx",
+      "to": "src/react/cards/CardHeader.tsx",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/CardStory.tsx",
+        "line": 1
+      }
+    },
+    {
+      "from": "src/react/cards/CardStory.tsx",
+      "to": "src/react/cards/CardHeader.tsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/CardStory.tsx",
+        "line": 17
+      }
+    },
+    {
       "from": "src/react/cards/OrderCard.tsx",
       "to": "src/browser/widgets/PriceWidget.jsx",
       "kind": "import",
@@ -973,6 +1085,36 @@
       "evidence": {
         "file": "src/react/cards/Total.tsx",
         "line": 1
+      }
+    },
+    {
+      "from": "src/react/cards/VendorCard.tsx",
+      "to": "src/browser/widgets/PriceWidget.jsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/VendorCard.tsx",
+        "line": 20
+      }
+    },
+    {
+      "from": "src/react/cards/WidgetShelf.tsx",
+      "to": "src/browser/widgets/priceRow.jsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/WidgetShelf.tsx",
+        "line": 21
+      }
+    },
+    {
+      "from": "src/react/cards/WidgetShelf.tsx",
+      "to": "src/components/OrderBadge.tsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/WidgetShelf.tsx",
+        "line": 22
       }
     },
     {
@@ -1150,10 +1292,12 @@
   "names": [
     {
       "family": "template",
-      "resolved": 14,
+      "resolved": 19,
       "unknown": 1,
       "ambiguous": 2,
       "wrongKind": 1,
+      "local": 1,
+      "vendor": 1,
       "ambiguousNames": [
         {
           "name": "Badge",

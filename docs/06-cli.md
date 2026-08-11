@@ -227,9 +227,10 @@ It is the yield of the `short-name` and `observer` strategies
 out of how many they read. It sits beside the counts rather than among the warnings below because a
 family that refuses is not a defect the way a duplicated node id is — a vendor component resolving to
 nothing is the strategy working — and what a reader needs is the ratio on every run, so the run where
-it collapses reads as a change rather than as the first time anybody looked. `empo doctor` prints the same block off the same graph, and the
-refusal clauses, the two sentences that replace the numbers, and why the block raises no finding are
-all set out there.
+it collapses reads as a change rather than as the first time anybody looked. `empo doctor` prints the
+same block off the same graph, and the refusal clauses, `short-name`'s two-pass lookup, the two
+sentences that replace the numbers, and why the block raises no finding are all set out there.
+`empo query` prints it too, beside the answer, but only the families that read a name there.
 
 **Not built yet: `--root <path>` to reindex one root.** A partial rebuild is only safe while no edge
 crosses a root, and bridges made that untrue: a bridge edge has one end in each root, so rebuilding
@@ -263,7 +264,30 @@ Output (human-readable, and `--json` for machines):
   the question from one direction and repeats it back from the other. Where no bridge edge is in
   the radius, the line says which of the two silences it is in, a graph holding no bridge edges at
   all or joins that are simply nowhere near this node.
+- **names block**: what the name-resolving rules yielded on this repository, in the same lines
+  `empo index` and `empo doctor` print and `empo doctor` documents below.
 - **staleness line**: `built_against` sha and commits-behind-HEAD.
+
+The names block prints after the answer body and before the staleness lines, under every mode and
+not only the blast radius, because every mode is built out of the same edges. It is not in `--json`:
+the machine form is the answer object and its caveat, and the yield is a fact about the graph the
+agent can read out of `empo doctor --json`, where it already rides.
+
+**It prints only the families that actually read a name here, and nothing at all otherwise.** That is
+a deliberate difference from `empo index` and `empo doctor`, which print the block unconditionally
+and have two sentences for the two silences — nobody counted, and counted but nothing read a name.
+Both of those are answers about the graph rather than about the node you asked about, and both
+surfaces already say them; what belongs beside an answer is the case a reader of that answer can be
+misled by, which is rules that read names here and resolved few of them. So a family with a name
+count of zero contributes no line, and a query on a repository where nothing resolves by name is as
+quiet as it was before.
+
+The motivating measurement is the reason it prints at all. On a real 186-file React Native
+application the `template` family resolved 3 of 1531 tag references, and `empo query` said nothing
+about it: every blast radius it printed was missing nearly every component edge, and read exactly
+like a blast radius that was complete. A radius whose component edges nearly all failed to resolve
+is not wrong, it is thin — the caveat at the foot of every answer already says the radius is a floor
+— and thin is indistinguishable from complete unless the yield prints where the answer does.
 
 Modes:
 
@@ -851,11 +875,83 @@ and nothing counted or printed that, so a family whose yield had gone to zero re
 family with nothing to find. The block counts that refusal. **It does not narrow it** — the same
 names are refused as before, and the change is that the ratio is now on the record.
 
+`short-name` consults the index twice: the exact spelling first, and only where no node carries it,
+the index again with the name lower-cased. A file naming convention is not a language — `<Badge />`
+is written `Badge.tsx` in one React repository and `badge.tsx` in the next, and both are a component
+the graph holds — and the exact map going first means a repository that spells its files as it spells
+its tags resolves before the fold is ever asked and can never be answered by it. A folded candidate
+also has to be **corroborated by the rendering file's own imports**: it stands only where that file
+imports this name from a specifier that resolves to that very file, relative path or configured alias.
+An exact match needs no such witness, because a tag spelled exactly as a file is the language's own
+convention answering, while a fold is the engine guessing a naming style is in play. A fold nothing
+corroborates counts as `in no node` rather than `ambiguous` — it was never admitted as a candidate, so
+nothing was weighed — and since the witness is asked per candidate and before the uniqueness test, a
+name two files carry once case is set aside still resolves where the reading file imports exactly one
+of them. `targetKinds` still filters the survivor. On the 186-file React Native application above,
+whose components live in `src/components/badge.tsx`, `template` went from 3 of 1531 tag references
+resolved to 735 of 1531, and not one of the 1528 misses had been an ambiguity anybody could have
+repaired by renaming a file. **This is why a `names` yield can jump between runs of two empo
+versions without a line of the repository changing.**
+
+What corroboration is worth was measured on cal.com, which names its shadcn-style files
+`toaster.tsx`, `collapsible.tsx` and `textarea.tsx`: the uncorroborated fold produced 53 extra
+template edges there and a sample of 6 came out 5 wrong — `<Toaster />` imported from `sonner`
+landing on the local `toaster.tsx`, `<Collapsible>` from `@radix-ui/react-collapsible`, `<TextArea>`
+from a `@calcom/ui` barrel whose real file is `inputs/Input.tsx`. Corroboration removed 46 of those
+edges, all five refuted ones included, and kept the real one (`apps/web/app/layout.tsx:167 ->
+apps/web/app/providers.tsx`, imported as `./providers`); on the React Native application 12 of 12
+sampled edges survive and each was opened at its cited line and confirmed real. One consequence to
+know: a component rendered with no import at all — a globally registered Vue component — is reachable
+through an exact-name match and never through a fold, since there is no import to corroborate it.
+
+A tag whose component comes from a package used to resolve to a local file whose basename collided
+with it **exactly** — react-native's `<Text>` in a repository holding `src/components/Text.tsx`
+became an edge to a file that line does not render, and that was 189 of react-admin's template edges.
+It is refused now, as `imported from a package`: the repository's own manifests say which names are
+packages it depends on and are not itself, and a name the reading file imports from one of those is
+declined even though the index holds exactly one node for it, of the right kind
+([04-language-packs](04-language-packs.md)). The yields the current runs print: react-admin 7409 of
+17415 references resolved with 3142 ambiguous, 5617 in no node, 527 of the wrong kind, 213 declared
+where they are used and 507 imported from a package; excalidraw 563 of 1264, cal.com 2777 of 5917,
+the React Native application 735 of 1531. Those numbers have moved in both directions across two
+builds and neither move is a regression: the refusals took react-admin from 7672 down to 7165,
+because those references were resolving to the wrong file, and the workspace redirect below took it
+back to 7409 by answering names the index had to refuse. That is the point of the block, since a
+reader who can see 7409 of 17415 knows what weight to put on an answer built out of them.
+
+A name imported from another **workspace** package of the same monorepo used to land wherever the
+basename fell, since a workspace is a name the repository is and can never be refused as a vendor
+one: cal.com's `WebhookListItem.tsx:222` imports `Button` from the internal `@coss/ui` and the edge
+landed on `packages/ui/components/button/Button.tsx`. The manifests also say where `@coss/ui` lives,
+so the nodes under `packages/coss-ui` are searched first and the edge now lands on
+`packages/coss-ui/src/components/button.tsx`. It resolves rather than refusing, so no clause counts
+it, and the search is a preference and not a requirement: a name the named package carries nowhere
+falls through to the index untouched, which is what keeps a re-export barrel such as react-admin's
+own working.
+
+What still gets an edge it should not: a dotted tag contributes its head, so excalidraw's
+`<DropdownMenu.Trigger>` reaches the file holding the namespace object rather than the one holding
+the component.
+
 A family that refused something adds a clause per refusal it made: `, N ambiguous` for a name several
 nodes carry, `, N in no node` for a name no node carries (a vendor component, a Blade built-in like
-`<x-slot>`), and `, N of the wrong kind` for a name in exactly one node of a kind the rule's
-`targetKinds` does not list. A clause for a refusal that did not happen is left out, because the
-denominator has already stated that zero and three `0 ...` clauses on every healthy family is what
+`<x-slot>`), `, N of the wrong kind` for a name in exactly one node of a kind the rule's
+`targetKinds` does not list, `, N declared where they are used` for a name the file that wrote
+the reference declares itself, through the pack's `declares` patterns, and
+`, N imported from a package` for a name that file imports from a package the repository depends on,
+through the pack's `packages` block ([04-language-packs](04-language-packs.md)). The last two are
+asked **last**, of the one name that had survived the other three and was about to become an edge,
+because that is the only case either can change: a name in no node was never at risk of a wrong edge
+and its honest verdict is `in no node`, whatever the reading file declares or imports. What is left
+is the case both exist for — the index found exactly one node, of a kind the rule allows, and the
+file that wrote the reference says it meant something else. They are the two refusals that prevent a
+wrong edge rather than losing a right one, which is why each is worth a clause rather than being
+folded into `in no node`: measured on marmelab/react-admin, 213 references are a file shadowing the
+name it renders with its own declaration and 507 are a component imported from a package, and before
+these they were edges pointing at somebody else's file.
+
+A clause for a refusal that did not happen is left out, because the
+denominator has already stated that zero and five `0 ...` clauses on every healthy family is what
 gets a line skimmed. Where a family has ambiguous names, an indented second line names them,
 `"OrderTable" (2 files, 5 references)`, most references first and then most files, five at most with
 `, and N more` for the rest. That second line is what makes the count actionable: the number says the

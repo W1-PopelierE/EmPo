@@ -3,6 +3,7 @@ import { configError } from "../errors";
 import type { GraphEdge, NameOutcome, NameVerdict } from "../schema/types";
 import type { Capture, ExtractedFile } from "./extractor";
 import { compareStrings } from "./order";
+import { packageOf } from "./packages";
 
 /**
  * Turns raw captures into edges between known nodes. An edge whose target is not a node in the
@@ -20,6 +21,16 @@ export interface NodeIndex {
   ids: Set<string>;
   /** Short name to node ids. More than one id means the name is ambiguous and is not resolved. */
   byShortName: Map<string, string[]>;
+  /**
+   * The same index keyed by the lower-cased name, consulted only when the exact spelling is in no
+   * node. A file naming convention is not a language: `<Badge />` is written `Badge.tsx` in one
+   * React repository and `badge.tsx` in the next, and both are a component the graph holds.
+   *
+   * It is a fallback and not the primary index, so a repository that spells its files exactly as it
+   * spells its tags resolves through the exact map and can never be answered by a fold. What it
+   * yields is corroborated before it resolves; `foldedCandidates` below is where that is argued.
+   */
+  byFoldedName: Map<string, string[]>;
   /**
    * Node id to the kind its pack's `kindRules` gave it, for the rules that declare `targetKinds`.
    * The kind is on the node either way; this is the lookup a name-resolving strategy needs and the
@@ -40,6 +51,17 @@ export interface ResolveContext {
    * no config, so an alias rule can never be smuggled into a pack's snapshot.
    */
   aliases?: AliasRule[];
+  /**
+   * The package names this repository depends on and does not itself carry, from engine/packages.ts.
+   * Absent where the pack declares no `packages` block, which leaves every name resolving exactly as
+   * it did before the field existed.
+   */
+  vendorPackages?: Set<string>;
+  /**
+   * The packages this repository **is**, name to repo-relative directory, from engine/packages.ts.
+   * Absent where the pack declares no `packages` block, on the same bargain as the field above.
+   */
+  internalPackages?: Map<string, string>;
 }
 
 /** One config alias pattern, split at its `*` once so resolution does no parsing per capture. */
@@ -95,6 +117,7 @@ export function compileAliases(aliases: Record<string, string[]> | undefined): A
 export function buildNodeIndex(files: ExtractedFile[]): NodeIndex {
   const ids = new Set<string>();
   const byShortName = new Map<string, string[]>();
+  const byFoldedName = new Map<string, string[]>();
   const kindById = new Map<string, string>();
 
   for (const file of files) {
@@ -103,9 +126,13 @@ export function buildNodeIndex(files: ExtractedFile[]): NodeIndex {
     const bucket = byShortName.get(file.name);
     if (bucket) bucket.push(file.id);
     else byShortName.set(file.name, [file.id]);
+    const folded = file.name.toLowerCase();
+    const foldedBucket = byFoldedName.get(folded);
+    if (foldedBucket) foldedBucket.push(file.id);
+    else byFoldedName.set(folded, [file.id]);
   }
 
-  return { ids, byShortName, kindById };
+  return { ids, byShortName, byFoldedName, kindById };
 }
 
 /** Strip a leading separator and collapse the doubled backslashes a quoted class name carries. */
@@ -139,9 +166,111 @@ export function resolveEdges(
   const edges: GraphEdge[] = [];
   const names: NameOutcome[] = [];
 
+  const declared = new Set(file.declares);
+
+  /**
+   * Does this file import `name` from the module that is `id`? Asked of a folded candidate only,
+   * and answered out of the captures the file already produced rather than out of a new pack rule:
+   * an `import` capture's group 0 is the statement as written, so the clause that binds the name and
+   * the specifier that says where it came from are both already here.
+   *
+   * Only a `module-path` capture can witness anything, which is what keeps this a TypeScript-shaped
+   * answer without a TypeScript-shaped rule in the engine: php's imports resolve by `fqcn`, so no
+   * php fold is ever corroborated and that pack behaves exactly as it did before the fold existed.
+   *
+   * **A name the statement renames away is not bound by it.** `import { ThemeProvider as
+   * MuiThemeProvider } from "@mui/material"` leaves the plain name free, and the file next to that
+   * line imports the local `ThemeProvider` and renders it. Reading the statement for the bare name
+   * refuses that real edge, which is the one thing this check must never do: it exists to stop a
+   * wrong edge, and a wrong refusal costs the same coupling by the other route. Measured on
+   * marmelab/react-admin, `AppBar.stories.tsx` is the case, twice.
+   *
+   * The name is escaped before it is spliced into a pattern. Every name that reaches here today is
+   * an identifier, and a strategy that one day reads a name holding a regex metacharacter would
+   * otherwise turn a pack's capture into a pattern this engine compiles.
+   */
+  const statementBinds = (statement: string, name: string): boolean => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (!new RegExp(`(?:^|[^A-Za-z0-9_$])${escaped}(?:[^A-Za-z0-9_$]|$)`).test(statement)) {
+      return false;
+    }
+    // Renamed away, and every occurrence of it: a clause naming one symbol twice, once renamed and
+    // once not, is not something a language lets a file write.
+    return !new RegExp(`(?:^|[^A-Za-z0-9_$])${escaped}\\s+as\\s`).test(statement);
+  };
+
+  const importsNameFrom = (name: string, id: string): boolean =>
+    file.captures.some(
+      (capture) =>
+        capture.resolve === "module-path" &&
+        statementBinds(capture.groups[0] ?? "", name) &&
+        resolveModulePath(file.file, capture.groups[1] ?? "", index, context) === id,
+    );
+
+  /**
+   * Does this file import `name` from a package the repository installs? Asked last, of a name the
+   * index has already answered, because that is the only case it can change: `<Button />` beside
+   * `import Button from "@mui/material/Button"` is a MUI component in a file that also happens to
+   * hold one local `Button.tsx`, and every question a name-resolving strategy asks — is the name
+   * unique, is the kind right — answers yes.
+   *
+   * A specifier naming a package this repository **is** never reaches here: `vendorPackages` has
+   * already subtracted the manifests' own names, so a workspace barrel goes on resolving and the
+   * edges this family exists for survive.
+   */
+  const importsVendorName = (name: string): boolean => {
+    const vendor = context.vendorPackages;
+    if (vendor === undefined || vendor.size === 0) return false;
+
+    return file.captures.some((capture) => {
+      if (capture.resolve !== "module-path" || !statementBinds(capture.groups[0] ?? "", name)) {
+        return false;
+      }
+      const named = packageOf(capture.groups[1] ?? "");
+      return named !== null && vendor.has(named);
+    });
+  };
+
+  /**
+   * The directories of the internal packages this file binds `name` from, in the order the file
+   * writes those imports.
+   *
+   * A workspace package is the one bare specifier that names neither a file here nor somebody
+   * else's code: `vendorPackages` subtracts it precisely because the repository **is** it, so the
+   * name goes on resolving against the whole tree and lands on whichever node happens to carry it.
+   * Measured on cal.com, `apps/web/modules/webhooks/components/WebhookListItem.tsx:222` renders
+   * `</Button>` under `import { Button } from "@coss/ui/components/button"`, and the edge landed on
+   * `packages/ui/components/button/Button.tsx` because that is the one node named exactly `Button`,
+   * while `@coss/ui` is `packages/coss-ui` and the component is its `src/components/button.tsx`.
+   *
+   * Read out of the same `module-path` captures `importsVendorName` reads, through the same
+   * `statementBinds`, so a renamed-away name binds nothing here either and php, which resolves its
+   * imports by `fqcn` and declares no `packages` block, is untouched twice over.
+   */
+  const internalDirs = (name: string): string[] => {
+    const internal = context.internalPackages;
+    if (internal === undefined || internal.size === 0) return [];
+
+    const dirs: string[] = [];
+    for (const capture of file.captures) {
+      if (capture.resolve !== "module-path" || !statementBinds(capture.groups[0] ?? "", name)) {
+        continue;
+      }
+      const named = packageOf(capture.groups[1] ?? "");
+      const dir = named === null ? undefined : internal.get(named);
+      if (dir !== undefined) dirs.push(dir);
+    }
+    return dirs;
+  };
+
   /** Look one name up, record the verdict, and hand back the id for the caller to use or not. */
   const read = (raw: string | undefined, capture: Capture): string | null => {
-    const found = resolveName(index, raw, capture.targetKinds);
+    const found = resolveName(index, raw, capture.targetKinds, {
+      declared,
+      importsNameFrom,
+      importsVendorName,
+      internalDirs,
+    });
     // A capture whose group did not participate has no name to record. It is not a refusal about a
     // name, it is a rule that matched without capturing one, and counting it as `unknown` would put
     // a pack's own bug into a number that is read as a fact about the repository.
@@ -326,21 +455,52 @@ function* candidatePaths(base: string, context: ResolveContext): Generator<strin
  * this strategy cannot read, whatever the kinds are, and narrowing the field of candidates does not
  * change that: it only hides it behind a plausible pick.
  *
- * **The verdict comes back with the id**, so the three ways to answer null stay three answers. They
+ * **The verdict comes back with the id**, so the five ways to answer null stay five answers. They
  * are not one fact: a name in no node is a vendor component and costs this repository nothing, a
- * name of the wrong kind is a rule's own `targetKinds` doing what it was declared for, and a name in
- * several nodes is a coupling that exists and is not in the graph. Returned as a bare null they were
- * indistinguishable downstream, which is how a family whose yield had gone to zero went on reporting
- * the same silence as a family with nothing to find.
+ * name of the wrong kind is a rule's own `targetKinds` doing what it was declared for, a name in
+ * several nodes is a coupling that exists and is not in the graph, and `local` and `vendor` are the
+ * two where a node was found, was of the right kind, and is still not what the line renders.
+ * Returned as a bare null they were indistinguishable downstream, which is how a family whose yield
+ * had gone to zero went on reporting the same silence as a family with nothing to find.
  */
+/** What one file says about a name, which is everything the root's index cannot say. */
+interface ReadingFile {
+  /** Names this file declares itself, from the pack's `declares` patterns. */
+  declared: Set<string>;
+  /** Whether this file imports the name from the module that is this node id. */
+  importsNameFrom: (name: string, id: string) => boolean;
+  /** Whether this file imports the name from a package the repository depends on. */
+  importsVendorName: (name: string) => boolean;
+  /** The repo-relative directories of the internal packages this file binds the name from. */
+  internalDirs: (name: string) => string[];
+}
+
 function resolveName(
   index: NodeIndex,
   shortName: string | undefined,
   targetKinds: string[] | undefined,
+  file: ReadingFile,
 ): { id: string | null; outcome: NameVerdict; candidates: number } {
   if (shortName === undefined) return { id: null, outcome: "unknown", candidates: 0 };
 
-  const candidates = index.byShortName.get(shortName) ?? [];
+  // The named workspace package is searched before the tree is, and this is a redirect rather than
+  // a refusal: the outcome stays `resolved`, and no verdict counts it, because the reference did
+  // become an edge and only its target moved. A count would be a count of nothing a reader can act
+  // on. Where the subtree answers with anything but one node of the right kind, the whole question
+  // falls through to the index below and nothing about it changes — which is what keeps a re-export
+  // barrel working, `packages/react-admin` holding no component file of its own and the search
+  // inside it therefore finding nothing.
+  const redirected = insidePackage(index, shortName, file.internalDirs(shortName));
+  if (redirected.length === 1) {
+    const only = redirected[0];
+    if (only !== undefined && kindAllowed(index, only, targetKinds)) {
+      return { id: only, outcome: "resolved", candidates: 1 };
+    }
+  }
+
+  const candidates =
+    index.byShortName.get(shortName) ??
+    foldedCandidates(index, shortName).filter((id) => file.importsNameFrom(shortName, id));
   if (candidates.length === 0) return { id: null, outcome: "unknown", candidates: 0 };
   if (candidates.length > 1) {
     return { id: null, outcome: "ambiguous", candidates: candidates.length };
@@ -348,8 +508,83 @@ function resolveName(
 
   const id = candidates[0];
   if (id === undefined) return { id: null, outcome: "unknown", candidates: 0 };
-  if (targetKinds !== undefined && !targetKinds.includes(index.kindById.get(id) ?? "")) {
+  if (!kindAllowed(index, id, targetKinds)) {
     return { id: null, outcome: "wrong-kind", candidates: 1 };
   }
+
+  // Asked last, of the one name that was about to become an edge, because that is the only case
+  // either question can change. A name in no node was never at risk of a wrong edge and its honest
+  // verdict is `unknown`, whatever the reading file declares or imports; asking these two first put
+  // every vendor tag in the repository into a refusal count that reads as a repairable loss. What is
+  // left here is the case both were added for: the index found exactly one node, of a kind the rule
+  // allows, and the file that wrote the reference says it meant something else.
+  if (file.declared.has(shortName)) return { id: null, outcome: "local", candidates: 1 };
+  if (file.importsVendorName(shortName)) return { id: null, outcome: "vendor", candidates: 1 };
+
   return { id, outcome: "resolved", candidates: 1 };
+}
+
+/**
+ * The nodes carrying a name once case is set aside, and only worth asking for when the exact
+ * spelling carried none.
+ *
+ * The whole yield of `short-name` on a repository can turn on this. Measured on a real 186-file
+ * React Native application, whose components live in `src/components/badge.tsx` and are rendered
+ * as `<Badge />`: 3 of 1531 tag references resolved before this fallback, and none of the 1528
+ * misses was an ambiguity anybody could have repaired by renaming a file. A pack that reads tags and
+ * yields nothing on the commonest file-naming convention in the language is not one anybody can call
+ * proven, whatever it does on a corpus written to be read.
+ *
+ * **A fold is corroborated before it resolves, and an exact match is not.** A tag spelled exactly as
+ * a file is the language's own convention answering; a fold is this engine guessing that a naming
+ * style is in play, and a guess needs a witness. The witness is the rendering file's own imports:
+ * the fold stands only where that file imports this name from this module. Measured on cal.com,
+ * which names its shadcn-style files `toaster.tsx` and `collapsible.tsx`, the uncorroborated fold
+ * produced 53 edges of which a sampled 5 in 6 were wrong — `<Toaster />` from the `sonner` package
+ * landing on a local file that merely folds onto its name. Every one of those refuses here, and on
+ * the React Native application, where the tags really do name those files, 12 of 12 sampled edges
+ * survive.
+ *
+ * The corroboration is asked per candidate and before the uniqueness test, so a name two files carry
+ * once case is set aside resolves when the reading file imports exactly one of them. That is not the
+ * ambiguity the exact map refuses: there, nothing in the file says which is meant, and here the file
+ * has said.
+ */
+function foldedCandidates(index: NodeIndex, shortName: string): string[] {
+  return index.byFoldedName.get(shortName.toLowerCase()) ?? [];
+}
+
+function kindAllowed(index: NodeIndex, id: string, targetKinds: string[] | undefined): boolean {
+  return targetKinds === undefined || targetKinds.includes(index.kindById.get(id) ?? "");
+}
+
+/**
+ * The nodes carrying a name inside the subtrees of the workspace packages the reading file binds it
+ * from, exact spelling first and the case fold only where the exact spelling carried none there.
+ *
+ * **Containment is a preference here and never a requirement**, and that distinction is the whole
+ * design. Requiring a resolved candidate to live under the named package's directory reads like the
+ * same rule and deletes real edges: on marmelab/react-admin a file imports from `react-admin`, whose
+ * `packages/react-admin/index.ts` re-exports `ra-ui-materialui` and `ra-core`, and the component it
+ * names legitimately lives in another package's directory. Searching the named subtree first and
+ * falling through leaves every one of those exactly as it was, because that subtree holds no node of
+ * the name to find.
+ *
+ * The fold needs no separate witness the way `foldedCandidates` does. There, the fold is this engine
+ * guessing that a naming style is in play and the file's own import is what corroborates it; here
+ * that import is the reason the subtree is being searched at all, so the witness is already in hand.
+ * `packages/coss-ui/src/components/button.tsx` is named `button` and the tag is `<Button />`, which
+ * is the measured case and reachable no other way.
+ *
+ * A manifest at the repository root maps to `""`, which contains every node and so narrows nothing:
+ * such a name answers whatever the index would have answered, one node or several.
+ */
+function insidePackage(index: NodeIndex, shortName: string, dirs: string[]): string[] {
+  if (dirs.length === 0) return [];
+
+  const under = (ids: string[]): string[] =>
+    ids.filter((id) => dirs.some((dir) => dir === "" || id.startsWith(`${dir}/`)));
+
+  const exact = under(index.byShortName.get(shortName) ?? []);
+  return exact.length > 0 ? exact : under(foldedCandidates(index, shortName));
 }

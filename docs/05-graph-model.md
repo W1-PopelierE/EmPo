@@ -7,7 +7,7 @@ specifies its schema. It is written only by `empo index`, never by hand, never b
 
 ```jsonc
 {
-  "schema": 5,                          // the format this file was written in, not the one empo writes
+  "schema": 6,                          // the format this file was written in, not the one empo writes
   "builtAgainst": "9cd9b6278…",         // git sha graph was built from
   "builtAtCommitSubject": "…",          // for human sanity when reading the file
   "roots": [ { "path": "apps/api", "lang": "php" }, … ],
@@ -110,11 +110,48 @@ name belongs to a package cannot fall onto the lone local file that happens to s
 That filter is applied to the survivor of the uniqueness test and not before it, so where two local
 files carry the name the tag resolves to nothing, which is what `short-name` already did. Section 4
 carries what each was measured to cost, what it did not, and why the other order invents an edge.
-It is worth knowing that this makes
-template files **sources** at scale where they used to be isolated, so it moves `--gods` and a blast
-radius and not only a fan-in. Nothing yet produces an
-edge *into* a template file: `view('orders.index')`, `@include`, `@extends` and an anonymous component are all
-still invisible, which is the unbuilt `view` resolve strategy and not this one. Coverage and
+Two further refusals are asked of the survivor of both tests, out of the pack's `declares` patterns
+and its `packages` block: a tag naming something the rendering file declares itself, and a tag naming
+something that file imports from a package the repository depends on, produce no edge either.
+
+**Where no file carries the name as written, the spelling is folded before it is given up on.** A
+file naming convention is not a language: `<Badge />` is `Badge.tsx` in one React repository and
+`badge.tsx` in the next, and both are a component this graph holds a node for. `buildNodeIndex`
+therefore keeps a second map keyed by the lower-cased name, consulted only when the exact spelling
+is in no node at all, so a repository that spells its files the way it spells its tags resolves
+through the exact map and can never be answered by a fold.
+
+**A fold is corroborated before it resolves, and an exact match is not.** A tag spelled exactly as a
+file is the language's own convention answering; a fold is the engine guessing that a naming style is
+in play, and a guess needs a witness. The witness is the rendering file's own imports: a folded
+candidate stands only where that file carries an `import` capture whose statement text binds the name
+and whose specifier resolves — through `resolveModulePath`, so relative paths and the root's
+configured aliases — to exactly that candidate. Because the witness is asked per candidate and
+**before** the uniqueness test, a name two files carry once case is set aside still resolves where
+the reading file imports exactly one of them. That is not the ambiguity the exact map refuses: there
+nothing in the file says which is meant, and here the file has said. A fold no import corroborates is
+`unknown` and not `ambiguous` — nothing was weighed, because nothing was admitted as a candidate.
+`targetKinds` still filters the survivor.
+
+What the fold is worth is the whole yield of the family on such a repository rather than a margin: on
+a real 186-file React Native application whose components live in `src/components/badge.tsx`,
+`template` resolved **3 of 1531** tag references before the fold and **735 of 1531** after it, with
+**795** in no node and one `local`, and every one of the 1528 misses had been `unknown` rather
+than an ambiguity anybody could have repaired by renaming a file. What corroboration buys is measured
+where the fold is most dangerous: cal.com names its shadcn-style files `toaster.tsx`,
+`collapsible.tsx` and `textarea.tsx`, and the uncorroborated fold produced 53 extra template edges
+there of which a sample of 6 was 5 wrong — `<Toaster />` imported from the `sonner` package landing
+on the local `toaster.tsx`, `<Collapsible>` from `@radix-ui/react-collapsible`, `<TextArea>` from a
+`@calcom/ui` barrel whose real file is `inputs/Input.tsx`. Corroboration removed **46** of those
+edges, every refuted one included, and kept the real one
+(`apps/web/app/layout.tsx:167 -> apps/web/app/providers.tsx`, imported as `./providers`). On the
+React Native application, where the tags really do name those files, **12 of 12** sampled edges
+survive and each was opened at its cited line and confirmed real.
+
+It is worth knowing that all of this makes template files **sources** at scale where they used to be
+isolated, so it moves `--gods` and a blast radius and not only a fan-in. Nothing yet produces an edge
+*into* a template file: `view('orders.index')`, `@include`, `@extends` and an anonymous component are
+all still invisible, which is the unbuilt `view` resolve strategy and not this one. Coverage and
 `--blind` do not move for the same reason, because a template-to-class edge carries reach only if
 something reaches the template first.
 
@@ -123,7 +160,10 @@ no imports, so its template edge was the only edge between that pair. In React a
 target is usually also imported by the file that renders it, so the pair now carries two edges, an
 `import` and a `template`, where Blade's carried one. The case that pays for the family there is the
 one where the overlap does not happen: a globally registered Vue component, or a Nuxt auto-import, is
-rendered by a tag and imported by nothing, and its template edge is reach no import parser has. What
+rendered by a tag and imported by nothing, and its template edge is reach no import parser has. That
+same absence is the boundary of the fold, and worth stating plainly: a component rendered with no
+import at all is reachable through an exact-name match and never through a fold, because a fold is
+corroborated by the import that such a file does not write. What
 the overlap does and no longer does to `fanin` is the paragraph below. Two measured ways the
 typescript side of this family gets it wrong, an edge invented from a component name written inside a
 quoted string in a file that can hold a tag anyway, and every edge to a duplicated component basename
@@ -383,9 +423,11 @@ repair, the same as above.
 {
   "family": "template",        // the edge family whose rules read the name; never "bridge"
   "resolved": 41,              // the name is in exactly one node, of a kind the rule accepts
-  "unknown": 12,               // the name is in no node: a vendor component, a Blade `<x-slot>`
+  "unknown": 12,               // the name is in no node, in any case: a vendor component, `<x-slot>`
   "ambiguous": 7,              // the name is in several nodes, so no edge is emitted to any of them
   "wrongKind": 3,              // one node carries it, of a kind the rule's `targetKinds` excludes
+  "local": 2,                  // the file that wrote the reference declares that name itself
+  "vendor": 1,                 // that file imports the name from a package this repository installs
   "ambiguousNames": [ { "name": "OrderTable", "nodes": 2, "references": 5 }, … ]
 }
 ```
@@ -423,24 +465,91 @@ nothing to do with resolution. The same reasoning is why the counts are not dedu
 roots either: two overlapping roots that scan one file twice do read its names twice, which moves
 numerator and denominator together, and `empo index` already names root overlap as the defect it is.
 
-**Four verdicts and not one, because they call for four different reactions.** `unknown` is the
+**Six verdicts and not one, because they call for six different reactions.** `unknown` is the
 ordinary cost of reading a language whose vendor components are spelled exactly like local ones: a
 JSX tag naming a package's component, a Blade built-in like `<x-slot>`. Nobody can act on it, and a
 healthy typescript repository carries a lot of it. `wrongKind` is a rule's own `targetKinds` doing
 precisely what it was declared for, refusing to land a tag on the one local `.ts` module that
 happens to share a basename with a package (the Edge section above, and
 [04-language-packs](04-language-packs.md) section 4, carry why that filter runs on the survivor of
-the uniqueness test rather than before it). `ambiguous` is the only one of the three that hides a
-coupling this repository really has: the name is in the graph, more than once, and the edge is
-dropped in both directions rather than guessed at. `resolved` is the fourth because the other three
+the uniqueness test rather than before it). `local` and `vendor` are the two where the index did
+answer and its answer is still not what the line names. `local` is the reference answering itself:
+the file that wrote it declares that name, through the pack's `declares` patterns, so whatever a node
+of the same basename elsewhere in the tree holds, it is not what this line means. `vendor` is the
+reference answered by somebody else's code: that file imports the name from a package this repository
+declares a dependency on ([04-language-packs](04-language-packs.md) section 4's `packages` block), so
+the node carrying the name is a basename collision — `import Button from '@mui/material/Button'`
+beside a local `Button.tsx`. **Both are asked last**, of the one name that had survived uniqueness
+and `targetKinds` and was about to become an edge, and both carry `candidates: 1` because exactly
+one node was weighed and then declined. That ordering is the honest one: a name in no node was never
+at risk of a wrong edge, so it stays `unknown` whatever the reading file declares or imports, and
+asking these two first billed every vendor tag in a repository as a refusal that reads like a
+repairable loss. Both prevent a wrong edge rather than losing a right one, and neither is rare: on
+marmelab/react-admin **213** references are `local` and **507** are `vendor`.
+`ambiguous` is the only one of the five failures that hides a coupling this repository really
+has: the name is in the graph, more than once, and the edge is dropped in both directions rather
+than guessed at. `resolved` is the sixth because the other five
 are unreadable without it: it is the numerator, and added to them it is the denominator, which is
 why every surface prints the ratio on every run including the run where nothing was refused.
 `41 of 41 resolved` and `0 of 53 resolved` are opposite results, and the total is the only thing
 that separates them. A denominator that appears only in the bad case is one nobody learns to look
 for.
-Returned as a bare null downstream, as they were, all three failures were one fact, which is how a
+Returned as a bare null downstream, as they were, all five failures were one fact, which is how a
 family whose yield had gone to zero went on producing the same silence as a family with nothing to
 find.
+
+**The denominator is every verdict, `local` and `vendor` included, and the printed line names the
+refusals that happened.** `nameLines` sums `resolved + unknown + ambiguous + wrongKind + local +
+vendor` and prints
+`N of TOTAL resolved` followed by a clause per non-zero refusal, `N ambiguous`, `N in no node`,
+`N of the wrong kind`, and after those `N declared where they are used` and
+`N imported from a package`. A zero gets no clause,
+because the denominator has already said it and five `0 …` clauses on every healthy family is the
+noise that gets a line skimmed. The two newest count in the total for the same reason the other three
+do: each is a name a rule read and did not turn into an edge, and a denominator that quietly dropped
+the references a family declined would report a yield higher than the one measured.
+
+**What these counts look like on real trees, so nobody reads a ratio as a defect.**
+
+| repository | resolved | ambiguous | in no node | wrong kind | local | vendor | template edges |
+|---|---|---|---|---|---|---|---|
+| a real 186-file React Native app | 735 of 1531 | 0 | 795 | 0 | 1 | 0 | 433 |
+| excalidraw | 563 of 1264 | 3 | 668 | 1 | 3 | 26 | 317 |
+| marmelab/react-admin | 7409 of 17415 | 3142 | 5617 | 527 | 213 | 507 | 2399 |
+| cal.com | 2777 of 5917 | 240 | 2822 | 9 | 46 | 23 | 1755 |
+
+The ambiguity on react-admin is the ordinary shape of a tree with feature directories rather than a
+fault. A family in the middle of that range is a family working; the number worth reacting to is a
+family that was resolving and stopped.
+
+**These numbers moved in both directions and neither move is a regression.** `declares` and
+`packages` took react-admin from 7672 of 17415 down to 7165, because those references were resolving
+to the wrong file: to a package's component a local basename happened to collide with, or to a name
+the reading file had declared itself. Of the six edges independent checkers had refuted in a sample
+of 38, four are refused now — two MUI collisions, one radix collision, one same-file `const`. The
+workspace redirect then took it up to 7409 by answering names the index had to refuse, and it removed
+no edge anywhere: 60 edges added on react-admin, 138 added and 35 retargeted on cal.com, both
+excalidraw and the React Native application byte-identical, neither being a monorepo. The repository
+the fold was for reads the other way still: the React Native application went from **3 of 1531** to
+**735 of 1531**.
+
+**A tag whose component comes from another workspace package now resolves to that package's file.**
+It is the case the `vendor` refusal can never reach, a workspace being a name the repository *is* and
+so subtracted out of the vendor set on purpose. cal.com's
+`apps/web/modules/webhooks/components/WebhookListItem.tsx:222` renders `</Button>` under an import
+from `@coss/ui`, the internal `packages/coss-ui`, and the edge landed on
+`packages/ui/components/button/Button.tsx`, the one node named exactly `Button`. The manifests say
+where `@coss/ui` lives, so the nodes under that directory are searched first and the edge now lands
+on `packages/coss-ui/src/components/button.tsx`. It is a **redirect and not a refusal** — the outcome
+stays `resolved` and no verdict counts it, since the reference did become an edge and only its target
+moved — and the search is a preference and never a requirement: requiring the target to live under
+the named directory would delete the barrel-reached edges this family exists for, react-admin's
+`packages/react-admin` re-exporting `ra-ui-materialui` and holding no component of its own
+([04-language-packs](04-language-packs.md) section 4).
+
+**One wrong-edge residue survives**, and it is stated with its evidence rather than as a direction: a
+dotted tag contributes its head, so `<DropdownMenu.Trigger>` in excalidraw resolves to the file
+holding the namespace object rather than to the file holding the component.
 
 **`ambiguousNames` is what makes the count actionable**, and it is the one place the record cuts by
 name instead of by reference. A number alone says the family is losing edges; this says which rename
@@ -452,7 +561,8 @@ entries that cost the same have to order the same on every machine or `graph.jso
 byte-comparable.
 
 **Merging across roots sums the counts and takes the MAX of the candidate counts.** Two references
-read under two roots are two references, so `resolved`, `unknown`, `ambiguous` and `wrongKind` add.
+read under two roots are two references, so `resolved`, `unknown`, `ambiguous`, `wrongKind`, `local`
+and `vendor` add.
 `nodes` does not, and the asymmetry is not an oversight. Ambiguity is decided against one root's
 node index: a name refused under `apps/portal` was weighed against `apps/portal`'s three files and a
 name refused under `apps/admin` against that root's two, and no single refusal ever looked at five.
@@ -488,6 +598,20 @@ thing. Here they do not, so the bump carries the whole of the announcement: with
 written by an earlier binary would parse, look well formed, and answer the one question the field
 was added to answer with a fact no run ever established. `empo doctor` reports the schema drift
 against the binary reading it, and `empo index` is the repair, the same as above.
+
+**`schema` goes from 5 to 6 with the case fold, with `local` and with `vendor`**, one bump for the
+three because they landed inside it, and it is the plainest case the
+number exists for. `resolved` kept its name and now admits a name a node carries in
+another case, so every count written under schema 5 was taken under a stricter rule and the two are
+not comparable: a family whose ratio jumps from 3 of 1531 to 735 of 1531 across two builds has not
+been repaired, it has been remeasured, and nothing else on disk records that. And `names` gained
+`local` and `vendor`, whose absence and whose zero are different answers, which is `hazards`' case: a
+schema 5 graph has no `local` key because nothing ever asked whether the file writing a reference
+declared the name itself, and no `vendor` key because nothing read a manifest, and defaulting either
+to 0 turns "nobody looked" into "this repository shadows nothing" and "nothing here renders somebody
+else's component", clean bills of health invented out of fields no run wrote. `isNameResolution` in
+`engine/health.ts` requires both keys for the same reason, so a record missing one is a malformed
+graph rather than one with a zero. `empo doctor` reports the drift and `empo index` is the repair.
 
 `names` is not a health finding and never becomes one. An ambiguous component name is the normal
 shape of a React tree with feature directories, and a `TextInput` under two namespaces is the normal

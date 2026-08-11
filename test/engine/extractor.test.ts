@@ -812,3 +812,39 @@ describe("symbol rules", () => {
     expect(extracted.produces.map((ref) => ref.key)).toEqual(["Beta", "Zulu", "alpha"]);
   });
 });
+
+describe("declared names", () => {
+  // `declares` reads the string-blanked view, and that view used to be built only where some rule
+  // asked for `maskStrings`. A pack that declares the field and no such rule then read the raw
+  // source, so a declaration quoted inside a string declared a name the file does not hold — which
+  // is exactly the local-name protection this field exists to give, spent on a wrong file.
+  const declaresPack: Pack = {
+    ...fallbackPack,
+    match: { extensions: [".tsx"] },
+    comments: {
+      line: ["//"],
+      block: [["/*", "*/"]],
+      stringQuotes: ['"', "'", "`"],
+      stringEscape: "\\",
+      multilineQuotes: ["`"],
+    },
+    declares: ["\\bconst\\s+([A-Z][A-Za-z0-9_]*)\\s*="],
+  };
+
+  test("ignores a declaration written inside a string when no rule asked for maskStrings", () => {
+    const source = [
+      'const example = "const Badge = () => null";',
+      "const Total = () => null;",
+    ].join("\n");
+
+    const extracted = extract(declaresPack, {
+      root: ".",
+      lang: "ts",
+      file: "src/Cart.tsx",
+      relPath: "src/Cart.tsx",
+      source,
+    });
+
+    expect(extracted.declares).toEqual(["Total"]);
+  });
+});

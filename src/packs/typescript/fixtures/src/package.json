@@ -1,0 +1,11 @@
+{
+  "name": "@acme/corpus",
+  "private": true,
+  "dependencies": {
+    "@acme/ui": "^1.0.0",
+    "react": "^18.0.0"
+  },
+  "devDependencies": {
+    "axios": "^1.0.0"
+  }
+}
