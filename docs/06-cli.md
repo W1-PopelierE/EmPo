@@ -620,9 +620,10 @@ and are written whole. Claude also receives hook entries merged into a `settings
 to the repository. In the merged files EmPo owns a part and not the whole, and it identifies its part
 two different ways because the formats allow different things: marker comments in markdown, and a
 content rule in JSON, where an entry is EmPo's only if its `type` is `"command"` and its `command`
-contains `"empo hook "` either at the start or immediately after a path separator. This also claims
-the older path-qualified spelling during migration, so regeneration replaces it instead of adding a
-second hook. See
+contains `"empo hook "` either at the start or immediately after a path separator. The generator
+writes only the bare command; the rule stays wider so it still claims the older path-qualified
+spelling a wired repository carries, and regeneration replaces that entry instead of adding a second
+hook beside it. See
 [10-distribution](10-distribution.md) for what that rule costs and what the command reports when it
 takes something out and cannot put it back.
 
@@ -840,7 +841,7 @@ a healthy session still opens in silence and still spawns nothing.
 read, and this one is not: each wired `command` string is handed to a shell whole, so pointing
 `empo doctor` at a repository executes whatever that repository's `.claude/settings.json` puts in
 those strings, shell syntax and all. Ownership is decided by the **shape** of the command and never
-by a signature: an entry is EmPo's because it contains `empo hook `, which is what lets `empo
+by a signature: an entry is EmPo's because it contains `empo hook`, which is what lets `empo
 update` merge without trampling a hand-edited entry, and it is also what makes a modified entry
 still ours. `empo hook session-start; <anything>` matches the ownership rule, is listed as a wired
 EmPo hook, and is run. A checkout can therefore choose what `empo doctor` executes on the machine

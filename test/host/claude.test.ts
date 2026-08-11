@@ -9,9 +9,7 @@ import {
   empoHooks,
   HOOK_COMMAND_PREFIX,
   type HookEntries,
-  hookCommandPrefix,
   isEmpoHook,
-  LOCAL_BIN_PATH,
   mergeSettings,
   type RemovedHook,
   renderSkill,
@@ -67,23 +65,37 @@ const FULL = make({
   },
 });
 
+/** The entries every target gets, since there is only the one spelling left to get. */
+const BARE_HOOKS = empoHooks();
+
 /**
- * The entries a target with no repo-local binary gets: the bare `empo hook ` spelling, which is
- * what every case below that is not about the wiring itself wants. Built from a directory that does
- * not exist, so it cannot pick up a `node_modules/.bin/empo` from whatever machine runs the suite.
+ * The spelling EmPo wrote where npm had left a binary in the checkout, and no longer writes at all.
+ * Still here because real `settings.json` files still carry it and the ownership rule has to claim
+ * it, which is the half of this change that must never be dropped with the other.
  */
-const BARE_HOOKS = empoHooks(join(tmpdir(), "empo-no-such-repo-at-all"));
+const LEGACY_LOCAL = `\${CLAUDE_PROJECT_DIR}/node_modules/.bin/empo hook `;
+
+/** A repository wired by the release that wrote the path-qualified spelling. */
+function legacyHooks(): HookEntries {
+  const entry = (event: string, timeout: number) => ({
+    type: "command" as const,
+    command: `${LEGACY_LOCAL}${event} --repo "\${CLAUDE_PROJECT_DIR}"`,
+    timeout,
+  });
+  return {
+    SessionStart: [{ hooks: [entry("session-start", 10)] }],
+    PreToolUse: [
+      { matcher: "Edit|Write", hooks: [entry("pre-edit", 10)] },
+      { matcher: "Bash", hooks: [entry("pre-commit", 20)] },
+    ],
+  };
+}
 
 let repo: string;
 
 beforeEach(() => {
   repo = mkdtempSync(join(tmpdir(), "empo-claude-"));
 });
-
-/** A target that has EmPo as a dependency, which is what `npm install` leaves behind. */
-function seedLocalBin(): void {
-  seed(LOCAL_BIN_PATH, '#!/bin/sh\nexec empo "$@"\n');
-}
 
 afterEach(() => {
   rmSync(repo, { recursive: true, force: true });
@@ -149,13 +161,13 @@ describe("the ownership rule", () => {
   });
 
   test("owns both spellings, which is what keeps an upgrade from doubling the hooks", () => {
-    // The regression pin. EmPo writes a bare `empo hook` in a target with no local binary and a
-    // repo-local path in one that has it, so a predicate that knew only the prefix would fail to
-    // recognize an entry a previous release wrote, leave it in place, and append the new one beside
-    // it. Two hooks would fire on every edit from then on.
+    // The regression pin, and the reason the predicate stays wider than the writer. EmPo writes only
+    // the bare command now, but a previous release wrote the path-qualified one and real repositories
+    // still carry it. A predicate narrowed to what the writer produces would fail to recognize those,
+    // leave them in place, and append the new entry beside them: two hooks on every edit from then on.
     for (const command of [
       `empo hook pre-edit --repo "\${CLAUDE_PROJECT_DIR}"`,
-      `\${CLAUDE_PROJECT_DIR}/node_modules/.bin/empo hook pre-edit --repo "\${CLAUDE_PROJECT_DIR}"`,
+      `${LEGACY_LOCAL}pre-edit --repo "\${CLAUDE_PROJECT_DIR}"`,
       "/usr/local/bin/empo hook session-start",
       // A Windows path separator, which is the other thing a path can be spelled with.
       "C:\\tools\\empo hook pre-commit",
@@ -168,18 +180,15 @@ describe("the ownership rule", () => {
   });
 
   test("owns every entry it writes, by construction", () => {
-    // The writer and the predicate cannot drift apart: whatever `empoHooks` produces for a target,
-    // the predicate recognizes. If this ever fails, a regenerate would double EmPo's own entries
-    // instead of replacing them.
-    seedLocalBin();
-    for (const entries of [BARE_HOOKS, empoHooks(repo)]) {
-      const written = Object.values(entries).flatMap((groups) =>
-        groups.flatMap((group) => group.hooks),
-      );
+    // The writer and the predicate cannot drift apart: whatever `empoHooks` produces, the predicate
+    // recognizes. If this ever fails, a regenerate would double EmPo's own entries instead of
+    // replacing them.
+    const written = Object.values(empoHooks()).flatMap((groups) =>
+      groups.flatMap((group) => group.hooks),
+    );
 
-      expect(written.length).toBeGreaterThan(0);
-      for (const entry of written) expect(isEmpoHook(entry)).toBe(true);
-    }
+    expect(written.length).toBeGreaterThan(0);
+    for (const entry of written) expect(isEmpoHook(entry)).toBe(true);
   });
 
   test("owns nothing else, however much it looks like EmPo's", () => {
@@ -204,51 +213,45 @@ describe("the ownership rule", () => {
 });
 
 describe("which binary the hooks reach for", () => {
-  test("wires the bare command in a target with no repo-local binary", () => {
-    expect(hookCommandPrefix(repo)).toBe("empo hook ");
-    expect(commands(text(null, empoHooks(repo)))).toEqual([
+  test("wires the bare command, whatever the target holds", () => {
+    // One channel is left and it puts `empo` on PATH, so there is nothing about the target left to
+    // branch on. A `node_modules/.bin/empo` no longer changes the answer, and nothing puts one there.
+    seed("node_modules/.bin/empo", '#!/bin/sh\nexec empo "$@"\n');
+
+    expect(commands(text(null, empoHooks()))).toEqual([
       `empo hook session-start --repo "\${CLAUDE_PROJECT_DIR}"`,
       `empo hook pre-edit --repo "\${CLAUDE_PROJECT_DIR}"`,
       `empo hook pre-commit --repo "\${CLAUDE_PROJECT_DIR}"`,
     ]);
   });
 
-  test("wires the repo-local binary when the target has one", () => {
-    // A fixed in-repo path, identical for every teammate and safe to commit, and it resolves no
-    // interpreter. A bare `empo` is a global install, which is per interpreter and vanishes on a
-    // Node version switch, after which the hooks fail open in silence.
-    seedLocalBin();
-
-    const local = `\${CLAUDE_PROJECT_DIR}/node_modules/.bin/empo hook `;
-    expect(hookCommandPrefix(repo)).toBe(local);
-    expect(commands(text(null, empoHooks(repo)))).toEqual([
-      `${local}session-start --repo "\${CLAUDE_PROJECT_DIR}"`,
-      `${local}pre-edit --repo "\${CLAUDE_PROJECT_DIR}"`,
-      `${local}pre-commit --repo "\${CLAUDE_PROJECT_DIR}"`,
-    ]);
-  });
-
   test("rewires a settings.json wired the old way to exactly one hook per event", () => {
-    // `empo update` finds its own previous entries through `isEmpoHook` and replaces them. A
-    // repository wired before the binary existed, that has since installed EmPo, must come out of
-    // the update with three hooks and not six.
-    seedLocalBin();
-    seed(SETTINGS_PATH, text(null, BARE_HOOKS));
+    // THE case, and the reason the ownership rule outlived the branch that produced the spelling.
+    // `empo update` finds its own previous entries through `isEmpoHook` and replaces them, so a
+    // repository wired by the release that wrote the repo-local path must come out of the update
+    // with three hooks and not six.
+    seed(SETTINGS_PATH, text(null, legacyHooks()));
 
     writeClaude(repo, BARE);
 
     const written = commands(read(SETTINGS_PATH));
     expect(written).toHaveLength(3);
-    expect(written.every((one) => one.startsWith(`\${CLAUDE_PROJECT_DIR}/`))).toBe(true);
-    // And the bare entries are gone rather than sitting beside the new ones.
-    expect(written.some((one) => one.startsWith("empo hook "))).toBe(false);
+    expect(written.every((one) => one.startsWith("empo hook "))).toBe(true);
+    // And the old entries are gone rather than sitting beside the new ones.
+    expect(written.some((one) => one.startsWith(LEGACY_LOCAL))).toBe(false);
   });
 
-  test("runs twice over a repo-local wiring without doubling a single hook", () => {
-    // THE case, and the direction the old prefix-only predicate got wrong: it did not recognize
-    // the path-prefixed entry as EmPo's, so a second `empo update` left the first run's three hooks
-    // in place and appended three more. Six hooks, two of every gate, on every session from then on.
-    seedLocalBin();
+  test("says it removed the old entries, because it did not put them back", () => {
+    // The noisy edge of the ownership rule, and correct: the command string really changed, so a
+    // human whose repository carried the old spelling hears about it once.
+    expect(removed(text(null, legacyHooks()), empoHooks()).map((one) => one.command)).toEqual([
+      `${LEGACY_LOCAL}session-start --repo "\${CLAUDE_PROJECT_DIR}"`,
+      `${LEGACY_LOCAL}pre-edit --repo "\${CLAUDE_PROJECT_DIR}"`,
+      `${LEGACY_LOCAL}pre-commit --repo "\${CLAUDE_PROJECT_DIR}"`,
+    ]);
+  });
+
+  test("runs twice without doubling a single hook", () => {
     writeClaude(repo, BARE);
     const once = read(SETTINGS_PATH);
 
@@ -259,25 +262,12 @@ describe("which binary the hooks reach for", () => {
     expect(again[3]).toEqual({ path: SETTINGS_PATH, state: "unchanged" });
   });
 
-  test("says it removed the old entries, because it did not put them back", () => {
-    // The noisy edge of the ownership rule, and correct: the command string really changed, so a
-    // human who had hand-wired the bare form hears about it once.
-    seedLocalBin();
+  test("is idempotent over its own output", () => {
+    const once = text(null, empoHooks());
 
-    expect(removed(text(null, BARE_HOOKS), empoHooks(repo)).map((one) => one.command)).toEqual([
-      `empo hook session-start --repo "\${CLAUDE_PROJECT_DIR}"`,
-      `empo hook pre-edit --repo "\${CLAUDE_PROJECT_DIR}"`,
-      `empo hook pre-commit --repo "\${CLAUDE_PROJECT_DIR}"`,
-    ]);
-  });
-
-  test("is still idempotent over its own repo-local output", () => {
-    seedLocalBin();
-    const once = text(null, empoHooks(repo));
-
-    expect(text(once, empoHooks(repo))).toBe(once);
-    expect(commands(text(once, empoHooks(repo)))).toHaveLength(3);
-    expect(removed(once, empoHooks(repo))).toEqual([]);
+    expect(text(once, empoHooks())).toBe(once);
+    expect(commands(text(once, empoHooks()))).toHaveLength(3);
+    expect(removed(once, empoHooks())).toEqual([]);
   });
 });
 
@@ -1068,7 +1058,7 @@ describe("wiredHooks", () => {
       // The longer timeout, because pre-commit computes the gate `empo check` does over a diff.
       ["PreToolUse", "Bash", 20],
     ]);
-    const written = Object.values(empoHooks(repo)).flatMap((groups) =>
+    const written = Object.values(empoHooks()).flatMap((groups) =>
       groups.flatMap((group) => group.hooks),
     );
     expect(found.map((one) => one.command)).toEqual(written.map((one) => one.command));
