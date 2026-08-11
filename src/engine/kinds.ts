@@ -10,6 +10,15 @@ import { loadPack } from "./pack-loader";
  * starts at it. A Laravel route file carries both, which is why neither can be derived from the
  * other: it is not dead code and it is where a user walks in.
  *
+ * **A framework-resolved kind may still gain an edge**, and one of them now does: the php pack's
+ * `view` rules read `view('orders.index')` and `@extends`, so a rendered blade file has a fan-in.
+ * That does not unmark the kind, and the distinction is the whole reason the mark is about the
+ * *resolver* rather than about a count. A view reached through `view($name)`, a view composer or a
+ * computed `@include` is reached by nothing any rule can see, and it looks — correctly — exactly
+ * like a view nobody renders at all. So a fan-in of zero on such a kind is still not evidence, and
+ * the ones that do carry edges leave the candidate list through the fan-in test rather than through
+ * this one.
+ *
  * This module exists so the two commands that read them cannot drift. `empo query --orphans` and
  * `empo init`'s map brief classify the same set of nodes, so a second copy of the rule would let
  * one of them call a kind framework-resolved while the other did not, which is the failure
@@ -30,8 +39,8 @@ import { loadPack } from "./pack-loader";
  * carried in its JSON, for the reader who would otherwise go and delete one.
  */
 export const FRAMEWORK_RESOLVED_REASON =
-  "A framework-resolved kind is reached by name or by convention, never by an edge, " +
-  "so its fan-in is zero whether it is used or not.";
+  "A framework-resolved kind is reached by name or by convention, so a fan-in of zero is not " +
+  "evidence that it is dead: the framework is the caller and no rule here can see the call.";
 
 /**
  * Why `empo init`'s brief holds a row back, which is **not** the sentence above.

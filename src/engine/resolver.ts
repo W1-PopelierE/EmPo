@@ -1,6 +1,6 @@
 import { posix } from "node:path";
 import { configError } from "../errors";
-import type { GraphEdge, NameOutcome, NameVerdict } from "../schema/types";
+import type { GraphEdge, NameOutcome, NameVerdict, PackViews } from "../schema/types";
 import type { Capture, ExtractedFile } from "./extractor";
 import { compareStrings } from "./order";
 import { packageOf } from "./packages";
@@ -37,6 +37,17 @@ export interface NodeIndex {
    * node list cannot give it without a scan per capture.
    */
   kindById: Map<string, string>;
+  /**
+   * Template path to node ids, for the `view` strategy: `orders/show` for a node whose file is
+   * `resources/views/orders/show.blade.php` under a pack-declared view root.
+   *
+   * A view name is not a short name and cannot be looked up like one. `@include('orders.row')` and
+   * `view('orders.index')` name a **file** by its path below a root the framework knows and nothing
+   * in the repository writes down, so the pack's `views` block says which directory that is and
+   * which suffixes a template carries. Empty for a pack declaring no such block, which is every
+   * pack that has no templates and every pack that had none before the field existed.
+   */
+  byViewName: Map<string, string[]>;
 }
 
 /** What the `module-path` strategy needs from the pack to turn a specifier into a file. */
@@ -114,11 +125,12 @@ export function compileAliases(aliases: Record<string, string[]> | undefined): A
   );
 }
 
-export function buildNodeIndex(files: ExtractedFile[]): NodeIndex {
+export function buildNodeIndex(files: ExtractedFile[], views?: PackViews): NodeIndex {
   const ids = new Set<string>();
   const byShortName = new Map<string, string[]>();
   const byFoldedName = new Map<string, string[]>();
   const kindById = new Map<string, string>();
+  const byViewName = new Map<string, string[]>();
 
   for (const file of files) {
     ids.add(file.id);
@@ -130,9 +142,48 @@ export function buildNodeIndex(files: ExtractedFile[]): NodeIndex {
     const foldedBucket = byFoldedName.get(folded);
     if (foldedBucket) foldedBucket.push(file.id);
     else byFoldedName.set(folded, [file.id]);
+    const viewName = views === undefined ? null : viewNameOf(file.file, views);
+    if (viewName !== null) {
+      const viewBucket = byViewName.get(viewName);
+      if (viewBucket) viewBucket.push(file.id);
+      else byViewName.set(viewName, [file.id]);
+    }
   }
 
-  return { ids, byShortName, byFoldedName, kindById };
+  return { ids, byShortName, byFoldedName, kindById, byViewName };
+}
+
+/**
+ * The name a framework would render this file by, or null where the file is not a template: the
+ * path below the first declared view root it sits under, with the declared suffix taken off.
+ *
+ * The root is matched **anywhere in the path** rather than only at its start, because a node id is
+ * repo-relative and a Laravel application is as often `apps/api/resources/views/` as it is
+ * `resources/views/`. That is the same reason `resolveModulePath` resolves against repo-relative
+ * ids: a monorepo is the normal case, not the odd one.
+ *
+ * ponytail: two applications in one repository each holding `orders/show` make that name ambiguous
+ * and it resolves to neither. Narrowing candidates to the referencing file's own root is the repair
+ * if a real monorepo shows the loss; refusing is the safe direction until one does.
+ */
+function viewNameOf(path: string, views: PackViews): string | null {
+  for (const root of views.roots) {
+    const marker = `${root}/`;
+    const at = path.startsWith(marker)
+      ? 0
+      : path.includes(`/${marker}`)
+        ? path.indexOf(`/${marker}`) + 1
+        : -1;
+    if (at === -1) continue;
+
+    const tail = path.slice(at + marker.length);
+    for (const extension of views.extensions) {
+      if (tail.length > extension.length && tail.endsWith(extension)) {
+        return tail.slice(0, -extension.length);
+      }
+    }
+  }
+  return null;
 }
 
 /** Strip a leading separator and collapse the doubled backslashes a quoted class name carries. */
@@ -285,6 +336,25 @@ export function resolveEdges(
     return found.id;
   };
 
+  /**
+   * Look one view name up in the index of template paths, record the verdict, and hand back the id.
+   *
+   * It does not go through `resolveName`, and that is the point of the strategy being a separate
+   * one: a view name is a path below a root and never a class name, so none of the four questions
+   * `resolveName` asks after uniqueness — the kind, the file's own declarations, its imports, its
+   * workspace packages — can say anything about it. What the two do share is the refusal: a name in
+   * no node and a name in several both yield nothing, and both are counted, because a strategy
+   * whose yield can silently be zero is not one anybody can call proven.
+   */
+  const readView = (raw: string | undefined, capture: Capture): string | null => {
+    if (raw === undefined) return null;
+    const candidates = index.byViewName.get(raw) ?? [];
+    const outcome: NameVerdict =
+      candidates.length === 1 ? "resolved" : candidates.length === 0 ? "unknown" : "ambiguous";
+    names.push({ family: capture.family, name: raw, outcome, candidates: candidates.length });
+    return outcome === "resolved" ? (candidates[0] ?? null) : null;
+  };
+
   for (const capture of file.captures) {
     const evidence = { file: file.file, line: capture.line };
 
@@ -335,10 +405,21 @@ export function resolveEdges(
         break;
       }
 
+      // The one strategy whose target is a template rather than a class, and the only thing in the
+      // graph that makes a template a sink: `@extends('layouts.app')` in a Blade file and
+      // `view('orders.show')` in the controller that renders it both land here. Without it every
+      // template edge ran out of a template and none ran into one, so a change to a controller
+      // never named the view it renders — the direction a reviewer actually asks about.
+      case "view": {
+        const target = readView(capture.groups[1], capture);
+        if (target !== null && target !== file.id) {
+          edges.push({ from: file.id, to: target, kind: capture.family, symbol: null, evidence });
+        }
+        break;
+      }
+
       default:
-        throw configError(`resolve strategy "${capture.resolve}" is not implemented yet`, [
-          "view lands with a pack that has templates, see docs/14-implementation-notes.md.",
-        ]);
+        throw configError(`resolve strategy "${capture.resolve}" is not implemented yet`);
     }
   }
 

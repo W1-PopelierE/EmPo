@@ -234,6 +234,7 @@ describe("typescript pack", () => {
       byShortName: new Map<string, string[]>(),
       byFoldedName: new Map<string, string[]>(),
       kindById: new Map<string, string>(),
+      byViewName: new Map<string, string[]>(),
     };
 
     expect(

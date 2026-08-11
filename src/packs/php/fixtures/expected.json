@@ -354,6 +354,30 @@
       "assertsValue": false
     },
     {
+      "id": "resources/views/layouts/app.blade.php",
+      "file": "resources/views/layouts/app.blade.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "view",
+      "name": "app.blade",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "resources/views/orders/row.blade.php",
+      "file": "resources/views/orders/row.blade.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "view",
+      "name": "row.blade",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
       "id": "resources/views/orders/show.blade.php",
       "file": "resources/views/orders/show.blade.php",
       "root": ".",
@@ -473,6 +497,16 @@
       }
     },
     {
+      "from": "Acme\\Http\\Controllers\\OrderController",
+      "to": "resources/views/orders/show.blade.php",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/OrderController.php",
+        "line": 26
+      }
+    },
+    {
       "from": "Acme\\Http\\Controllers\\ReceiptController",
       "to": "Acme\\Jobs\\EmailReceipt",
       "kind": "import",
@@ -490,6 +524,16 @@
       "evidence": {
         "file": "app/Http/Controllers/ReceiptController.php",
         "line": 6
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\ReceiptController",
+      "to": "resources/views/layouts/app.blade.php",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/ReceiptController.php",
+        "line": 31
       }
     },
     {
@@ -703,13 +747,23 @@
       }
     },
     {
+      "from": "resources/views/orders/row.blade.php",
+      "to": "Acme\\View\\Components\\PriceBadge",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "resources/views/orders/row.blade.php",
+        "line": 5
+      }
+    },
+    {
       "from": "resources/views/orders/show.blade.php",
       "to": "Acme\\Livewire\\OrderPanel",
       "kind": "template",
       "symbol": null,
       "evidence": {
         "file": "resources/views/orders/show.blade.php",
-        "line": 19
+        "line": 38
       }
     },
     {
@@ -719,7 +773,7 @@
       "symbol": null,
       "evidence": {
         "file": "resources/views/orders/show.blade.php",
-        "line": 17
+        "line": 36
       }
     },
     {
@@ -729,7 +783,7 @@
       "symbol": null,
       "evidence": {
         "file": "resources/views/orders/show.blade.php",
-        "line": 6
+        "line": 9
       }
     },
     {
@@ -739,7 +793,27 @@
       "symbol": null,
       "evidence": {
         "file": "resources/views/orders/show.blade.php",
-        "line": 11
+        "line": 30
+      }
+    },
+    {
+      "from": "resources/views/orders/show.blade.php",
+      "to": "resources/views/layouts/app.blade.php",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "resources/views/orders/show.blade.php",
+        "line": 7
+      }
+    },
+    {
+      "from": "resources/views/orders/show.blade.php",
+      "to": "resources/views/orders/row.blade.php",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "resources/views/orders/show.blade.php",
+        "line": 14
       }
     },
     {
@@ -750,6 +824,16 @@
       "evidence": {
         "file": "routes/api.php",
         "line": 3
+      }
+    },
+    {
+      "from": "routes/api.php",
+      "to": "resources/views/layouts/app.blade.php",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "routes/api.php",
+        "line": 13
       }
     },
     {
@@ -799,8 +883,8 @@
     },
     {
       "family": "template",
-      "resolved": 4,
-      "unknown": 0,
+      "resolved": 11,
+      "unknown": 1,
       "ambiguous": 1,
       "wrongKind": 0,
       "local": 0,

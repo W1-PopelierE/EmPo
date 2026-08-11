@@ -1034,8 +1034,10 @@ describe("queryCommand --blind", () => {
 /**
  * The point of the whole mode: a zero fan-in is evidence of dead code only for a kind something in
  * the repository would have had to reference. A view, a migration and a policy are reached by the
- * framework, by name, and can never gain an edge, so listing them taught an agent to propose
- * deleting working code. What is left out is counted and named, because an omitted list that says
+ * framework, by name, so they can sit at zero while being used every day, and listing them taught
+ * an agent to propose deleting working code. The `view` strategy narrowed that set without closing
+ * it: a blade file named by `view('orders.show')` now has a fan-in and leaves this list through the
+ * fan-in test, while the one rendered by `view($name)` beside it is as invisible as ever. What is left out is counted and named, because an omitted list that says
  * nothing about its omission reads as the whole list.
  */
 describe("queryCommand --orphans", () => {

@@ -7,8 +7,6 @@ import {
   type ResolveContext,
   resolveEdges,
 } from "../../src/engine/resolver";
-import { EmpoError } from "../../src/errors";
-import type { ResolveStrategy } from "../../src/schema/types";
 
 /**
  * The resolver takes raw captures and a node index and returns edges, so its inputs are plain
@@ -232,25 +230,121 @@ describe("resolveEdges", () => {
 
     expect(resolveEdges(view, buildNodeIndex([view]), PHP).edges).toEqual([]);
   });
+});
 
-  test("fails with exit code 2 on a resolve strategy the engine has not implemented", () => {
-    const unimplemented: ResolveStrategy[] = ["view"];
+/**
+ * The one strategy whose target is a template. Every other strategy makes a template a source; this
+ * is what makes one a sink, so a controller reports the page it renders.
+ *
+ * The captures are already normalized here, exactly as the extractor hands them over: the pack's
+ * `dot-to-slash` has turned `orders.show` into `orders/show` before the resolver ever sees it, so
+ * nothing below knows that Blade spells a view name with dots.
+ */
+describe("resolveEdges, view", () => {
+  const VIEWS = { roots: ["resources/views"], extensions: [".blade.php", ".php"] };
 
-    for (const resolve of unimplemented) {
-      const importer = node("Acme\\Thing", "Thing", "app/Thing.php", [
-        { family: "import", resolve, groups: ["./other", "./other"], line: 3 },
-      ]);
-      const index = buildNodeIndex([importer]);
+  function viewCapture(name: string, line: number): Capture {
+    return { family: "template", resolve: "view", groups: [`@include('${name}')`, name], line };
+  }
 
-      try {
-        resolveEdges(importer, index, PHP);
-        expect.unreachable(`expected "${resolve}" to be rejected`);
-      } catch (error) {
-        expect(error).toBeInstanceOf(EmpoError);
-        expect((error as EmpoError).exitCode).toBe(2);
-        expect((error as EmpoError).message).toContain(resolve);
-      }
-    }
+  function template(path: string): ExtractedFile {
+    const file = node(path, path.split("/").pop() ?? path, path);
+    return { ...file, kind: "view" };
+  }
+
+  test("resolves a view name against the pack's view roots", () => {
+    const show = template("resources/views/orders/show.blade.php");
+    const controller = node("Acme\\OrderController", "OrderController", "app/OrderController.php", [
+      viewCapture("orders/show", 12),
+    ]);
+
+    const resolved = resolveEdges(controller, buildNodeIndex([show, controller], VIEWS), PHP);
+
+    expect(resolved.edges).toEqual([
+      {
+        from: "Acme\\OrderController",
+        to: "resources/views/orders/show.blade.php",
+        kind: "template",
+        symbol: null,
+        evidence: { file: "app/OrderController.php", line: 12 },
+      },
+    ]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "orders/show", outcome: "resolved", candidates: 1 },
+    ]);
+  });
+
+  test("finds the root anywhere in a repo-relative path, so a monorepo resolves", () => {
+    // `apps/api/resources/views/...` is as normal a Laravel layout as the bare one, and a node id
+    // is repo-relative for exactly the reason resolveModulePath's are.
+    const show = template("apps/api/resources/views/orders/show.blade.php");
+    const controller = node("Acme\\OrderController", "OrderController", "apps/api/app/O.php", [
+      viewCapture("orders/show", 3),
+    ]);
+
+    const resolved = resolveEdges(controller, buildNodeIndex([show, controller], VIEWS), PHP);
+
+    expect(resolved.edges.map((edge) => edge.to)).toEqual([
+      "apps/api/resources/views/orders/show.blade.php",
+    ]);
+  });
+
+  test("counts a name no template carries rather than refusing it silently", () => {
+    const controller = node("Acme\\OrderController", "OrderController", "app/OrderController.php", [
+      viewCapture("orders/archived", 7),
+    ]);
+
+    const resolved = resolveEdges(controller, buildNodeIndex([controller], VIEWS), PHP);
+
+    expect(resolved.edges).toEqual([]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "orders/archived", outcome: "unknown", candidates: 0 },
+    ]);
+  });
+
+  test("refuses a view name two applications in one repository both carry", () => {
+    // The same refusal `short-name` makes, for the same reason: picking one would put a confident
+    // wrong file:line in front of a reader where the honest answer is that nothing here can tell.
+    const api = template("apps/api/resources/views/orders/show.blade.php");
+    const admin = template("apps/admin/resources/views/orders/show.blade.php");
+    const controller = node("Acme\\OrderController", "OrderController", "apps/api/app/O.php", [
+      viewCapture("orders/show", 3),
+    ]);
+
+    const resolved = resolveEdges(controller, buildNodeIndex([api, admin, controller], VIEWS), PHP);
+
+    expect(resolved.edges).toEqual([]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "orders/show", outcome: "ambiguous", candidates: 2 },
+    ]);
+  });
+
+  test("resolves nothing at all for a pack that declares no view roots", () => {
+    // The index is built without them, so the strategy has nothing to look in. The schema refuses
+    // that pack at load (src/schema/pack.schema.ts); this pins what the engine does if it ever
+    // arrives anyway, which is refuse and say so rather than invent.
+    const show = template("resources/views/orders/show.blade.php");
+    const controller = node("Acme\\OrderController", "OrderController", "app/OrderController.php", [
+      viewCapture("orders/show", 12),
+    ]);
+
+    const resolved = resolveEdges(controller, buildNodeIndex([show, controller]), PHP);
+
+    expect(resolved.edges).toEqual([]);
+    expect(resolved.names[0]?.outcome).toBe("unknown");
+  });
+
+  test("takes the longest declared suffix off, so a blade file is not named `show.blade`", () => {
+    const show = template("resources/views/orders/show.blade.php");
+    const index = buildNodeIndex([show], VIEWS);
+
+    expect([...index.byViewName.keys()]).toEqual(["orders/show"]);
+  });
+
+  test("indexes no file outside a view root", () => {
+    const index = buildNodeIndex([node("Acme\\Order", "Order", "app/Models/Order.php")], VIEWS);
+
+    expect(index.byViewName.size).toBe(0);
   });
 });
 

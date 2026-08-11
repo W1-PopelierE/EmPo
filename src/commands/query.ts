@@ -410,8 +410,15 @@ export interface OrphansAnswer {
 
 /**
  * Nodes nothing references. Zero fan-in alone is not the answer: a Laravel view, a migration or a
- * policy is reached by the framework, by name, and can never gain an edge, so a list built on
- * fan-in alone is mostly false positives and an agent acting on it deletes working code.
+ * policy is reached by the framework, by name, so a list built on fan-in alone is mostly false
+ * positives and an agent acting on it deletes working code.
+ *
+ * A view is the kind where that is now a judgement rather than an impossibility. The php pack reads
+ * `view('orders.index')` and `@extends`, so a rendered blade file has a fan-in and never reaches
+ * this list; what is left marked is the view reached through `view($name)`, a composer or a
+ * computed include, which no rule can see and which therefore still looks exactly like a view
+ * nobody renders. The mark says who resolves the kind, not how many edges an instance of it has
+ * (engine/kinds.ts).
  *
  * Excluding them silently would be the other failure, so nothing here is dropped without being
  * counted, named by kind and reachable through `--all`.

@@ -536,6 +536,43 @@ describe("packSchema", () => {
     );
   });
 
+  test("rejects a view rule in a pack that declares no view roots", () => {
+    // Without a `views` block the strategy resolves every name it reads against an empty index, so
+    // the pack ships a family that produces nothing and looks exactly like a corpus with nothing to
+    // find. Same remedy as every other gap in this schema: answer at load, where the message can
+    // name the pack, rather than as an edge nobody can explain the absence of.
+    const rule = {
+      pattern: "@include\\(\\s*['\"]([A-Za-z0-9._/-]+)['\"]",
+      resolve: "view",
+      normalize: ["dot-to-slash"],
+    };
+
+    const { success, issues } = parse(pack({ edges: { template: [rule] } }));
+
+    expect(success).toBe(false);
+    expect(issues).toContain(
+      'edges.template.0.resolve: the "view" strategy needs a views block naming the roots to resolve against',
+    );
+  });
+
+  test("accepts the same rule once the pack says where its templates live", () => {
+    const rule = {
+      pattern: "@include\\(\\s*['\"]([A-Za-z0-9._/-]+)['\"]",
+      resolve: "view",
+      normalize: ["dot-to-slash"],
+    };
+
+    const { success, issues } = parse(
+      pack({
+        edges: { template: [rule] },
+        views: { roots: ["resources/views"], extensions: [".blade.php"] },
+      }),
+    );
+
+    expect(issues).toBe("");
+    expect(success).toBe(true);
+  });
+
   test("rejects a normalizer the engine has no verb for", () => {
     // The vocabulary is engine-side and closed: a pack orders the verbs, it cannot invent one. A
     // typo that parsed would be a no-op, and a no-op normalizer is a capture that resolves to

@@ -451,6 +451,7 @@ function applyNormalizers(value: string, normalizers: Normalizer[]): string {
     else if (normalizer === "strip-leading-slash") result = result.replace(/^\/+/, "");
     else if (normalizer === "last-dot-segment") result = lastDotSegment(result);
     else if (normalizer === "pascal-case") result = pascalCase(result);
+    else if (normalizer === "dot-to-slash") result = result.replace(/\./g, "/");
   }
   return result;
 }

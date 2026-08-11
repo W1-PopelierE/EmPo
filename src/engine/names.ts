@@ -12,6 +12,11 @@ import { compareStrings } from "./order";
  * 640-file copy where every component name was 40-way ambiguous no template edge resolved at all.
  * None of that was reported: no warning, doctor OK.
  *
+ * `view` is counted here too, and reaches three of the same verdicts. Its input is a path below a
+ * root rather than a bare name, so the refusal is per name in a different sense — two applications
+ * in one repository each holding `orders/show` — but what a reader needs from the number is
+ * identical, and a strategy counted somewhere else would be a second place this arithmetic lives.
+ *
  * This module is what ends that silence. It does not narrow the refusal, which is a separate and
  * larger change: a family that resolves nothing still resolves nothing, and now says so, so a
  * reader can tell "found nothing" from "there was nothing to find". The rendering lives beside the

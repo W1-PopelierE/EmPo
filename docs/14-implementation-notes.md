@@ -521,6 +521,9 @@ export interface Pack {
                                  // dependencies, so a name imported from a package can be refused.
                                  // Read by the same two strategies; a pack that declares none gets
                                  // an empty set and resolves every name as it always did.
+  views?: PackViews;       // optional: { roots, extensions }, where this framework keeps its
+                           // templates. Read by the "view" resolve strategy and by nothing else,
+                           // and required by a pack that names it (schema/pack.schema.ts).
   hazards?: PackHazards;   // optional: a pack that declares none makes no hazard claim at all
   aliasSources?: PackAliasSource[];  // optional: where this toolchain writes import aliases.
                                      // Read by empo init to seed config roots[].aliases, and by
