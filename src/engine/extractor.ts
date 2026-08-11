@@ -303,7 +303,11 @@ function kindOf(compiled: CompiledPack, source: string, codeOnly: string, relPat
 function wantsCodeOnly(compiled: CompiledPack): boolean {
   return (
     compiled.edgeRules.some((rule) => rule.maskStrings) ||
-    compiled.kindRules.some((rule) => rule.maskStrings)
+    compiled.kindRules.some((rule) => rule.maskStrings) ||
+    // `declares` reads this view unconditionally, so a pack declaring it and no `maskStrings` rule
+    // would otherwise read the raw source: `"const Badge = ..."` inside a string would declare
+    // `Badge` locally and suppress a real edge the tag rules resolve.
+    compiled.declares.length > 0
   );
 }
 

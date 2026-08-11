@@ -1114,11 +1114,11 @@ fixture lesson above already states, that a snapshot catches only what its corpu
 was the one verdict of the four that corpus never reached, so the separation between "in no node" and
 "in several nodes" was ungated until a tag naming nothing at all existed.
 
-## What the counts then said, and the three repairs they paid for
+## What the counts then said, and the four repairs they paid for
 
 The section above ends by insisting the counts are a measurement and never a repair. This is what the
-measurement said once it was pointed at real repositories, and the three repairs it justified. All
-three are in the typescript pack and in `engine/resolver.ts`, the third also in the new
+measurement said once it was pointed at real repositories, and the four repairs it justified. All
+four are in the typescript pack and in `engine/resolver.ts`, the third and fourth also in the new
 `engine/packages.ts` and one line of `engine/build.ts`; none touches the ambiguity rule, which
 is still the largest refusal there is.
 

@@ -626,7 +626,7 @@ Two consequences of asking the witness **per candidate and before the uniqueness
 import corroborates is `unknown` and not `ambiguous`: nothing was weighed, because nothing was
 admitted as a candidate. And a name two files carry once case is set aside still resolves where the
 reading file imports exactly one of them — which is not the ambiguity the exact map refuses, since
-there nothing in the file says which is meant and here the file has said. The cost is at the other
+there is nothing in the file that says which is meant and here the file has said. The cost is at the other
 end: a component rendered with no import at all, a globally registered Vue component, is reachable
 through an exact-name match and never through a fold.
 
@@ -1516,5 +1516,5 @@ otherwise have resolved: `CardFooter` reaches it through the fold, which `CardSt
 corroborate, so that name is honestly `unknown` and the shadow verdict was no longer gated by
 anything. `OrderCard.tsx` is carried by the exact index and kinded `component`, so a file declaring
 its own `const OrderCard` and rendering it is the case `local` exists for. With all of it the corpus
-is 44 nodes and its `template` record reads `resolved 17, unknown 1, ambiguous 2, wrongKind 1,
+is 46 nodes and its `template` record reads `resolved 19, unknown 1, ambiguous 2, wrongKind 1,
 local 1, vendor 1`.

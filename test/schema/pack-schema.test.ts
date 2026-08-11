@@ -562,4 +562,19 @@ describe("packSchema", () => {
       "edges.import.0.pattern: pattern has fewer capture groups than its resolve strategy reads",
     );
   });
+
+  test("rejects a declares pattern that captures no name", () => {
+    // `declaredNames` reads group 1 and skips a match without one, so a pattern with no group
+    // parses, matches, and declares nothing: local-name protection disappears without a word.
+    const { success, issues } = parse(pack({ declares: ["\\bconst [A-Z][A-Za-z0-9_]*"] }));
+
+    expect(success).toBe(false);
+    expect(issues).toContain("declares.0: must capture the declared name in group 1");
+  });
+
+  test("accepts the same declares pattern once it captures the name", () => {
+    const { success } = parse(pack({ declares: ["\\bconst ([A-Z][A-Za-z0-9_]*)"] }));
+
+    expect(success).toBe(true);
+  });
 });

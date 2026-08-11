@@ -545,7 +545,13 @@ export const packSchema = z
      * `comments` and `edges`. A pack that declares nothing here loses nothing: every name is looked
      * up exactly as it was before the field existed.
      */
-    declares: z.array(regex).optional(),
+    declares: z
+      .array(
+        regex.refine((pattern) => groupCount(pattern) >= 1, {
+          message: "must capture the declared name in group 1",
+        }),
+      )
+      .optional(),
     /**
      * Where this language's package manager writes what a repository depends on, so a bare specifier
      * can be told apart from a path into this repository.
