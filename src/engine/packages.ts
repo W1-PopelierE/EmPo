@@ -17,10 +17,14 @@ import type { PackPackageSource } from "../schema/types";
  * own workspaces as dependencies of each other, so `@calcom/ui` appears in both sets and has to come
  * out. What survives is the set of names that name something outside this repository.
  *
- * Nothing here reads `node_modules`. An installed tree is a build artifact that a fresh checkout does
- * not have and CI may prune, and a graph whose refusals depended on it would answer differently on
- * two machines with the same commit. A manifest is checked in.
+ * Nothing here reads an installed tree, and that is enforced here rather than left to the config's
+ * `ignore`. An installed tree is a build artifact that a fresh checkout does not have and CI may
+ * prune, so a graph whose refusals depended on it would answer differently on two machines with the
+ * same commit — and the failure is silent and backwards: every installed package's manifest declares
+ * its own `name`, so reading them subtracts `@mui/material` from the very set it belongs in and the
+ * `vendor` verdict quietly stops firing on the repositories that have run an install.
  */
+const INSTALLED_TREES = ["**/node_modules/**", "**/vendor/**", "**/bower_components/**"];
 export function vendorPackages(
   repoRoot: string,
   source: PackPackageSource | undefined,
@@ -33,7 +37,7 @@ export function vendorPackages(
 
   for (const relPath of globSync([`**/${source.file}`], {
     cwd: repoRoot,
-    ignore: ignore ?? [],
+    ignore: [...INSTALLED_TREES, ...(ignore ?? [])],
     onlyFiles: true,
     dot: false,
   })) {

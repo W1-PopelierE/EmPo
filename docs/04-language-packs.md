@@ -693,15 +693,23 @@ through a workspace barrel being the coupling no import parser sees. Subtracting
 manifests declare leaves the set that names something outside this repository, and nothing else is
 refused.
 
-**Nothing reads `node_modules`.** An installed tree is a build artifact a fresh checkout does not have
-and CI may prune, and a graph whose refusals depended on it would answer differently on two machines
-sitting on the same commit. A manifest is checked in, which is the same reason `empo index` opens no
-toolchain config and reads the root's `aliases` out of config instead.
+**No module resolution is performed and `node_modules` is not consulted for anything.** An installed
+tree is a build artifact a fresh checkout does not have and CI may prune, and a graph whose refusals
+depended on one would answer differently on two machines sitting on the same commit. A manifest is
+checked in, which is the same reason `empo index` opens no toolchain config and reads the root's
+`aliases` out of config instead. The exclusion is the module's own and does not
+rest on the config: `engine/packages.ts` prepends `node_modules`, `vendor` and `bower_components` to
+whatever `ignore` holds. It is not defence in depth, it is the one failure this set has that is both
+silent and backwards — an installed package's manifest declares its own `name`, `own` is subtracted
+from `dependencies`, and reading `node_modules` would take `@mui/material` back out of the vendor set
+and stop refusing it, on exactly the checkouts that have run an install. A default nobody may edit
+away is the only form that survives a repository editing its `ignore` list.
 
-**The manifests are read per root, not per repository**, because a root is what carries a pack and
-the manifest that says what a package is belongs to the language the pack speaks. A repository whose
-php and TypeScript halves both declared a `packages` block would get two sets, each read out of its
-own language's manifests, and neither could refuse a name in the other's files. The php pack declares
+**Which manifests are read is a per-root question only in the sense that a root carries a pack.**
+`buildRoot` calls the reader once per root with that root's pack's block, and the glob runs from the
+**repository** root, so what varies between roots is which manifest basename is looked for and not
+which subtree is searched: two typescript roots get the same set, and a php root beside them gets
+whatever `composer.json` says the day php declares a block. The php pack declares
 none, gets an empty set, and resolves every name exactly as it did before the field existed — the
 same bargain `pathGlob`, `maskStrings`, `targetKinds` and `declares` each struck.
 
@@ -1451,8 +1459,8 @@ index carries `cardFooter` and nothing carries `CardFooter`, so before the fold 
 `unknown`, so the snapshot pins the witness as well as the fold. `CardHeader.tsx` beside it is
 spelled as its own tag and is answered by the exact map with no witness asked for, which is what pins
 the fold as a fallback rather than as the primary lookup. `react/cards/CardStory.tsx` is the other
-half: it declares its own
-`const CardFooter = () => ...` and renders both `<CardFooter />` and `<CardHeader />`, so the
+half: it declares a component of its own — `const CardFooter` then, `const OrderCard` since the
+ordering moved, for the reason given below — and renders both that tag and `<CardHeader />`, so the
 snapshot pins that the shadowed name is refused as `local` while the tag the file does not declare
 still resolves — the refusal is about the name, not about the file that wrote it. The corpus went
 from 40 nodes to 43 and its `template` record from 14 resolved to 16, with `local` at 1, and no
@@ -1463,8 +1471,8 @@ count that was there before moved: `unknown` is still 1, `ambiguous` still 2 ove
 that needs a dependency declared cannot be reached by a source tree alone. `package.json` at the
 corpus root is named `@acme/corpus` and depends on `@acme/ui` and `react`, with `axios` in
 `devDependencies` so more than one dependency field is under the snapshot;
-`src/browser/widgets/package.json` is named `@acme/widgets` and is the workspace half, the manifest
-whose own name has to come back out of the dependency set. `react/cards/VendorCard.tsx` renders one
+`src/browser/widgets/package.json` is named `@acme/widgets` and is the workspace half, a manifest
+sitting under the tree rather than at its top. `react/cards/VendorCard.tsx` renders one
 tag of each shape. `<CardHeader />` is imported from `@acme/ui` and is refused as `vendor` even
 though `cards/CardHeader.tsx` sits beside it, carries the name exactly and is kinded `component` —
 which is the whole point, since every question the strategy asks about that name answers yes.

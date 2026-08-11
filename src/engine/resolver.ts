@@ -203,8 +203,8 @@ export function resolveEdges(
     );
 
   /**
-   * Does this file import `name` from a package the repository installs? Asked of every name before
-   * the index is, because the index cannot see it: `<Button />` beside
+   * Does this file import `name` from a package the repository installs? Asked last, of a name the
+   * index has already answered, because that is the only case it can change: `<Button />` beside
    * `import Button from "@mui/material/Button"` is a MUI component in a file that also happens to
    * hold one local `Button.tsx`, and every question a name-resolving strategy asks — is the name
    * unique, is the kind right — answers yes.

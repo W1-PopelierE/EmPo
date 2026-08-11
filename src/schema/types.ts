@@ -93,8 +93,9 @@ export interface NameOutcome {
   name: string;
   outcome: NameVerdict;
   /**
-   * Nodes carrying the name: 0 for `unknown`, `local` and `vendor`, 1 for `resolved` and
-   * `wrong-kind`, 2+ for `ambiguous`.
+   * Nodes carrying the name: 0 for `unknown`, 1 for `resolved`, `wrong-kind`, `local` and `vendor`,
+   * 2+ for `ambiguous`. The last two are 1 because they are asked of a name the index had already
+   * answered: what they refuse is an edge that was about to be written, not a name nothing carried.
    */
   candidates: number;
 }

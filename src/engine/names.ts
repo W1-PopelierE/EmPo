@@ -182,7 +182,7 @@ export function nameLines(names: NameResolution[] | null): string[] {
       report.vendor;
     const clauses = [`${report.resolved} of ${total} resolved`];
     // Only the non-zero refusals get a clause. The zero is already stated by the denominator above,
-    // and three "0 ..." clauses on every healthy family is the noise that gets a line skimmed.
+    // and five "0 ..." clauses on every healthy family is the noise that gets a line skimmed.
     if (report.ambiguous > 0) clauses.push(`${report.ambiguous} ambiguous`);
     if (report.unknown > 0) clauses.push(`${report.unknown} in no node`);
     if (report.wrongKind > 0) clauses.push(`${report.wrongKind} of the wrong kind`);

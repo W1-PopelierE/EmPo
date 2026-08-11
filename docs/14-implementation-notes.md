@@ -1118,7 +1118,8 @@ was the one verdict of the four that corpus never reached, so the separation bet
 
 The section above ends by insisting the counts are a measurement and never a repair. This is what the
 measurement said once it was pointed at real repositories, and the three repairs it justified. All
-three are in the typescript pack and in `engine/resolver.ts`; none touches the ambiguity rule, which
+three are in the typescript pack and in `engine/resolver.ts`, the third also in the new
+`engine/packages.ts` and one line of `engine/build.ts`; none touches the ambiguity rule, which
 is still the largest refusal there is.
 
 **The case fold, and why it is a fallback and not the index.** `short-name` looked a tag's spelling up
@@ -1230,26 +1231,28 @@ down in a manifest.
 every manifest the pack's `packages` block names, honouring the config `ignore` list, and returns the
 **dependency names minus the manifests' own names**; `packageOf(specifier)` turns a specifier into
 the package it names, two segments for a scoped one and one for the rest, which is npm's own rule and
-why `@mui/material/Button` and `@mui/material` answer the same. `buildRoot` calls it per root and
-puts the set on `ResolveContext`, because a root is what carries a pack and a manifest belongs to the
-language its pack speaks; php declares no block, gets an empty set, and resolves byte-identically to
-before. `importsVendorName` in `resolveEdges` reuses `bindsName`, the same escaped word-boundary
-regex `importsNameFrom` was already built out of, and asks whether any `module-path` capture in this
+why `@mui/material/Button` and `@mui/material` answer the same. `buildRoot` calls it once per root,
+with that root's pack's block, and puts the set on `ResolveContext`; the glob itself runs from the
+repository root, so what is per root is which manifest basename gets read rather than which subtree,
+and php, declaring no block, gets an empty set and resolves byte-identically to
+before. `importsVendorName` in `resolveEdges` reuses `statementBinds`, the same escaped
+word-boundary test `importsNameFrom` was already built out of — which also refuses a name the import
+statement renames away — and asks whether any `module-path` capture in this
 file binds the name and names a package in that set. `resolveName` asks it last, beside `local`, of
 the survivor of uniqueness and `targetKinds`, for the same reason and with the same `candidates: 1`.
 
 **Both halves of the subtraction are load-bearing and dependencies alone would have been a
 regression.** A monorepo imports its own workspaces exactly as it imports npm — `@calcom/ui`,
 `react-admin`, `ra-core` — so a rule that refused every bare specifier would delete precisely the
-barrel-reached edges this family exists for. And nothing reads `node_modules`: an installed tree is a
+barrel-reached edges this family exists for. And no module resolution happens: an installed tree is a
 build artifact a fresh checkout does not have and CI may prune, so a graph whose refusals depended on
 it would answer differently on two machines sitting on the same commit. A manifest is checked in.
-`test/engine/packages.test.ts` pins the subtraction directly, since the fixture corpus can only pin
-its consequence: the corpus gained a `package.json` named `@acme/corpus` depending on `@acme/ui`, a
-workspace manifest named `@acme/widgets`, and a `react/cards/VendorCard.tsx` whose `<CardHeader />`
-is refused as `vendor` although a local `CardHeader.tsx` carries the name exactly, while its
-`<PriceWidget />` from the workspace resolves. The `template` record there reads `resolved 17,
-unknown 1, ambiguous 2, wrongKind 1, local 1, vendor 1`.
+`node_modules` cannot reach this at all: the glob prepends `**/node_modules/**`, `**/vendor/**` and
+`**/bower_components/**` to the config's `ignore` rather than trusting it to hold them. The failure it
+closes is silent and inverted — an installed manifest declares its own `name`, and `vendorPackages`
+subtracts `own` from `dependencies`, so a read of `node_modules` removes `@mui/material` from the set
+that exists to refuse it. A repository that trims its `ignore` list would lose the refusal and see
+only a yield that went up.
 
 **The yields went down on three of the four repositories, and that is the result.** react-admin now
 resolves **7165 of 17415** with **3386 ambiguous**, 5617 in no node, 527 of the wrong kind, 213

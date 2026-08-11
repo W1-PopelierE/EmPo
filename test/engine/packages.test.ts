@@ -75,13 +75,26 @@ describe("vendorPackages", () => {
     expect([...vendorPackages(repo, NPM, [])]).toEqual(["react"]);
   });
 
-  test("honours the config's ignore list, so a vendored tree cannot answer for the repository", () => {
+  test("honours the config's ignore list, so an excluded tree cannot answer for the repository", () => {
     const repo = repoWith({
       "package.json": { name: "acme", dependencies: { react: "*" } },
+      "examples/demo/package.json": { name: "demo", dependencies: { lodash: "*" } },
+    });
+
+    expect([...vendorPackages(repo, NPM, ["**/examples/**"])]).toEqual(["react"]);
+  });
+
+  test("never reads an installed tree, whatever the config ignores", () => {
+    // The silent, backwards failure: an installed package's manifest declares its own name, so
+    // reading node_modules subtracts `@mui/material` from the set it belongs in and the refusal
+    // built on that set stops firing — on exactly the checkouts that have run an install.
+    const repo = repoWith({
+      "package.json": { name: "acme", dependencies: { "@mui/material": "*" } },
+      "node_modules/@mui/material/package.json": { name: "@mui/material" },
       "node_modules/left-pad/package.json": { name: "left-pad", dependencies: { lodash: "*" } },
     });
 
-    expect([...vendorPackages(repo, NPM, ["**/node_modules/**"])]).toEqual(["react"]);
+    expect([...vendorPackages(repo, NPM, [])]).toEqual(["@mui/material"]);
   });
 
   test("claims nothing where the pack declares no manifest", () => {

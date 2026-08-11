@@ -87,10 +87,11 @@ export function buildRoot(options: BuildRootOptions): RootGraph {
     extensions: options.pack.match.extensions,
     indexNames: options.pack.node.id.indexNames ?? [],
     aliases: compileAliases(options.root.aliases),
-    // Read per root and not per repository, because a root is what carries a pack and the manifest
-    // that says what a package is belongs to the language the pack speaks. A repository whose php
-    // and TypeScript halves both declare a `packages` block gets two sets, each read out of its own
-    // language's manifests, and neither can refuse a name in the other's files.
+    // Read per pack rather than once for the repository: the manifest that says what a package is
+    // belongs to the language the pack speaks, so a repository whose php and TypeScript halves both
+    // declared a `packages` block would get two sets and neither could refuse a name in the other's
+    // files. Two roots of the same language read the same manifests and get the same set, which is
+    // the same answer computed twice and not a per-root fact.
     vendorPackages: vendorPackages(options.repoRoot, options.pack.packages, options.ignore),
   };
   const edges: GraphEdge[] = [];
