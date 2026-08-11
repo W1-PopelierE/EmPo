@@ -438,7 +438,7 @@ describe("typescript pack", () => {
     expect(actual.names).toEqual([
       {
         family: "template",
-        resolved: 17,
+        resolved: 19,
         local: 1,
         vendor: 1,
         unknown: 1,
@@ -450,6 +450,32 @@ describe("typescript pack", () => {
         ],
       },
     ]);
+  });
+
+  test("reads a tag against the workspace package its import names, and falls through where that package has it not", () => {
+    // WidgetShelf.tsx imports both names from `@acme/widgets`, the package whose manifest sits at
+    // src/browser/widgets/package.json, and the two go opposite ways out of one rule.
+    //
+    // `PriceRow` is the redirect. `src/components/PriceRow.tsx` carries the name spelled exactly, so
+    // the index answers it confidently and wrongly; the specifier says the name came out of
+    // `@acme/widgets`, and under that directory exactly one node carries it once case is set aside.
+    // That is cal.com's `<Button />` from the internal `@coss/ui`, whose real file is
+    // `packages/coss-ui/src/components/button.tsx` while the index answers
+    // `packages/ui/components/button/Button.tsx`.
+    //
+    // `OrderBadge` is the fall-through, and it is the reason containment is a preference here and
+    // never a requirement. Nothing under src/browser/widgets carries that name, which is what a
+    // re-export barrel looks like from the outside: react-admin's `packages/react-admin` re-exports
+    // ra-ui-materialui and ra-core and holds no component of its own, so a rule that required the
+    // target to live under the named package would delete
+    // `examples/crm/src/deals/DealList.tsx:105 -> packages/ra-ui-materialui/src/layout/TopToolbar.tsx`
+    // and every edge like it. The search finds nothing and the question falls through untouched.
+    expect(
+      from("src/react/cards/WidgetShelf.tsx")
+        .filter((edge) => edge.kind === "template")
+        .map((edge) => edge.to)
+        .sort(),
+    ).toEqual(["src/browser/widgets/priceRow.jsx", "src/components/OrderBadge.tsx"]);
   });
 
   test("reads no tag out of a comment, and none out of a lowercase element", () => {

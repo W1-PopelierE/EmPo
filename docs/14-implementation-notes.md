@@ -1227,12 +1227,13 @@ the fold and never reaches an exact match. The one fact that separates the two c
 source at all: `@mui/material` is a package this repository installs, and the repository writes that
 down in a manifest.
 
-`engine/packages.ts` is the whole of the reading. `vendorPackages(repoRoot, source, ignore)` globs
+`engine/packages.ts` is the whole of the reading. `readPackages(repoRoot, source, ignore)` globs
 every manifest the pack's `packages` block names, honouring the config `ignore` list, and returns the
-**dependency names minus the manifests' own names**; `packageOf(specifier)` turns a specifier into
-the package it names, two segments for a scoped one and one for the rest, which is npm's own rule and
-why `@mui/material/Button` and `@mui/material` answer the same. `buildRoot` calls it once per root,
-with that root's pack's block, and puts the set on `ResolveContext`; the glob itself runs from the
+**dependency names minus the manifests' own names** as `vendor` (and those own names mapped to their
+directories as `internal`, which is the next repair below); `packageOf(specifier)` turns a specifier
+into the package it names, two segments for a scoped one and one for the rest, which is npm's own
+rule and why `@mui/material/Button` and `@mui/material` answer the same. `buildRoot` calls it once per
+root, with that root's pack's block, and puts both on `ResolveContext`; the glob itself runs from the
 repository root, so what is per root is which manifest basename gets read rather than which subtree,
 and php, declaring no block, gets an empty set and resolves byte-identically to
 before. `importsVendorName` in `resolveEdges` reuses `statementBinds`, the same escaped
@@ -1249,40 +1250,77 @@ build artifact a fresh checkout does not have and CI may prune, so a graph whose
 it would answer differently on two machines sitting on the same commit. A manifest is checked in.
 `node_modules` cannot reach this at all: the glob prepends `**/node_modules/**`, `**/vendor/**` and
 `**/bower_components/**` to the config's `ignore` rather than trusting it to hold them. The failure it
-closes is silent and inverted — an installed manifest declares its own `name`, and `vendorPackages`
+closes is silent and inverted — an installed manifest declares its own `name`, and `readPackages`
 subtracts `own` from `dependencies`, so a read of `node_modules` removes `@mui/material` from the set
 that exists to refuse it. A repository that trims its `ignore` list would lose the refusal and see
 only a yield that went up.
 
-**The yields went down on three of the four repositories, and that is the result.** react-admin now
-resolves **7165 of 17415** with **3386 ambiguous**, 5617 in no node, 527 of the wrong kind, 213
-`local` and 507 `vendor`, against 7672 on the build before. excalidraw is **563 of 1264** (26
-`vendor`), cal.com **2476 of 5917** (23 `vendor`), the React Native application **735 of 1531**. The
-references that moved were resolving to the wrong file: of the six edges independent checkers refuted
-in the sample of 38, four are refused now — two MUI collisions, one radix collision, one same-file
-`const`.
+**The yields went down on three of the four repositories, and that is the result.** That build had
+react-admin at **7165 of 17415** with **3386 ambiguous**, against 7672 on the build before it, and
+the references that moved were resolving to the wrong file: of the six edges independent checkers
+refuted in the sample of 38, four are refused — two MUI collisions, one radix collision, one
+same-file `const`.
 
-**Two residues, both left deliberately.** A collision with another **workspace** package cannot be
-refused on this evidence, since a workspace name is one the repository is: cal.com's
-`apps/web/modules/webhooks/components/WebhookListItem.tsx:222` imports `Button` from the internal
-`@coss/ui` and the edge still lands on `packages/ui/components/button/Button.tsx`. Requiring the
-resolved candidate to live under the named package's directory would close it and would break
-re-export chains, where react-admin's own barrel legitimately re-exports `ra-ui-materialui`
-components, and the two are indistinguishable to that rule. And a dotted tag contributes its head, so
-excalidraw's `<DropdownMenu.Trigger>` resolves to the file holding the namespace object rather than
-the one holding the component.
+**The same manifests, read a second way, are what closed the workspace collision.** It is the one
+case the `vendor` refusal can never reach, because a workspace name is one the repository *is* and
+the vendor set subtracts it precisely so barrel-reached edges survive: cal.com's
+`apps/web/modules/webhooks/components/WebhookListItem.tsx:222` renders `</Button>` under
+`import { Button } from "@coss/ui/components/button"`, `@coss/ui` is `packages/coss-ui`, and the edge
+landed on `packages/ui/components/button/Button.tsx` because that is the one node named exactly
+`Button`. What the manifests also say is where `@coss/ui` lives, so `readPackages` returns the own
+names mapped to the directory each manifest sits in beside the vendor set — one pass, since the glob
+is the expensive half and the two answers are one subtraction seen from either side — and
+`ResolveContext` carries both.
 
-And the ambiguity refusal is untouched, which those yields show plainly: the ambiguous share is
-references dropped because two files hold the name.
-Those are floors and they are meant to be read as floors. The three repairs here moved a repository
+**The rule is a preference and never a requirement, and that distinction is the whole design.**
+`resolveName` asks `insidePackage` first: where the statement that binds the name names an internal
+package whose directory is known, the nodes under that directory are searched, exact spelling and
+then the case fold, and exactly one of a kind the rule allows is the target. Anything else falls
+straight through to the index with nothing changed. The obvious version — require the resolved
+candidate to live under the named directory — reads like the same rule and deletes real edges:
+react-admin's `packages/react-admin` is a barrel whose `index.ts` re-exports `ra-ui-materialui` and
+`ra-core`, so `examples/crm/src/deals/DealList.tsx:105 ->
+packages/ra-ui-materialui/src/layout/TopToolbar.tsx` is a component legitimately living in another
+package's directory. Searching that barrel finds nothing, which is what makes falling through the
+right answer rather than a softened one.
+
+It is a **redirect and not a refusal**, so the outcome stays `resolved`, no verdict counts it and no
+`NameVerdict` was added: the reference did become an edge and only its target moved, and a count of
+that is a count of nothing a reader can act on. Three details are worth keeping. The subtree fold
+needs no separate witness the way `foldedCandidates` does, because the import that selected the
+subtree is that witness — which is the only way `<Button />` reaches a file named `button.tsx`. The
+binding is read through `statementBinds`, the same escaped word-boundary test `importsVendorName`
+uses, so a name an import renames away selects no subtree either. And the redirect is asked **before**
+`local` rather than after it, which was measured: guarding it on the declared set cost five cal.com
+edges, and all five were
+`const AlbyPriceComponent = dynamic(() => import("@calcom/app-store/alby/components/AlbyPriceComponent"))`
+— the file declares the name, and the thing it declares is a wrapper around an import of exactly the
+file the redirect finds.
+
+**Where that left the numbers, and nothing was lost.** react-admin **7409 of 17415** with **3142
+ambiguous**, 5617 in no node, 527 of the wrong kind, 213 `local`, 507 `vendor`; cal.com **2777 of
+5917** with 240 ambiguous, 2822 in no node, 9 of the wrong kind, 46 `local`, 23 `vendor`; excalidraw
+**563 of 1264** and the React Native application **735 of 1531**, both byte-identical to the build
+before, neither being a monorepo. **No repository lost an edge**: 60 added on react-admin, 138 added
+and 35 retargeted on cal.com, none removed anywhere. A sample of the moved and added edges was opened
+at its cited lines by independent checkers told to refute each one.
+
+**One residue is left deliberately.** A dotted tag contributes its head, so excalidraw's
+`<DropdownMenu.Trigger>` resolves to the file holding the namespace object rather than the one
+holding the component.
+
+And the ambiguity refusal moved for the first time here, though only where a workspace boundary
+answers it: react-admin 3386 to 3142 and cal.com 515 to 240, every one of them a name two files carry
+and an import that says which package it came out of. Everywhere else the share is still references
+dropped because two files hold the name and nothing in the reference says which.
+Those are floors and they are meant to be read as floors. The four repairs here moved a repository
 that had no component graph at all into having one and stopped two classes of edge that pointed at the
 wrong file; they did not make `short-name` a resolver, and the number that would have to move for it
 to become one is the ambiguous count. That is where the first direction of the two on the table above
-— resolving a name against the imports the same file already writes — is still waiting: corroboration
-took it exactly as far as the fold path, where a guess had to be witnessed, and the imports are read
-on the exact path only to refuse, never to pick between two candidates, so
-the ambiguity refusal is still undecided,
-now with a denominator attached.
+— resolving a name against the imports the same file already writes — is now half taken: an import is
+read on the exact path to refuse (`vendor`) and to choose between candidates in different workspace
+packages, and never yet to choose between two candidates inside one. The ambiguity refusal is still
+mostly undecided, now with a denominator attached and with the monorepo half of it answered.
 
 ## Coding conventions
 

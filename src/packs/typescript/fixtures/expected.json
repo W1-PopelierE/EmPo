@@ -130,6 +130,18 @@
       "assertsValue": false
     },
     {
+      "id": "src/browser/widgets/priceRow.jsx",
+      "file": "src/browser/widgets/priceRow.jsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "priceRow",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
       "id": "src/components/CartBadge.vue",
       "file": "src/components/CartBadge.vue",
       "root": ".",
@@ -376,6 +388,18 @@
       "lang": "typescript",
       "kind": "component",
       "name": "VendorCard",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "src/react/cards/WidgetShelf.tsx",
+      "file": "src/react/cards/WidgetShelf.tsx",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "WidgetShelf",
       "produces": [],
       "consumes": [],
       "isTest": false,
@@ -1074,6 +1098,26 @@
       }
     },
     {
+      "from": "src/react/cards/WidgetShelf.tsx",
+      "to": "src/browser/widgets/priceRow.jsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/WidgetShelf.tsx",
+        "line": 21
+      }
+    },
+    {
+      "from": "src/react/cards/WidgetShelf.tsx",
+      "to": "src/components/OrderBadge.tsx",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/WidgetShelf.tsx",
+        "line": 22
+      }
+    },
+    {
       "from": "src/react/types/OrderRow.ts",
       "to": "src/shared/money.ts",
       "kind": "import",
@@ -1248,7 +1292,7 @@
   "names": [
     {
       "family": "template",
-      "resolved": 17,
+      "resolved": 19,
       "unknown": 1,
       "ambiguous": 2,
       "wrongKind": 1,

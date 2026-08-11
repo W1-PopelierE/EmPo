@@ -57,6 +57,11 @@ export interface ResolveContext {
    * it did before the field existed.
    */
   vendorPackages?: Set<string>;
+  /**
+   * The packages this repository **is**, name to repo-relative directory, from engine/packages.ts.
+   * Absent where the pack declares no `packages` block, on the same bargain as the field above.
+   */
+  internalPackages?: Map<string, string>;
 }
 
 /** One config alias pattern, split at its `*` once so resolution does no parsing per capture. */
@@ -226,12 +231,45 @@ export function resolveEdges(
     });
   };
 
+  /**
+   * The directories of the internal packages this file binds `name` from, in the order the file
+   * writes those imports.
+   *
+   * A workspace package is the one bare specifier that names neither a file here nor somebody
+   * else's code: `vendorPackages` subtracts it precisely because the repository **is** it, so the
+   * name goes on resolving against the whole tree and lands on whichever node happens to carry it.
+   * Measured on cal.com, `apps/web/modules/webhooks/components/WebhookListItem.tsx:222` renders
+   * `</Button>` under `import { Button } from "@coss/ui/components/button"`, and the edge landed on
+   * `packages/ui/components/button/Button.tsx` because that is the one node named exactly `Button`,
+   * while `@coss/ui` is `packages/coss-ui` and the component is its `src/components/button.tsx`.
+   *
+   * Read out of the same `module-path` captures `importsVendorName` reads, through the same
+   * `statementBinds`, so a renamed-away name binds nothing here either and php, which resolves its
+   * imports by `fqcn` and declares no `packages` block, is untouched twice over.
+   */
+  const internalDirs = (name: string): string[] => {
+    const internal = context.internalPackages;
+    if (internal === undefined || internal.size === 0) return [];
+
+    const dirs: string[] = [];
+    for (const capture of file.captures) {
+      if (capture.resolve !== "module-path" || !statementBinds(capture.groups[0] ?? "", name)) {
+        continue;
+      }
+      const named = packageOf(capture.groups[1] ?? "");
+      const dir = named === null ? undefined : internal.get(named);
+      if (dir !== undefined) dirs.push(dir);
+    }
+    return dirs;
+  };
+
   /** Look one name up, record the verdict, and hand back the id for the caller to use or not. */
   const read = (raw: string | undefined, capture: Capture): string | null => {
     const found = resolveName(index, raw, capture.targetKinds, {
       declared,
       importsNameFrom,
       importsVendorName,
+      internalDirs,
     });
     // A capture whose group did not participate has no name to record. It is not a refusal about a
     // name, it is a rule that matched without capturing one, and counting it as `unknown` would put
@@ -433,6 +471,8 @@ interface ReadingFile {
   importsNameFrom: (name: string, id: string) => boolean;
   /** Whether this file imports the name from a package the repository depends on. */
   importsVendorName: (name: string) => boolean;
+  /** The repo-relative directories of the internal packages this file binds the name from. */
+  internalDirs: (name: string) => string[];
 }
 
 function resolveName(
@@ -442,6 +482,21 @@ function resolveName(
   file: ReadingFile,
 ): { id: string | null; outcome: NameVerdict; candidates: number } {
   if (shortName === undefined) return { id: null, outcome: "unknown", candidates: 0 };
+
+  // The named workspace package is searched before the tree is, and this is a redirect rather than
+  // a refusal: the outcome stays `resolved`, and no verdict counts it, because the reference did
+  // become an edge and only its target moved. A count would be a count of nothing a reader can act
+  // on. Where the subtree answers with anything but one node of the right kind, the whole question
+  // falls through to the index below and nothing about it changes — which is what keeps a re-export
+  // barrel working, `packages/react-admin` holding no component file of its own and the search
+  // inside it therefore finding nothing.
+  const redirected = insidePackage(index, shortName, file.internalDirs(shortName));
+  if (redirected.length === 1) {
+    const only = redirected[0];
+    if (only !== undefined && kindAllowed(index, only, targetKinds)) {
+      return { id: only, outcome: "resolved", candidates: 1 };
+    }
+  }
 
   const candidates =
     index.byShortName.get(shortName) ??
@@ -453,7 +508,7 @@ function resolveName(
 
   const id = candidates[0];
   if (id === undefined) return { id: null, outcome: "unknown", candidates: 0 };
-  if (targetKinds !== undefined && !targetKinds.includes(index.kindById.get(id) ?? "")) {
+  if (!kindAllowed(index, id, targetKinds)) {
     return { id: null, outcome: "wrong-kind", candidates: 1 };
   }
 
@@ -497,4 +552,39 @@ function resolveName(
  */
 function foldedCandidates(index: NodeIndex, shortName: string): string[] {
   return index.byFoldedName.get(shortName.toLowerCase()) ?? [];
+}
+
+function kindAllowed(index: NodeIndex, id: string, targetKinds: string[] | undefined): boolean {
+  return targetKinds === undefined || targetKinds.includes(index.kindById.get(id) ?? "");
+}
+
+/**
+ * The nodes carrying a name inside the subtrees of the workspace packages the reading file binds it
+ * from, exact spelling first and the case fold only where the exact spelling carried none there.
+ *
+ * **Containment is a preference here and never a requirement**, and that distinction is the whole
+ * design. Requiring a resolved candidate to live under the named package's directory reads like the
+ * same rule and deletes real edges: on marmelab/react-admin a file imports from `react-admin`, whose
+ * `packages/react-admin/index.ts` re-exports `ra-ui-materialui` and `ra-core`, and the component it
+ * names legitimately lives in another package's directory. Searching the named subtree first and
+ * falling through leaves every one of those exactly as it was, because that subtree holds no node of
+ * the name to find.
+ *
+ * The fold needs no separate witness the way `foldedCandidates` does. There, the fold is this engine
+ * guessing that a naming style is in play and the file's own import is what corroborates it; here
+ * that import is the reason the subtree is being searched at all, so the witness is already in hand.
+ * `packages/coss-ui/src/components/button.tsx` is named `button` and the tag is `<Button />`, which
+ * is the measured case and reachable no other way.
+ *
+ * A manifest at the repository root maps to `""`, which contains every node and so narrows nothing:
+ * such a name answers whatever the index would have answered, one node or several.
+ */
+function insidePackage(index: NodeIndex, shortName: string, dirs: string[]): string[] {
+  if (dirs.length === 0) return [];
+
+  const under = (ids: string[]): string[] =>
+    ids.filter((id) => dirs.some((dir) => dir === "" || id.startsWith(`${dir}/`)));
+
+  const exact = under(index.byShortName.get(shortName) ?? []);
+  return exact.length > 0 ? exact : under(foldedCandidates(index, shortName));
 }

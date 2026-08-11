@@ -515,31 +515,41 @@ the references a family declined would report a yield higher than the one measur
 |---|---|---|---|---|---|---|---|
 | a real 186-file React Native app | 735 of 1531 | 0 | 795 | 0 | 1 | 0 | 433 |
 | excalidraw | 563 of 1264 | 3 | 668 | 1 | 3 | 26 | 317 |
-| marmelab/react-admin | 7165 of 17415 | 3386 | 5617 | 527 | 213 | 507 | 2339 |
-| cal.com | 2476 of 5917 | 515 | 2843 | 9 | 51 | 23 | 1617 |
+| marmelab/react-admin | 7409 of 17415 | 3142 | 5617 | 527 | 213 | 507 | 2399 |
+| cal.com | 2777 of 5917 | 240 | 2822 | 9 | 46 | 23 | 1755 |
 
 The ambiguity on react-admin is the ordinary shape of a tree with feature directories rather than a
 fault. A family in the middle of that range is a family working; the number worth reacting to is a
 family that was resolving and stopped.
 
-**Three of the four resolve fewer references than the build before this one, and that is the
-result rather than a regression.** react-admin resolved 7672 of 17415 then and 7165 now. The
-references that moved were resolving to the wrong file: to a package's component that a local
-basename happened to collide with, or to a name the reading file had declared itself. Of the six
-edges independent checkers had refuted in a sample of 38, four are refused now — two MUI collisions,
-one radix collision, one same-file `const`. The repository the fold was for reads the other way and
-is unchanged by it: the React Native application went from **3 of 1531** to **735 of 1531**.
+**These numbers moved in both directions and neither move is a regression.** `declares` and
+`packages` took react-admin from 7672 of 17415 down to 7165, because those references were resolving
+to the wrong file: to a package's component a local basename happened to collide with, or to a name
+the reading file had declared itself. Of the six edges independent checkers had refuted in a sample
+of 38, four are refused now — two MUI collisions, one radix collision, one same-file `const`. The
+workspace redirect then took it up to 7409 by answering names the index had to refuse, and it removed
+no edge anywhere: 60 edges added on react-admin, 138 added and 35 retargeted on cal.com, both
+excalidraw and the React Native application byte-identical, neither being a monorepo. The repository
+the fold was for reads the other way still: the React Native application went from **3 of 1531** to
+**735 of 1531**.
 
-**Two wrong-edge residues survive, and both are stated with their evidence rather than as a
-direction.** The first is a collision with another **workspace** package, which is the case the
-`vendor` rule has to allow through: cal.com's
-`apps/web/modules/webhooks/components/WebhookListItem.tsx:222` imports `Button` from `@coss/ui`, the
-internal `packages/coss-ui`, and the edge still lands on
-`packages/ui/components/button/Button.tsx`. Requiring the resolved candidate to live under the named
-package's directory would close it and would break re-export chains, where react-admin's own barrel
-legitimately re-exports `ra-ui-materialui` components; the two are indistinguishable to that rule.
-The second is dotted: `<DropdownMenu.Trigger>` in excalidraw contributes its head, so it resolves to
-the file holding the namespace object rather than to the file holding the component.
+**A tag whose component comes from another workspace package now resolves to that package's file.**
+It is the case the `vendor` refusal can never reach, a workspace being a name the repository *is* and
+so subtracted out of the vendor set on purpose. cal.com's
+`apps/web/modules/webhooks/components/WebhookListItem.tsx:222` renders `</Button>` under an import
+from `@coss/ui`, the internal `packages/coss-ui`, and the edge landed on
+`packages/ui/components/button/Button.tsx`, the one node named exactly `Button`. The manifests say
+where `@coss/ui` lives, so the nodes under that directory are searched first and the edge now lands
+on `packages/coss-ui/src/components/button.tsx`. It is a **redirect and not a refusal** — the outcome
+stays `resolved` and no verdict counts it, since the reference did become an edge and only its target
+moved — and the search is a preference and never a requirement: requiring the target to live under
+the named directory would delete the barrel-reached edges this family exists for, react-admin's
+`packages/react-admin` re-exporting `ra-ui-materialui` and holding no component of its own
+([04-language-packs](04-language-packs.md) section 4).
+
+**One wrong-edge residue survives**, and it is stated with its evidence rather than as a direction: a
+dotted tag contributes its head, so `<DropdownMenu.Trigger>` in excalidraw resolves to the file
+holding the namespace object rather than to the file holding the component.
 
 **`ambiguousNames` is what makes the count actionable**, and it is the one place the record cuts by
 name instead of by reference. A number alone says the family is losing edges; this says which rename

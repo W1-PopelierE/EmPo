@@ -910,20 +910,28 @@ became an edge to a file that line does not render, and that was 189 of react-ad
 It is refused now, as `imported from a package`: the repository's own manifests say which names are
 packages it depends on and are not itself, and a name the reading file imports from one of those is
 declined even though the index holds exactly one node for it, of the right kind
-([04-language-packs](04-language-packs.md)). The yields the current runs print: react-admin 7165 of
-17415 references resolved with 3386 ambiguous, 5617 in no node, 527 of the wrong kind, 213 declared
-where they are used and 507 imported from a package; excalidraw 563 of 1264, cal.com 2476 of 5917,
-the React Native application 735 of 1531. Three of those four are **lower** than the build before,
-react-admin by 507 from 7672, and lower is the result rather than a regression: those references were
-resolving to the wrong file. That is the point of the block, since a reader who can see 7165 of 17415
-knows what weight to put on an answer built out of them.
+([04-language-packs](04-language-packs.md)). The yields the current runs print: react-admin 7409 of
+17415 references resolved with 3142 ambiguous, 5617 in no node, 527 of the wrong kind, 213 declared
+where they are used and 507 imported from a package; excalidraw 563 of 1264, cal.com 2777 of 5917,
+the React Native application 735 of 1531. Those numbers have moved in both directions across two
+builds and neither move is a regression: the refusals took react-admin from 7672 down to 7165,
+because those references were resolving to the wrong file, and the workspace redirect below took it
+back to 7409 by answering names the index had to refuse. That is the point of the block, since a
+reader who can see 7409 of 17415 knows what weight to put on an answer built out of them.
 
-What still gets an edge it should not: a name imported from another **workspace** package of the same
-monorepo, since a workspace is a name the repository is and can never be refused on that evidence —
-cal.com's `WebhookListItem.tsx:222` imports `Button` from the internal `@coss/ui` and the edge lands
-on `packages/ui/components/button/Button.tsx`. And a dotted tag contributes its head, so
-excalidraw's `<DropdownMenu.Trigger>` reaches the file holding the namespace object rather than the
-one holding the component.
+A name imported from another **workspace** package of the same monorepo used to land wherever the
+basename fell, since a workspace is a name the repository is and can never be refused as a vendor
+one: cal.com's `WebhookListItem.tsx:222` imports `Button` from the internal `@coss/ui` and the edge
+landed on `packages/ui/components/button/Button.tsx`. The manifests also say where `@coss/ui` lives,
+so the nodes under `packages/coss-ui` are searched first and the edge now lands on
+`packages/coss-ui/src/components/button.tsx`. It resolves rather than refusing, so no clause counts
+it, and the search is a preference and not a requirement: a name the named package carries nowhere
+falls through to the index untouched, which is what keeps a re-export barrel such as react-admin's
+own working.
+
+What still gets an edge it should not: a dotted tag contributes its head, so excalidraw's
+`<DropdownMenu.Trigger>` reaches the file holding the namespace object rather than the one holding
+the component.
 
 A family that refused something adds a clause per refusal it made: `, N ambiguous` for a name several
 nodes carry, `, N in no node` for a name no node carries (a vendor component, a Blade built-in like

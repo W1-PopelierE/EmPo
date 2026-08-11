@@ -1,7 +1,30 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { globSync } from "tinyglobby";
 import type { PackPackageSource } from "../schema/types";
+
+/**
+ * What one pass over a repository's manifests says: the package names it depends on and is not
+ * itself, and where each package it **is** lives.
+ *
+ * The two answers come out of the same read because they are the same subtraction seen from either
+ * side, and because the glob is the expensive half: a second entry point would walk a monorepo twice
+ * per root to compute a set the first walk already had in hand.
+ */
+export interface RepoPackages {
+  /** Names that name something outside this repository. See below for why the subtraction. */
+  vendor: Set<string>;
+  /**
+   * Package name to the repo-relative directory of the manifest declaring it, for the packages this
+   * repository **is**. The repository-root manifest maps to `""`, which is the whole tree and so
+   * bounds nothing, which is the honest answer for a name that covers everything.
+   *
+   * A name two manifests declare is in neither: nothing here can say which directory was meant, and
+   * a guess would redirect an edge at a file chosen by glob order. Dropping it leaves the name
+   * resolving exactly as it did before this map existed.
+   */
+  internal: Map<string, string>;
+}
 
 /**
  * The package names a repository depends on and is not itself, read out of its own manifests.
@@ -25,14 +48,16 @@ import type { PackPackageSource } from "../schema/types";
  * `vendor` verdict quietly stops firing on the repositories that have run an install.
  */
 const INSTALLED_TREES = ["**/node_modules/**", "**/vendor/**", "**/bower_components/**"];
-export function vendorPackages(
+export function readPackages(
   repoRoot: string,
   source: PackPackageSource | undefined,
   ignore: string[] | undefined,
-): Set<string> {
-  if (source === undefined) return new Set();
+): RepoPackages {
+  if (source === undefined) return { vendor: new Set(), internal: new Map() };
 
   const own = new Set<string>();
+  const internal = new Map<string, string>();
+  const duplicated = new Set<string>();
   const dependencies = new Set<string>();
 
   for (const relPath of globSync([`**/${source.file}`], {
@@ -53,7 +78,14 @@ export function vendorPackages(
     }
 
     const name = manifest[source.name];
-    if (typeof name === "string" && name !== "") own.add(name);
+    if (typeof name === "string" && name !== "") {
+      own.add(name);
+      // tinyglobby yields forward slashes on every platform, which is what makes this comparable to
+      // a node id: both are repo-relative and posix, and `engine/scanner.ts` says why that matters.
+      const dir = posix.dirname(relPath);
+      if (internal.has(name)) duplicated.add(name);
+      internal.set(name, dir === "." ? "" : dir);
+    }
 
     for (const field of source.dependencies) {
       const held = manifest[field];
@@ -63,7 +95,8 @@ export function vendorPackages(
   }
 
   for (const name of own) dependencies.delete(name);
-  return dependencies;
+  for (const name of duplicated) internal.delete(name);
+  return { vendor: dependencies, internal };
 }
 
 /**

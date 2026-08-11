@@ -713,26 +713,52 @@ whatever `composer.json` says the day php declares a block. The php pack declare
 none, gets an empty set, and resolves every name exactly as it did before the field existed — the
 same bargain `pathGlob`, `maskStrings`, `targetKinds` and `declares` each struck.
 
-**Where the three repairs left the numbers, and the yield went down.** On react-admin **7165 of
-17415** names resolve, with 3386 `ambiguous`, 5617 in no node, 527 of the wrong kind, 213 `local` and
-507 `vendor` over 2339 template edges; excalidraw **563 of 1264** (3, 668, 1, 3 local, 26 vendor,
-317 template edges); cal.com **2476 of 5917** (515, 2843, 9, 51 local, 23 vendor, 1617 template
-edges); the 186-file React Native application **735 of 1531** (0, 795, 0, 1 local, 0 vendor, 433
-template edges). react-admin resolved 7672 on the build before this one, and lower is the result
-rather than a regression: those references were resolving to the wrong file. Of the six edges
-independent checkers had refuted in the original sample of 38, four are now refused — two MUI
-collisions, one radix collision, and one name a file declared as its own `const`.
+**The workspace collision is the fourth repair, and it reuses the same block from the other side.**
+The `vendor` refusal cannot touch it by construction: a name imported from another **workspace**
+package is a name the repository *is*, subtracted out of the vendor set precisely so barrel-reached
+edges survive. cal.com's `apps/web/modules/webhooks/components/WebhookListItem.tsx:222` renders
+`</Button>` under `import { Button } from "@coss/ui/components/button"`, `@coss/ui` is the workspace
+package at `packages/coss-ui`, and the edge landed on `packages/ui/components/button/Button.tsx`
+because that is the one node named exactly `Button`. Every question the strategy asks answers yes,
+and the one fact that separates the two files is again in the manifests: they say where `@coss/ui`
+lives.
 
-**Two residues survive, and both are ceilings rather than bugs.** The first is a collision with
-another **workspace** package, which is exactly the case the subtraction has to allow: cal.com's
-`apps/web/modules/webhooks/components/WebhookListItem.tsx:222` imports `Button` from `@coss/ui`,
-which is the internal `packages/coss-ui`, and the edge still lands on
-`packages/ui/components/button/Button.tsx`. Requiring the candidate to live under the named package's
-directory would close it and would break re-export chains, where react-admin's own barrel
-legitimately re-exports `ra-ui-materialui` components; the two are indistinguishable to that rule, so
-neither is attempted. The second is dotted: `<DropdownMenu.Trigger>` in excalidraw contributes its
-head (below), which resolves to the file holding the namespace object rather than to the file holding
-the component.
+**So the manifests are read for a second map, and the rule is a preference and never a requirement.**
+`engine/packages.ts` returns the dependency names minus the manifests' own names *and* those own
+names mapped to the repo-relative directory each manifest sits in. Where the statement that binds a
+name names an internal package whose directory is known, the nodes under that directory are searched
+first, exact spelling and then the case fold; exactly one of the right kind is the target, and
+anything else falls straight through to the index with nothing about it changed. **Requiring the
+resolved candidate to live under that directory would look like the same rule and would delete real
+edges**: react-admin's `packages/react-admin` is a barrel whose `index.ts` re-exports
+`ra-ui-materialui` and `ra-core`, so `examples/crm/src/deals/DealList.tsx:105` legitimately reaches
+`packages/ra-ui-materialui/src/layout/TopToolbar.tsx`, in another package's directory. Searching that
+barrel finds nothing, which is exactly what makes falling through the right answer.
+
+This is a **redirect and not a refusal**: the outcome stays `resolved`, no verdict counts it, and no
+`NameVerdict` was added, because the reference did become an edge and only its target moved. The fold
+inside a named package needs no separate witness the way the general fold does, since the import that
+selected the subtree is that witness — which is how `<Button />` reaches a file named `button.tsx`.
+A manifest at the repository root maps to `""`, which contains everything and so narrows nothing, and
+a name two manifests declare is mapped by neither: glob order is not evidence about which directory
+somebody meant.
+
+**Where the four repairs left the numbers.** On react-admin **7409 of 17415** names resolve, with
+3142 `ambiguous`, 5617 in no node, 527 of the wrong kind, 213 `local` and 507 `vendor` over 2399
+template edges; excalidraw **563 of 1264** (3, 668, 1, 3 local, 26 vendor, 317 template edges);
+cal.com **2777 of 5917** (240, 2822, 9, 46 local, 23 vendor, 1755 template edges); the 186-file React
+Native application **735 of 1531** (0, 795, 0, 1 local, 0 vendor, 433 template edges). The third
+repair took react-admin from 7672 to 7165 and lower was the result rather than a regression, those
+references having resolved to the wrong file; the fourth takes it back to 7409 by answering names the
+index had to refuse, and **no repository lost an edge to it**: 60 edges added on react-admin, 138
+added and 35 retargeted on cal.com, and excalidraw and the React Native application byte-identical,
+neither being a monorepo. Of the six edges independent checkers had refuted in the original sample of
+38, four are refused — two MUI collisions, one radix collision, and one name a file declared as its
+own `const`.
+
+**One residue survives, and it is a ceiling rather than a bug.** A dotted tag contributes its head, so
+`<DropdownMenu.Trigger>` in excalidraw resolves to the file holding the namespace object rather than
+to the file holding the component.
 
 The alternative for the namespace, declaring a root prefix such as `App\View\Components\` in the
 pack, was rejected: that is a property of the repository rather than of the language, composer and

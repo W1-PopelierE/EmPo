@@ -1041,3 +1041,256 @@ describe("resolveEdges, the names it declined", () => {
     ]);
   });
 });
+
+/**
+ * The redirect, which is the one thing the index cannot do on its own: a bare specifier naming a
+ * package this repository **is** says which subtree the name came out of, and the index only knows
+ * which nodes carry it.
+ *
+ * Measured on cal.com, where `apps/web/modules/webhooks/components/WebhookListItem.tsx:222` renders
+ * `</Button>` under `import { Button } from "@coss/ui/components/button"`. `@coss/ui` is the
+ * workspace package at `packages/coss-ui` and the component is its `src/components/button.tsx`;
+ * every question the index asks answers `packages/ui/components/button/Button.tsx`, which is the one
+ * node named exactly `Button`, and `vendorPackages` cannot refuse it because `@coss/ui` is a name
+ * the repository is. The redirect moved 35 of cal.com's template edges onto the file the import
+ * really reaches and turned 301 more references into `resolved` (275 from `ambiguous`, 21 from
+ * `unknown`, 5 from `local`), removing no edge on any of the four repositories measured.
+ */
+describe("resolveEdges, a name bound from a workspace package", () => {
+  function kinded(id: string, name: string, kind: string): ExtractedFile {
+    return { ...node(id, name, id), kind, lang: "typescript" };
+  }
+
+  function importing(id: string, statement: string, specifier: string, tag: string): ExtractedFile {
+    return {
+      ...kinded(id, (id.split("/").pop() ?? id).replace(/\.[^.]+$/, ""), "component"),
+      captures: [
+        {
+          family: "import" as const,
+          resolve: "module-path" as const,
+          groups: [statement, specifier],
+          line: 3,
+        },
+        { ...shortNameCapture(tag, 42), targetKinds: ["component", "screen"] },
+      ],
+    };
+  }
+
+  const COSS_UI = new Map([["@coss/ui", "packages/coss-ui"]]);
+
+  test("prefers the node inside the package the specifier names over the one the index found", () => {
+    // The measured case, with the folding cal.com does: the workspace file is `button.tsx` and the
+    // tag is `<Button />`, so the exact spelling inside the package carries nothing and the fold
+    // inside it carries one. The fold needs no separate witness here the way `foldedCandidates`
+    // does, because the import that made this subtree the one to search is that witness.
+    const collision = kinded("packages/ui/components/button/Button.tsx", "Button", "component");
+    const real = kinded("packages/coss-ui/src/components/button.tsx", "button", "component");
+    const view = importing(
+      "apps/web/modules/webhooks/components/WebhookListItem.tsx",
+      'import { Button } from "@coss/ui/components/button"',
+      "@coss/ui/components/button",
+      "Button",
+    );
+
+    const resolved = resolveEdges(view, buildNodeIndex([collision, real, view]), {
+      ...TS,
+      internalPackages: COSS_UI,
+    });
+
+    expect(resolved.edges.map((edge) => edge.to)).toEqual([
+      "packages/coss-ui/src/components/button.tsx",
+    ]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "Button", outcome: "resolved", candidates: 1 },
+    ]);
+  });
+
+  test("falls through to the index where the named package carries the name nowhere", () => {
+    // The reason containment is a preference and never a requirement, and the case that would have
+    // been deleted by the obvious version of this rule. On marmelab/react-admin a file imports from
+    // `react-admin`, whose `packages/react-admin/index.ts` re-exports `ra-ui-materialui` and
+    // `ra-core`, so the component legitimately lives in another package's directory:
+    // `examples/crm/src/deals/DealList.tsx:105` reaches
+    // `packages/ra-ui-materialui/src/layout/TopToolbar.tsx` and must go on reaching it.
+    const toolbar = kinded(
+      "packages/ra-ui-materialui/src/layout/TopToolbar.tsx",
+      "TopToolbar",
+      "component",
+    );
+    const list = importing(
+      "examples/crm/src/deals/DealList.tsx",
+      'import { TopToolbar } from "react-admin"',
+      "react-admin",
+      "TopToolbar",
+    );
+
+    const resolved = resolveEdges(list, buildNodeIndex([toolbar, list]), {
+      ...TS,
+      internalPackages: new Map([["react-admin", "packages/react-admin"]]),
+    });
+
+    expect(resolved.edges.map((edge) => edge.to)).toEqual([
+      "packages/ra-ui-materialui/src/layout/TopToolbar.tsx",
+    ]);
+  });
+
+  test("redirects a name the index calls ambiguous when the named package holds one of them", () => {
+    // Where the yield comes from. Two feature directories carrying `Select` is the ordinary shape of
+    // a monorepo and the index has to refuse it, because nothing in the tag says which is meant. The
+    // import does say, and once the subtree is searched the refusal is answerable: react-admin went
+    // from 3386 ambiguous to 3142 and cal.com from 515 to 240 on that alone.
+    const inside = kinded("packages/ui/components/Select.tsx", "Select", "component");
+    const elsewhere = kinded("apps/web/components/Select.tsx", "Select", "component");
+    const view = importing(
+      "apps/web/pages/Booking.tsx",
+      'import { Select } from "@calcom/ui"',
+      "@calcom/ui",
+      "Select",
+    );
+
+    const index = buildNodeIndex([inside, elsewhere, view]);
+    const packages = new Map([["@calcom/ui", "packages/ui"]]);
+
+    expect(resolveEdges(view, index, TS).names).toEqual([
+      { family: "template", name: "Select", outcome: "ambiguous", candidates: 2 },
+    ]);
+    expect(
+      resolveEdges(view, index, { ...TS, internalPackages: packages }).edges.map((e) => e.to),
+    ).toEqual(["packages/ui/components/Select.tsx"]);
+  });
+
+  test("falls through where the named package holds two nodes of the name, refusing rather than picking", () => {
+    // Inside a package the ambiguity is the same fact it is outside one, and a subtree narrow enough
+    // to feel decisive is not evidence. Two answers and the question goes back to the index, which
+    // refuses it for the same reason.
+    const one = kinded("packages/ui/src/form/Select.tsx", "Select", "component");
+    const two = kinded("packages/ui/src/data/Select.tsx", "Select", "component");
+    const view = importing(
+      "apps/web/pages/Booking.tsx",
+      'import { Select } from "@calcom/ui"',
+      "@calcom/ui",
+      "Select",
+    );
+
+    const resolved = resolveEdges(view, buildNodeIndex([one, two, view]), {
+      ...TS,
+      internalPackages: new Map([["@calcom/ui", "packages/ui"]]),
+    });
+
+    expect(resolved.edges).toEqual([]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "Select", outcome: "ambiguous", candidates: 2 },
+    ]);
+  });
+
+  test("declines a node inside the package whose kind the rule does not allow", () => {
+    // `targetKinds` is not softened by the specifier being specific. A `.ts` module sharing a
+    // basename with a component is exactly what that filter was declared for, and a redirect that
+    // skipped it would land a tag on a type module with more confidence than the index ever had.
+    const types = kinded("packages/ui/src/types/Select.ts", "Select", "module");
+    const view = importing(
+      "apps/web/pages/Booking.tsx",
+      'import { Select } from "@calcom/ui"',
+      "@calcom/ui",
+      "Select",
+    );
+
+    const resolved = resolveEdges(view, buildNodeIndex([types, view]), {
+      ...TS,
+      internalPackages: new Map([["@calcom/ui", "packages/ui"]]),
+    });
+
+    expect(resolved.edges).toEqual([]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "Select", outcome: "wrong-kind", candidates: 1 },
+    ]);
+  });
+
+  test("reads no package out of an import that renamed the name away", () => {
+    // The same false refusal `importsVendorName` had to be taught, aimed the other way: a statement
+    // that binds `Button` to something else has not bound `Button`, so it cannot say which subtree
+    // `Button` came from either. Both questions go through `statementBinds` for this reason.
+    const inside = kinded("packages/coss-ui/src/components/button.tsx", "button", "component");
+    const local = kinded("apps/web/components/Button.tsx", "Button", "component");
+    const view = {
+      ...importing(
+        "apps/web/pages/Signup.tsx",
+        'import { Button as CossButton } from "@coss/ui"',
+        "@coss/ui",
+        "Button",
+      ),
+    };
+
+    const resolved = resolveEdges(view, buildNodeIndex([inside, local, view]), {
+      ...TS,
+      internalPackages: COSS_UI,
+    });
+
+    expect(resolved.edges.map((edge) => edge.to)).toEqual(["apps/web/components/Button.tsx"]);
+  });
+
+  test("outranks a declaration that is itself a dynamic import of the named package's file", () => {
+    // Why the redirect is asked before `local` rather than after it, which was measured rather than
+    // chosen. Guarding it on the declared set cost five cal.com edges, and opening all five found
+    // the same shape:
+    // `packages/features/bookings/components/event-meta/Price.tsx:22` renders
+    // `<AlbyPriceComponent />` under
+    // `const AlbyPriceComponent = dynamic(() => import("@calcom/app-store/alby/components/AlbyPriceComponent"))`.
+    // The file does declare the name, so `local` refused it, and the thing it declares is a wrapper
+    // around an import of exactly the file the redirect finds. `local` exists to stop an edge to a
+    // file the line does not mean; here the line means that file and says so in the same statement.
+    const real = kinded(
+      "packages/app-store/alby/components/AlbyPriceComponent.tsx",
+      "AlbyPriceComponent",
+      "component",
+    );
+    const price = {
+      ...kinded("packages/features/bookings/components/event-meta/Price.tsx", "Price", "component"),
+      declares: ["AlbyPriceComponent", "Price"],
+      captures: [
+        {
+          family: "import" as const,
+          resolve: "module-path" as const,
+          groups: [
+            'import("@calcom/app-store/alby/components/AlbyPriceComponent")',
+            "@calcom/app-store/alby/components/AlbyPriceComponent",
+          ],
+          line: 8,
+        },
+        { ...shortNameCapture("AlbyPriceComponent", 22), targetKinds: ["component", "screen"] },
+      ],
+    };
+
+    const resolved = resolveEdges(price, buildNodeIndex([real, price]), {
+      ...TS,
+      internalPackages: new Map([["@calcom/app-store", "packages/app-store"]]),
+    });
+
+    expect(resolved.edges.map((edge) => edge.to)).toEqual([
+      "packages/app-store/alby/components/AlbyPriceComponent.tsx",
+    ]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "AlbyPriceComponent", outcome: "resolved", candidates: 1 },
+    ]);
+  });
+
+  test("resolves exactly as before where the pack declares no packages block", () => {
+    // php's bargain, unchanged for the third time: no `packages` block means no map, and a map that
+    // is absent narrows nothing. It is also the state of every `empo pack test` run whose corpus
+    // declares no manifest.
+    const collision = kinded("packages/ui/components/button/Button.tsx", "Button", "component");
+    const real = kinded("packages/coss-ui/src/components/button.tsx", "button", "component");
+    const view = importing(
+      "apps/web/modules/webhooks/components/WebhookListItem.tsx",
+      'import { Button } from "@coss/ui/components/button"',
+      "@coss/ui/components/button",
+      "Button",
+    );
+
+    const resolved = resolveEdges(view, buildNodeIndex([collision, real, view]), TS);
+
+    expect(resolved.edges.map((edge) => edge.to)).toEqual([
+      "packages/ui/components/button/Button.tsx",
+    ]);
+  });
+});
