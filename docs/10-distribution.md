@@ -386,12 +386,12 @@ reproducible from a file listing, so EmPo merges into it and removes only what i
 own. There is no marker-comment trick available in JSON, so ownership is by content:
 
 > An entry inside a `hooks` array is EmPo's if and only if its `type` is `"command"` and its
-> `command` string invokes `empo hook `, whether as the bare command or through a path ending in
+> `command` string invokes `empo hook`, whether as the bare command or through a path ending in
 > `/empo`.
 
 That second clause exists because the wiring once had a second spelling, and outlives it: EmPo writes
 only the bare command now, but a repository wired by the release that wrote
-`${CLAUDE_PROJECT_DIR}/node_modules/.bin/empo hook ` still carries that entry, and a rule that
+`${CLAUDE_PROJECT_DIR}/node_modules/.bin/empo hook` still carries that entry, and a rule that
 recognized only what the generator writes would leave it unclaimed beside the new one rather than
 replacing it. The section on the three hooks below states the trap in full; it is repeated here
 because this is the paragraph somebody edits when they add or drop a spelling.
@@ -527,7 +527,7 @@ gone: with npm dropped as a channel nothing puts an EmPo there, so the branch wa
 condition merely a way to be surprised. What did not go with it is the recognizer, and that
 asymmetry is the whole point. One trap lives here and it is the kind that produces a mess rather than
 an error. **`empo update` identifies its own hook entries by their command string** (`settings.json`
-is the repository's, above: ownership is by content, an entry invoking `empo hook ` at the start of
+is the repository's, above: ownership is by content, an entry invoking `empo hook` at the start of
 the command or after a path separator). Changing what the generator **writes** without keeping what
 it **recognizes** does not fix a wired repository, it doubles it: the old entry is not claimed, so it
 is not removed, and the new one is appended beside it. Both then fire on every event. So the

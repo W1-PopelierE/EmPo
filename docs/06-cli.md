@@ -841,7 +841,7 @@ a healthy session still opens in silence and still spawns nothing.
 read, and this one is not: each wired `command` string is handed to a shell whole, so pointing
 `empo doctor` at a repository executes whatever that repository's `.claude/settings.json` puts in
 those strings, shell syntax and all. Ownership is decided by the **shape** of the command and never
-by a signature: an entry is EmPo's because it contains `empo hook `, which is what lets `empo
+by a signature: an entry is EmPo's because it contains `empo hook`, which is what lets `empo
 update` merge without trampling a hand-edited entry, and it is also what makes a modified entry
 still ours. `empo hook session-start; <anything>` matches the ownership rule, is listed as a wired
 EmPo hook, and is run. A checkout can therefore choose what `empo doctor` executes on the machine
