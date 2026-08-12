@@ -21,7 +21,7 @@ describe("typescript pack", () => {
 
   test("loads with its declared identity", () => {
     expect(pack.name).toBe("typescript");
-    expect(pack.version).toBe("1.8.0");
+    expect(pack.version).toBe("1.9.0");
   });
 
   test("reproduces the expected nodes", () => {
@@ -150,6 +150,7 @@ describe("typescript pack", () => {
     expect(from("src/screens/CartScreen.ts").map((edge) => edge.to)).toEqual([
       "src/api/orders.ts",
       "src/components/CartPanel.vue",
+      "src/shared/register-handlers.ts",
     ]);
     // Two edges to one file, because App.vue imports CartPanel in its script and renders it in its
     // template, and the graph deduplicates per (from, to, kind). Both are true and they answer
@@ -246,13 +247,41 @@ describe("typescript pack", () => {
   });
 
   test("reads a CommonJS require as the import it is", () => {
-    // The third import rule has always matched `require(`, and no fixture file exercised it while
+    // The call-syntax import rule has always matched `require(`, and no fixture file exercised it while
     // the pack read no JavaScript, because a .ts file does not write one. It is the only shape a
     // .cjs file has to say a coupling with.
     const edge = from("src/browser/legacy-bridge.cjs")[0];
 
     expect(edge?.to).toBe("src/browser/tracker.js");
     expect(edge?.evidence.line).toBe(1);
+  });
+
+  test("reads a side-effect import, which names no binding and no `from`", () => {
+    // The rule the other three could not cover: `import "./x"` has no clause to hold a binding and
+    // no call parens either, so a registration module read as reached by nobody. CartScreen.ts
+    // writes it with double quotes, instrument.mjs with single ones, and both are real fan-in:
+    // deleting register-handlers.ts breaks each of them.
+    const into = actual.edges.filter((edge) => edge.to === "src/shared/register-handlers.ts");
+
+    expect(into.map((edge) => [edge.from, edge.evidence.line])).toEqual([
+      ["src/browser/instrument.mjs", 1],
+      ["src/screens/CartScreen.ts", 4],
+    ]);
+  });
+
+  test("does not read a side-effect import twice, nor take a dynamic import for one", () => {
+    // The new rule sits next to two that also start at `import`, so the shapes they own have to
+    // stay theirs. A statement with a `from` clause is one edge, not two, and `import("./x")`
+    // keeps its parens out of the side-effect rule's reach: `\\s+['\"]` cannot cross a `(`.
+    expect(
+      from("src/browser/instrument.mjs").filter((edge) => edge.to === "src/browser/analytics.js"),
+    ).toHaveLength(1);
+
+    const lazy = from("src/screens/OrderScreen.tsx").filter((edge) =>
+      edge.to.endsWith("OrderBadge.tsx"),
+    );
+
+    expect(lazy).toHaveLength(1);
   });
 
   test("kinds a React component wherever it sits, on the extension and the tag together", () => {
