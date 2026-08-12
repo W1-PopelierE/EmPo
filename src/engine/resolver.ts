@@ -241,6 +241,15 @@ export function resolveEdges(
    * otherwise turn a pack's capture into a pattern this engine compiles.
    */
   const statementBinds = (statement: string, name: string): boolean => {
+    // **A side-effect import binds no name, and its specifier is the whole statement.** Every other
+    // shape read here carries a clause or call parens beside the path, so the name is matched in
+    // text a file wrote about a symbol; `import "@mui/material/Button/Button.css"` writes `Button`
+    // twice and means neither of them as a binding. Read whole it refuses the local `Button.tsx`
+    // the file renders, which is the one thing this check must never do. A dynamic
+    // `import("@calcom/…/AlbyPriceComponent")` is deliberately not this shape: it holds the parens,
+    // and the name in its specifier is the file the line means.
+    if (/^[ \t]*import\s*(['"`])[^'"`]*\1[ \t]*;?[ \t]*$/.test(statement)) return false;
+
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     if (!new RegExp(`(?:^|[^A-Za-z0-9_$])${escaped}(?:[^A-Za-z0-9_$]|$)`).test(statement)) {
       return false;

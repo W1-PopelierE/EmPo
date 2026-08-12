@@ -65,7 +65,7 @@
         "resolve": "module-path"
       },
       {
-        "pattern": "^[ \\t]*import\\s+['\"]([^'\"]+)['\"]",
+        "pattern": "^[ \\t]*import\\s*['\"]([^'\"]+)['\"]",
         "resolve": "module-path"
       },
       {

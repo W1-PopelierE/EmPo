@@ -19,6 +19,26 @@ describe("typescript pack", () => {
   const node = (id: string): GraphNode | undefined => actual.nodes.find((n) => n.id === id);
   const from = (id: string): GraphEdge[] => actual.edges.filter((edge) => edge.from === id);
 
+  /**
+   * Every module specifier the pack's import rules read out of one line, in the order the rules are
+   * declared and before anything deduplicates them. The graph cannot answer this: `dedupeEdges`
+   * keys on (from, to, kind), so two rules matching one statement leave one edge either way and a
+   * test reading the graph cannot tell an overlap from a clean split.
+   */
+  const specifiers = (line: string): string[] => {
+    const extracted = extractFile(compilePack(pack), {
+      root: ".",
+      lang: "typescript",
+      file: "src/probe.ts",
+      relPath: "src/probe.ts",
+      source: `${line}\n`,
+    });
+    if (extracted === null) throw new Error("expected the probe to yield a node");
+    return extracted.captures
+      .filter((capture) => capture.family === "import" && capture.resolve === "module-path")
+      .map((capture) => capture.groups[1] ?? "");
+  };
+
   test("loads with its declared identity", () => {
     expect(pack.name).toBe("typescript");
     expect(pack.version).toBe("1.9.0");
@@ -271,17 +291,29 @@ describe("typescript pack", () => {
 
   test("does not read a side-effect import twice, nor take a dynamic import for one", () => {
     // The new rule sits next to two that also start at `import`, so the shapes they own have to
-    // stay theirs. A statement with a `from` clause is one edge, not two, and `import("./x")`
-    // keeps its parens out of the side-effect rule's reach: `\\s+['\"]` cannot cross a `(`.
-    expect(
-      from("src/browser/instrument.mjs").filter((edge) => edge.to === "src/browser/analytics.js"),
-    ).toHaveLength(1);
+    // stay theirs. Counted before the graph deduplicates, because `dedupeEdges` keys on
+    // (from, to, kind) and collapses a double match into one edge (engine/build.ts): asserting on
+    // the graph here would pass whether or not the rules overlap, which is no assertion at all.
+    expect(specifiers('import { reportTotal } from "./analytics.js";')).toEqual(["./analytics.js"]);
+    expect(specifiers('export { Money } from "./money";')).toEqual(["./money"]);
+    expect(specifiers('const { OrderBadge } = await import("./OrderBadge");')).toEqual([
+      "./OrderBadge",
+    ]);
+    // `\s*['"]` still cannot cross a `(`, so the side-effect rule takes no dynamic import at all.
+    // A space before the parens is read by nothing, the call rule wanting `import(` with none:
+    // that shape is a gap this rule deliberately does not paper over, recorded rather than fixed.
+    expect(specifiers('const mod = await import ("./OrderBadge");')).toEqual([]);
+    expect(specifiers('import "./register-handlers";')).toEqual(["./register-handlers"]);
+    expect(specifiers("import './register-handlers';")).toEqual(["./register-handlers"]);
+  });
 
-    const lazy = from("src/screens/OrderScreen.tsx").filter((edge) =>
-      edge.to.endsWith("OrderBadge.tsx"),
-    );
-
-    expect(lazy).toHaveLength(1);
+  test("reads the side-effect import a bundler writes, which spells no whitespace at all", () => {
+    // `import"./x"` is what every minifier emits, and the clause rule beside this one already reads
+    // its own minified form through `[\s{]`. A rule that demanded whitespace made the two disagree
+    // on one input for no reason: `import` followed straight by a quote is a side-effect import and
+    // can be nothing else, so `\s*` cannot over-match.
+    expect(specifiers('import"./register-handlers";')).toEqual(["./register-handlers"]);
+    expect(specifiers('import{formatMoney}from"./money";')).toEqual(["./money"]);
   });
 
   test("kinds a React component wherever it sits, on the extension and the tag together", () => {

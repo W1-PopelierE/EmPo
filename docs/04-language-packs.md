@@ -1514,13 +1514,15 @@ leaking into it.
 The side-effect import (`import "./register-handlers";`) was recorded here as a deliberate absence,
 on the grounds that a rule with no line in the fixture corpus proving it is a rule nobody has tested,
 and that it lands the day the corpus grows one. The corpus grew two, so it landed: a fourth import
-rule, `^[ \t]*import\s+['"]([^'"]+)['"]`, which is the shape the other three cannot reach because it
+rule, `^[ \t]*import\s*['"]([^'"]+)['"]`, which is the shape the other three cannot reach because it
 carries no binding clause and no call parens. What it bought is the module every importer reached
 silently: a registration file, a polyfill, a css module, a test setup file, each of which read as
-fan-in of zero while the pack wanted a `from`. The one thing the typescript pack still deliberately
-does not do is refuse a type-only import: it reads `import type { Money } from "./money"` as a real
-edge, unlike the
-docblock references [05-graph-model](05-graph-model.md) excludes: a PHP `@property` annotation is
+fan-in of zero while the pack wanted a `from`. The `\s*` is not `\s+` so that `import"./x"`, which
+is what a minifier writes, reads the same as the spaced spelling the clause rule beside it already
+takes through `[\s{]`; `import` followed straight by a quote is a side-effect import and can be
+nothing else. The one thing the typescript pack still deliberately does not do is refuse a type-only
+import: it reads `import type { Money } from "./money"` as a real edge, unlike the docblock
+references [05-graph-model](05-graph-model.md) excludes: a PHP `@property` annotation is
 documentation, while a TypeScript type import is checked by the compiler, so changing the type
 really does break the file that imported it.
 
@@ -1602,5 +1604,5 @@ otherwise have resolved: `CardFooter` reaches it through the fold, which `CardSt
 corroborate, so that name is honestly `unknown` and the shadow verdict was no longer gated by
 anything. `OrderCard.tsx` is carried by the exact index and kinded `component`, so a file declaring
 its own `const OrderCard` and rendering it is the case `local` exists for. With all of it the corpus
-is 46 nodes and its `template` record reads `resolved 19, unknown 1, ambiguous 2, wrongKind 1,
+is 47 nodes and its `template` record reads `resolved 19, unknown 1, ambiguous 2, wrongKind 1,
 local 1, vendor 1`.

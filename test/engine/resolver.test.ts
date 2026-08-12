@@ -1103,6 +1103,41 @@ describe("resolveEdges, the names it declined", () => {
     ]);
   });
 
+  test("does not read a name that appears only inside the specifier as bound by it", () => {
+    // The same false refusal by the other route, and the typescript pack's side-effect import rule
+    // is what put it in reach: a bare `import "@mui/material/Button/Button.css"` binds nothing at
+    // all, yet the statement carries the word `Button` twice. Read whole, it refuses the local
+    // `Button.tsx` the file actually renders. A specifier is a path and never a binding clause.
+    const local = kinded(
+      "src/components/Button.tsx",
+      "Button",
+      "src/components/Button.tsx",
+      "component",
+    );
+    const view = {
+      ...kinded("src/reviews/Review.tsx", "Review", "src/reviews/Review.tsx", "component"),
+      captures: [
+        {
+          family: "import" as const,
+          resolve: "module-path" as const,
+          groups: ['import "@mui/material/Button/Button.css"', "@mui/material/Button/Button.css"],
+          line: 1,
+        },
+        kindedCapture("Button", 30, ["component"]),
+      ],
+    };
+
+    const resolved = resolveEdges(view, buildNodeIndex([local, view]), {
+      ...TS,
+      vendorPackages: new Set(["@mui/material"]),
+    });
+
+    expect(resolved.edges.map((edge) => edge.to)).toEqual(["src/components/Button.tsx"]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "Button", outcome: "resolved", candidates: 1 },
+    ]);
+  });
+
   test("counts no name for a module-path capture, however little it resolved", () => {
     // Only the two bare-name strategies are counted. A specifier that resolves to nothing is a
     // vendor import or a file outside the graph, and nobody can act on that refusal, so folding it
