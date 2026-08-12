@@ -49,6 +49,18 @@
       "assertsValue": false
     },
     {
+      "id": "Acme\\Http\\Controllers\\QueueHandoffController",
+      "file": "app/Http/Controllers/QueueHandoffController.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "QueueHandoffController",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
       "id": "Acme\\Http\\Controllers\\ReceiptController",
       "file": "app/Http/Controllers/ReceiptController.php",
       "root": ".",
@@ -67,6 +79,18 @@
       "lang": "php",
       "kind": "class",
       "name": "RefundController",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Http\\Controllers\\SpoolController",
+      "file": "app/Http/Controllers/SpoolController.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "SpoolController",
       "produces": [],
       "consumes": [],
       "isTest": false,
@@ -205,12 +229,36 @@
       "assertsValue": false
     },
     {
+      "id": "Acme\\Mailables\\WelcomeMail",
+      "file": "app/Mailables/WelcomeMail.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "job",
+      "name": "WelcomeMail",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
       "id": "Acme\\Models\\Order",
       "file": "app/Models/Order.php",
       "root": ".",
       "lang": "php",
       "kind": "model",
       "name": "Order",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Notifications\\OrderShipped",
+      "file": "app/Notifications/OrderShipped.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "job",
+      "name": "OrderShipped",
       "produces": [],
       "consumes": [],
       "isTest": false,
@@ -507,6 +555,46 @@
       }
     },
     {
+      "from": "Acme\\Http\\Controllers\\QueueHandoffController",
+      "to": "Acme\\Jobs\\ChargeCard",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/QueueHandoffController.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\QueueHandoffController",
+      "to": "Acme\\Mailables\\WelcomeMail",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/QueueHandoffController.php",
+        "line": 6
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\QueueHandoffController",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/QueueHandoffController.php",
+        "line": 7
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\QueueHandoffController",
+      "to": "Acme\\Notifications\\OrderShipped",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/QueueHandoffController.php",
+        "line": 8
+      }
+    },
+    {
       "from": "Acme\\Http\\Controllers\\ReceiptController",
       "to": "Acme\\Jobs\\EmailReceipt",
       "kind": "import",
@@ -554,6 +642,36 @@
       "evidence": {
         "file": "app/Http/Controllers/RefundController.php",
         "line": 6
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\SpoolController",
+      "to": "Acme\\Mailables\\WelcomeMail",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/SpoolController.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\SpoolController",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/SpoolController.php",
+        "line": 6
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\SpoolController",
+      "to": "Acme\\Notifications\\OrderShipped",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/SpoolController.php",
+        "line": 7
       }
     },
     {
@@ -677,6 +795,16 @@
       }
     },
     {
+      "from": "Acme\\Mailables\\WelcomeMail",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Mailables/WelcomeMail.php",
+        "line": 5
+      }
+    },
+    {
       "from": "Acme\\Models\\Order",
       "to": "Acme\\Observers\\OrderObserver",
       "kind": "hook",
@@ -684,6 +812,16 @@
       "evidence": {
         "file": "app/Providers/AppServiceProvider.php",
         "line": 12
+      }
+    },
+    {
+      "from": "Acme\\Notifications\\OrderShipped",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Notifications/OrderShipped.php",
+        "line": 5
       }
     },
     {
@@ -854,6 +992,48 @@
       "job": "ChargeCard",
       "target": "Acme\\Jobs\\ChargeCard",
       "transactionLine": 15
+    },
+    {
+      "file": "app/Http/Controllers/QueueHandoffController.php",
+      "line": 21,
+      "job": "WelcomeMail",
+      "target": "Acme\\Mailables\\WelcomeMail",
+      "transactionLine": 20
+    },
+    {
+      "file": "app/Http/Controllers/QueueHandoffController.php",
+      "line": 22,
+      "job": "WelcomeMail",
+      "target": "Acme\\Mailables\\WelcomeMail",
+      "transactionLine": 20
+    },
+    {
+      "file": "app/Http/Controllers/QueueHandoffController.php",
+      "line": 23,
+      "job": "ChargeCard",
+      "target": "Acme\\Jobs\\ChargeCard",
+      "transactionLine": 20
+    },
+    {
+      "file": "app/Http/Controllers/QueueHandoffController.php",
+      "line": 24,
+      "job": "OrderShipped",
+      "target": "Acme\\Notifications\\OrderShipped",
+      "transactionLine": 20
+    },
+    {
+      "file": "app/Http/Controllers/QueueHandoffController.php",
+      "line": 25,
+      "job": "OrderShipped",
+      "target": "Acme\\Notifications\\OrderShipped",
+      "transactionLine": 20
+    },
+    {
+      "file": "app/Http/Controllers/SpoolController.php",
+      "line": 33,
+      "job": "",
+      "target": null,
+      "transactionLine": 28
     },
     {
       "file": "app/Http/Controllers/SubscriptionController.php",

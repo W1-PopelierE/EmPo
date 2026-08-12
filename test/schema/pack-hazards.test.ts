@@ -168,9 +168,46 @@ describe("php pack hazards", () => {
       "\\Acme\\Notifications\\OrderShipped",
     ]);
 
-    // The first argument written as an array puts a comma inside it. The scan runs to the `new`
-    // rather than counting commas, so the notification is still the one that gets named.
+    // The first argument written as an array puts a comma inside it. The rule wants a comma before
+    // the `new` and takes the earliest one a `new` follows, so the notification is still named.
     expect(jobsIn("Notification::send([$a, $b], new OrderShipped);")).toEqual(["OrderShipped"]);
+
+    // The queue-name spellings, where the job is one argument further along than the bare form.
+    expect(jobsIn('Queue::pushOn("emails", new ChargeCard($o));')).toEqual(["ChargeCard"]);
+    expect(jobsIn('Queue::laterOn("emails", 60, new ChargeCard($o));')).toEqual(["ChargeCard"]);
+  });
+
+  test("names the job and not the delay when later() is handed a constructed one", () => {
+    // `later()` and `laterOn()` take the delay first, and Laravel accepts a DateTimeInterface or a
+    // DateInterval there, so the first `new` inside the call is not always the job. The delayed
+    // rules want a comma before the `new`; the immediate ones must not, because there the job is
+    // the first argument. Naming the delay class would resolve a hazard to the wrong node, which
+    // the pack ranks below naming nothing at all.
+    expect(
+      jobsIn("Mail::to($u)->later(new \\DateTimeImmutable('2026-01-01'), $mailable);"),
+    ).toEqual([""]);
+    expect(jobsIn("Queue::later(new DateTime('2026-01-01'), new ProcessPodcast($id));")).toEqual([
+      "ProcessPodcast",
+    ]);
+
+    // The immediate spellings still read their first argument, which is where their job is.
+    expect(jobsIn("Queue::push(new ChargeCard($order));")).toEqual(["ChargeCard"]);
+    expect(jobsIn("Mail::to($user)->queue(new WelcomeMail($user));")).toEqual(["WelcomeMail"]);
+  });
+
+  test("refuses a namespace-qualified lookalike of the facades it is anchored to", () => {
+    // `\b` treats the `\` in `Acme\Mail::` as a boundary, so a bare word anchor reads this
+    // application's own Mail, Queue or Notification class as the Laravel facade and fabricates a
+    // hazard. The anchor forbids a word character or a `\` before the name, which still admits the
+    // global-namespace spelling every one of these facades is really written as.
+    expect(jobsIn("Acme\\Mail::to($u)->queue(new WelcomeMail($u));")).toEqual([]);
+    expect(jobsIn("Acme\\Queue::push(new ChargeCard($order));")).toEqual([]);
+    expect(jobsIn("Acme\\Notification::send($users, new OrderShipped);")).toEqual([]);
+    expect(jobsIn("Support\\Mail::to($u)->later(now(), new WelcomeMail($u));")).toEqual([]);
+
+    // Rooted at the global namespace, which is the facade and not a lookalike.
+    expect(jobsIn("\\Mail::to($u)->queue(new WelcomeMail($u));")).toEqual(["WelcomeMail"]);
+    expect(jobsIn("\\Queue::push(new ChargeCard($order));")).toEqual(["ChargeCard"]);
   });
 
   test("reports the queue path unnamed rather than not at all when no class is written", () => {
@@ -214,6 +251,20 @@ describe("php pack hazards", () => {
     // `->notify(` on any receiver, which is what the rows above rule out.
     expect(jobsIn("$user->notify($notification);")).toEqual([]);
     expect(jobsIn("$user->notify(notification: new OrderShipped);")).toEqual([]);
+  });
+
+  test("reads a hand-rolled emitter's notify(new …) too, which is the accepted over-report", () => {
+    // The one rule with no receiver to anchor to. `Mail::` and `Queue::` name a facade, and
+    // `Notification::send` names one, but `->notify()` is how Laravel spells a notification on any
+    // notifiable, so there is no receiver token to require. The `new` is the whole defence, and a
+    // hand-rolled subject that constructs its event inline walks through it.
+    //
+    // Pinned rather than fixed, because the alternative costs more than it buys: narrowing to a
+    // known notifiable would need the receiver's class, which no call-site rule has, and dropping
+    // the rule loses `$user->notify(new OrderShipped)`, the commonest queue path in Laravel that
+    // never says dispatch. The over-report is bounded — it needs an inline `new` inside a database
+    // transaction — and .empo/conventions.md carries the judgement so a review does not relitigate.
+    expect(jobsIn("$subject->notify(new PriceChanged($p));")).toEqual(["PriceChanged"]);
   });
 
   test("does not read the two queue paths that only the dispatched class can decide", () => {
@@ -332,13 +383,27 @@ describe("php pack hazards", () => {
       "app/Http/Controllers/RefundController.php",
       "app/Http/Controllers/ReceiptController.php",
       "app/Http/Controllers/CatalogController.php",
+      "app/Http/Controllers/QueueHandoffController.php",
+      "app/Http/Controllers/SpoolController.php",
       "app/Libraries/Ledger/LedgerPoster.php",
       "app/Libraries/Ledger/LedgerCloser.php",
       "app/Libraries/Ledger/LedgerReverser.php",
     ];
-    const declared = ["ChargeCard", "EmailReceipt", "PostLedgerEntry", "RebuildSearchIndex"];
+    const declared = [
+      "ChargeCard",
+      "EmailReceipt",
+      "PostLedgerEntry",
+      "RebuildSearchIndex",
+      "WelcomeMail",
+      "OrderShipped",
+    ];
 
-    const found = new Set(files.flatMap((file) => jobsIn(corpus(file))));
+    // The empty name is dropped rather than declared: SpoolController holds a `later()` with a
+    // constructed delay on purpose, and the rule leaving that job unnamed is the point of the line.
+    // A name that is not there cannot resolve to the wrong node, which is what this test guards.
+    const found = new Set(
+      files.flatMap((file) => jobsIn(corpus(file))).filter((job) => job !== ""),
+    );
 
     expect(found.size).toBeGreaterThan(0);
     for (const job of found) {

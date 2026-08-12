@@ -29,3 +29,19 @@ file rather than a departure from it. A line number written here goes stale on t
 same file and sends the next reader to a blank line. Find it with
 `grep -n "export function matchesDeclaredPath" src/engine/flows.ts` and read the block immediately
 above the export.
+
+## The php pack's `->notify(new …)` rule is anchored to no receiver, on purpose
+
+Every other hazard dispatch rule in `src/packs/php/pack.json` names a facade or a `::dispatch`
+spelling, so a reviewer reading the `notify` rule beside them concludes the missing receiver anchor
+is an oversight and flags the over-report: a hand-rolled subject's `$subject->notify(new Event($x))`
+written inside a transaction is reported as a queued handoff. That is a real over-report and it was
+judged worth its cost. There is no receiver token to require, because `->notify()` is how Laravel
+spells a notification on any notifiable; narrowing it would need the receiver's class, which no
+call-site rule has, and dropping it loses `$user->notify(new OrderShipped)`, the commonest queue
+path in Laravel that never says `dispatch`. The `new` bounds the damage, and the decision is pinned
+in `test/schema/pack-hazards.test.ts` under "the accepted over-report".
+
+The rule to apply: the queue rules anchored to `Mail::`, `Queue::` and `Notification::` are anchored
+so a namespace-qualified lookalike is refused, and `->notify(` deliberately is not. Grep for
+`the accepted over-report` before raising this again.
