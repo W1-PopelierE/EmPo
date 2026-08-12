@@ -1455,7 +1455,10 @@ Two, deliberately different, to keep the interface honest:
   names the typescript pack produces). It is the one pack that declares a `views` block, which those
   four rules are the only reader of, the one pack that declares a `hazards` block, covering
   both Laravel
-  transaction forms, the three spellings of a dispatch, `->afterCommit()` at the site and
+  transaction forms, seven spellings that hand work to a queue — the three `dispatch` forms, the
+  `Mail` facade's `queue()`/`later()`, the `Queue` facade's `push()`/`pushOn()`/`later()`/
+  `laterOn()`/`bulk()`, `->notify(new …)` and `Notification::send()`, which is a floor and not the
+  whole of Laravel — `->afterCommit()` at the site and
   `public $afterCommit = true` on the job, and the one that declares a compound-extension comment
   syntax, `.blade.php` masking `{{-- --}}`.
 - **typescript** (`strategy: module-path`, three `import` rules, two `template` rules for the JSX and
