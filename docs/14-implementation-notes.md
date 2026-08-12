@@ -1247,6 +1247,15 @@ statement renames away — and asks whether any `module-path` capture in this
 file binds the name and names a package in that set. `resolveName` asks it last, beside `local`, of
 the survivor of uniqueness and `targetKinds`, for the same reason and with the same `candidates: 1`.
 
+**A side-effect import binds nothing, and `statementBinds` answers that before it reads a word.** The
+typescript pack's fourth import rule made `import "@mui/material/Button/Button.css"` a `module-path`
+capture for the first time, and that statement is its specifier and nothing else: read as text it
+carries `Button` twice and refuses the local `Button.tsx` the file renders, which is the false
+refusal this check exists to avoid rather than to make. Every other shape reaching here writes a
+clause or call parens beside the path, so the name is matched in something the file said about a
+symbol; the dynamic `import("@calcom/…/AlbyPriceComponent")` in the next repair keeps its specifier
+read for exactly that reason, and the exclusion is anchored on the shape, not on the pack.
+
 **Both halves of the subtraction are load-bearing and dependencies alone would have been a
 regression.** A monorepo imports its own workspaces exactly as it imports npm — `@calcom/ui`,
 `react-admin`, `ra-core` — so a rule that refused every bare specifier would delete precisely the

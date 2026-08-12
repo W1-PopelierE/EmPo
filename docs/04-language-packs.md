@@ -1461,7 +1461,7 @@ Two, deliberately different, to keep the interface honest:
   whole of Laravel — `->afterCommit()` at the site and
   `public $afterCommit = true` on the job, and the one that declares a compound-extension comment
   syntax, `.blade.php` masking `{{-- --}}`.
-- **typescript** (`strategy: module-path`, three `import` rules, two `template` rules for the JSX and
+- **typescript** (`strategy: module-path`, four `import` rules, two `template` rules for the JSX and
   Vue component tag, scoped with `pathGlob` to `**/*.{tsx,jsx,vue}` and confined by `targetKinds` to
   landing on a `component` or a `screen`, three `declares` patterns so those two rules refuse a tag
   naming something the rendering file declares itself, a `packages` block naming `package.json`,
@@ -1511,15 +1511,22 @@ all the same: the primitive is general (any convention that references a file by
 rather than an Inertia special case, which is the engine growing a vocabulary rather than a language
 leaking into it.
 
-Two things the typescript pack deliberately does not do, recorded so absence is not mistaken for
-oversight. It has no rule for a side-effect import (`import "./register-handlers";`), because a rule
-with no line in the fixture corpus proving it is a rule nobody has tested; it lands the day the
-corpus grows one. And it reads `import type { Money } from "./money"` as a real edge, unlike the
-docblock references [05-graph-model](05-graph-model.md) excludes: a PHP `@property` annotation is
+The side-effect import (`import "./register-handlers";`) was recorded here as a deliberate absence,
+on the grounds that a rule with no line in the fixture corpus proving it is a rule nobody has tested,
+and that it lands the day the corpus grows one. The corpus grew two, so it landed: a fourth import
+rule, `^[ \t]*import\s*['"]([^'"]+)['"]`, which is the shape the other three cannot reach because it
+carries no binding clause and no call parens. What it bought is the module every importer reached
+silently: a registration file, a polyfill, a css module, a test setup file, each of which read as
+fan-in of zero while the pack wanted a `from`. The `\s*` is not `\s+` so that `import"./x"`, which
+is what a minifier writes, reads the same as the spaced spelling the clause rule beside it already
+takes through `[\s{]`; `import` followed straight by a quote is a side-effect import and can be
+nothing else. The one thing the typescript pack still deliberately does not do is refuse a type-only
+import: it reads `import type { Money } from "./money"` as a real edge, unlike the docblock
+references [05-graph-model](05-graph-model.md) excludes: a PHP `@property` annotation is
 documentation, while a TypeScript type import is checked by the compiler, so changing the type
 really does break the file that imported it.
 
-A third absence is worth naming with less certainty than those two, because nobody has argued it
+A further absence is worth naming with less certainty than that one, because nobody has argued it
 either way yet: the typescript pack declares no `hazards` block. Section 7's rule then applies to it,
 so this repository's own `empo query --hazards`, which indexes itself with that pack alone, answers
 that no pack in play looks rather than that it is clean. A Node queue and a transaction can hold the
@@ -1597,5 +1604,5 @@ otherwise have resolved: `CardFooter` reaches it through the fold, which `CardSt
 corroborate, so that name is honestly `unknown` and the shadow verdict was no longer gated by
 anything. `OrderCard.tsx` is carried by the exact index and kinded `component`, so a file declaring
 its own `const OrderCard` and rendering it is the case `local` exists for. With all of it the corpus
-is 46 nodes and its `template` record reads `resolved 19, unknown 1, ambiguous 2, wrongKind 1,
+is 47 nodes and its `template` record reads `resolved 19, unknown 1, ambiguous 2, wrongKind 1,
 local 1, vendor 1`.

@@ -1,6 +1,6 @@
 {
   "name": "typescript",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "match": {
     "extensions": [".ts", ".tsx", ".vue", ".js", ".jsx", ".mjs", ".cjs"],
     "manifest": ["package.json", "tsconfig.json"]
@@ -62,6 +62,10 @@
       },
       {
         "pattern": "^[ \\t]*export[\\s{][A-Za-z0-9_$,{}\\s*]*?from\\s*['\"]([^'\"]+)['\"]",
+        "resolve": "module-path"
+      },
+      {
+        "pattern": "^[ \\t]*import\\s*['\"]([^'\"]+)['\"]",
         "resolve": "module-path"
       },
       {

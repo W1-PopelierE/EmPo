@@ -538,6 +538,18 @@
       "assertsValue": false
     },
     {
+      "id": "src/shared/register-handlers.ts",
+      "file": "src/shared/register-handlers.ts",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "module",
+      "name": "register-handlers",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
       "id": "tests/cart.chai.test.ts",
       "file": "tests/cart.chai.test.ts",
       "root": ".",
@@ -660,6 +672,16 @@
     {
       "from": "src/browser/instrument.mjs",
       "to": "src/browser/analytics.js",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/browser/instrument.mjs",
+        "line": 2
+      }
+    },
+    {
+      "from": "src/browser/instrument.mjs",
+      "to": "src/shared/register-handlers.ts",
       "kind": "import",
       "symbol": null,
       "evidence": {
@@ -1174,7 +1196,7 @@
       "symbol": null,
       "evidence": {
         "file": "src/screens/CartScreen.ts",
-        "line": 2
+        "line": 6
       }
     },
     {
@@ -1184,7 +1206,17 @@
       "symbol": null,
       "evidence": {
         "file": "src/screens/CartScreen.ts",
-        "line": 1
+        "line": 5
+      }
+    },
+    {
+      "from": "src/screens/CartScreen.ts",
+      "to": "src/shared/register-handlers.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/screens/CartScreen.ts",
+        "line": 4
       }
     },
     {
@@ -1245,6 +1277,16 @@
       "evidence": {
         "file": "src/screens/OrderScreenView.tsx",
         "line": 7
+      }
+    },
+    {
+      "from": "src/shared/register-handlers.ts",
+      "to": "src/shared/money.ts",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/shared/register-handlers.ts",
+        "line": 5
       }
     },
     {
