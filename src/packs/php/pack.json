@@ -1,6 +1,6 @@
 {
   "name": "php",
-  "version": "1.6.0",
+  "version": "1.7.0",
 
   "match": {
     "extensions": [".php"],
@@ -259,6 +259,22 @@
       },
       {
         "pattern": "(?<!\\w)(?!Bus\\b)((?:[A-Za-z0-9_]+\\\\)*[A-Z][A-Za-z0-9_]*)::dispatch\\(",
+        "job": 1
+      },
+      {
+        "pattern": "\\bMail::(?:[\\w\\$\\\\'\"\\[\\]().,:>\\- ]*?->\\s*)?(?:queue|later)\\((?:[\\w\\$\\\\'\"\\[\\]().,:>\\- ]*?new\\s+(\\\\?(?:[A-Za-z0-9_]+\\\\)*[A-Za-z0-9_]+))?",
+        "job": 1
+      },
+      {
+        "pattern": "\\bQueue::(?:push|pushOn|later|laterOn|bulk)\\((?:[\\w\\$\\\\'\"\\[\\]().,:>\\- ]*?new\\s+(\\\\?(?:[A-Za-z0-9_]+\\\\)*[A-Za-z0-9_]+))?",
+        "job": 1
+      },
+      {
+        "pattern": "->\\s*notify\\(\\s*new\\s+(\\\\?(?:[A-Za-z0-9_]+\\\\)*[A-Za-z0-9_]+)",
+        "job": 1
+      },
+      {
+        "pattern": "\\bNotification::send\\((?:[\\w\\$\\\\'\"\\[\\]().,:>\\- ]*?new\\s+(\\\\?(?:[A-Za-z0-9_]+\\\\)*[A-Za-z0-9_]+))?",
         "job": 1
       }
     ],

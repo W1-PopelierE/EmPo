@@ -139,6 +139,100 @@ describe("php pack hazards", () => {
     expect(jobsIn("Bus::dispatch(new ChargeCard($order));")).toEqual(["ChargeCard"]);
   });
 
+  test("reads the queue paths that never spell dispatch, which are the same hazard", () => {
+    // A mailable handed to the queue, a job pushed through the Queue facade, a notification handed
+    // to one notifiable and to a collection of them. None of these says `dispatch`, and each one
+    // hands work to a queue that does not roll back with the transaction enclosing it.
+    expect(jobsIn("Mail::to($user)->queue(new WelcomeMail($user));")).toEqual(["WelcomeMail"]);
+    expect(jobsIn("Mail::to($u)->cc($x)->queue(new WelcomeMail($u));")).toEqual(["WelcomeMail"]);
+    expect(jobsIn("Queue::push(new ChargeCard($order));")).toEqual(["ChargeCard"]);
+    expect(jobsIn("$user->notify(new OrderShipped($order));")).toEqual(["OrderShipped"]);
+    expect(jobsIn("Notification::send($users, new OrderShipped($order));")).toEqual([
+      "OrderShipped",
+    ]);
+
+    // The delayed spellings, which are queued exactly as the immediate ones are: the delay is the
+    // worker's, and the row the job wants still has to be committed before the worker wakes.
+    expect(jobsIn("Mail::to($u)->later(now()->addHour(), new WelcomeMail($u));")).toEqual([
+      "WelcomeMail",
+    ]);
+    expect(jobsIn("Queue::later(60, new ChargeCard($order));")).toEqual(["ChargeCard"]);
+
+    // Through the facade's router, which is the same notify call one chain further along.
+    expect(jobsIn('Notification::route("mail", $address)->notify(new OrderShipped);')).toEqual([
+      "OrderShipped",
+    ]);
+
+    // Qualified exactly as the dispatch spellings capture it, so the same resolver reads it.
+    expect(jobsIn("$user->notify(new \\Acme\\Notifications\\OrderShipped);")).toEqual([
+      "\\Acme\\Notifications\\OrderShipped",
+    ]);
+
+    // The first argument written as an array puts a comma inside it. The scan runs to the `new`
+    // rather than counting commas, so the notification is still the one that gets named.
+    expect(jobsIn("Notification::send([$a, $b], new OrderShipped);")).toEqual(["OrderShipped"]);
+  });
+
+  test("reports the queue path unnamed rather than not at all when no class is written", () => {
+    // The capture is optional on every rule whose receiver already proves the call is a queue
+    // handoff, and engine/hazards.ts keeps a site whose group did not participate: the enclosure is
+    // what makes it a hazard and naming the job is the resolver's problem. Dropping the site would
+    // be the worse answer, because an absent row reads as a clean bill of health.
+    expect(jobsIn("Mail::to($user)->queue($mailable);")).toEqual([""]);
+    expect(jobsIn("Notification::send($users, $notification);")).toEqual([""]);
+
+    // Unnamed and not misnamed, which is the whole reason the capture demands `new`. `static` is
+    // not the notification, and a name that resolves to the wrong node is worse than no name:
+    // engine/build.ts resolveJob binds a written name to a real node id.
+    expect(jobsIn("Notification::send($users, static::build());")).toEqual([""]);
+  });
+
+  test("leaves the synchronous queue-path spellings alone, for the dispatchSync reason", () => {
+    // notifyNow and sendNow deliver in-process, inside the transaction, exactly as dispatchNow runs
+    // the job there. Same parenthesis defence: the method name has to end where the call opens.
+    expect(jobsIn("$user->notifyNow(new OrderShipped($order));")).toEqual([]);
+    expect(jobsIn("Notification::sendNow($users, new OrderShipped($order));")).toEqual([]);
+  });
+
+  test("refuses a queue() or notify() that is some other object's method", () => {
+    // `dispatch(` was a Laravel token. `queue(` and `notify(` are ordinary PHP method names, so
+    // these two rules cannot be spelled as bare method calls without reporting every spooler,
+    // observer and toast written inside a transaction. The defence is the receiver on one side and
+    // the `new` on the other: the queue rules are anchored to the Mail and Queue facades, and
+    // ->notify() is read only when a notification is constructed in the call.
+    expect(jobsIn('Cookie::queue(Cookie::make("name", "value"));')).toEqual([]);
+    expect(jobsIn("$this->spool->queue(Priority::HIGH, $order->label());")).toEqual([]);
+    expect(jobsIn("$printer->queue($document);")).toEqual([]);
+    expect(jobsIn('Redis::connection()->queue("default");')).toEqual([]);
+    expect(jobsIn("$observer->notify();")).toEqual([]);
+    expect(jobsIn('$this->notify("success", "Saved");')).toEqual([]);
+    expect(jobsIn("$observer->notify(Event::UPDATED, $payload);")).toEqual([]);
+    expect(jobsIn("$user->notify(Notification::class);")).toEqual([]);
+
+    // A known miss that the `new` buys, pinned so it stays a decision. A notification held in a
+    // variable is a real hazard this pack does not see, and reading it would mean matching
+    // `->notify(` on any receiver, which is what the rows above rule out.
+    expect(jobsIn("$user->notify($notification);")).toEqual([]);
+    expect(jobsIn("$user->notify(notification: new OrderShipped);")).toEqual([]);
+  });
+
+  test("does not read the two queue paths that only the dispatched class can decide", () => {
+    // Deliberately absent, and the reason is that neither call site says whether anything queues.
+    // `Mail::to($u)->send($mailable)` queues only when that mailable implements ShouldQueue, and
+    // `event(new X)` queues only when some listener of X does. Both facts live in another class,
+    // and a rule that read the call site alone would report every synchronous send and every
+    // synchronous event as this hazard. A fabricated finding is the one direction this tool may
+    // not take (engine/hazards.ts), so the miss is taken instead.
+    //
+    // Deciding them is not impossible, only bigger than a call-site rule: engine/build.ts resolves
+    // a dispatched name to a node before it reports, so a declaration-side marker could ask the
+    // dispatched class whether it queues. That would change what every existing rule reports, so
+    // it is its own change and not a line in this one.
+    expect(jobsIn("Mail::to($user)->send(new WelcomeMail($user));")).toEqual([]);
+    expect(jobsIn("event(new OrderPlaced($order));")).toEqual([]);
+    expect(jobsIn("broadcast(new OrderPlaced($order));")).toEqual([]);
+  });
+
   test("captures a qualified job as written, which is what resolves it without an index", () => {
     // `Hazard.job` is the job as written at the site, and engine/build.ts resolveJob takes a
     // qualified name as a node id outright and only falls back to the short-name index for a bare

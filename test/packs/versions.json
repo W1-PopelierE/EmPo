@@ -1,7 +1,7 @@
 {
   "php": {
-    "version": "1.6.0",
-    "hash": "c6f7d59f74672a1045800d4cf40c7bfd256a99734f958883c4c12da6ba35cb54"
+    "version": "1.7.0",
+    "hash": "faeeb34ccaffe00a41727078f926565b65b19005dc86bb55163af0f674bad56f"
   },
   "typescript": {
     "version": "1.8.0",
