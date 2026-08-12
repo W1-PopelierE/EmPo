@@ -1461,7 +1461,7 @@ Two, deliberately different, to keep the interface honest:
   whole of Laravel — `->afterCommit()` at the site and
   `public $afterCommit = true` on the job, and the one that declares a compound-extension comment
   syntax, `.blade.php` masking `{{-- --}}`.
-- **typescript** (`strategy: module-path`, three `import` rules, two `template` rules for the JSX and
+- **typescript** (`strategy: module-path`, four `import` rules, two `template` rules for the JSX and
   Vue component tag, scoped with `pathGlob` to `**/*.{tsx,jsx,vue}` and confined by `targetKinds` to
   landing on a `component` or a `screen`, three `declares` patterns so those two rules refuse a tag
   naming something the rendering file declares itself, a `packages` block naming `package.json`,
