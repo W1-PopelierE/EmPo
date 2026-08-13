@@ -891,3 +891,61 @@ describe("a symbol node id strategy", () => {
     ).not.toThrow();
   });
 });
+
+/**
+ * The extents a `symbol` pack reads out of one file. A file is partitioned by where its exports are
+ * declared, so what needs pinning is where one extent ends and the next begins, that a pack asking
+ * for no symbols gets none, and that one name never opens two extents.
+ */
+describe("symbol extents", () => {
+  const symbolPack: Pack = withNode(basePack, {
+    ...basePack.node,
+    id: {
+      strategy: "symbol",
+      symbolPattern:
+        "^export\\s+(?:default\\s+)?(?:async\\s+)?(?:function\\s*\\*?|class|const|let|var|type|interface|enum)\\s+([A-Za-z0-9_$]+)",
+      indexNames: ["index"],
+    },
+  });
+
+  const modulePathPack: Pack = withNode(basePack, {
+    ...basePack.node,
+    id: { strategy: "module-path" },
+  });
+
+  const source = [
+    'import { formatMoney } from "./money";', // 1
+    "", // 2
+    "export function total(items) {", // 3
+    "  return formatMoney(items);", // 4
+    "}", // 5
+    "", // 6
+    "export const LABEL = 'x';", // 7
+  ].join("\n");
+
+  test("partitions a file into one extent per exported symbol", () => {
+    const extracted = extract(symbolPack, file("apps/web/src/total.ts", source));
+
+    expect(extracted.symbols).toEqual([
+      { name: "total", id: "apps/web/src/total.ts#total", startLine: 3, endLine: 6 },
+      { name: "LABEL", id: "apps/web/src/total.ts#LABEL", startLine: 7, endLine: 7 },
+    ]);
+  });
+
+  test("yields no symbols for a pack that declares no symbolPattern", () => {
+    const extracted = extract(modulePathPack, file("apps/web/src/total.ts", source));
+
+    expect(extracted.symbols).toEqual([]);
+  });
+
+  test("keeps two exports of one name as one symbol", () => {
+    // A file cannot export one name twice; if a pattern matches it twice the first wins, so an id is
+    // never duplicated inside one file.
+    const extracted = extract(
+      symbolPack,
+      file("x.ts", "export const a = 1;\nexport const a = 2;\n"),
+    );
+
+    expect(extracted.symbols.map((symbol) => symbol.id)).toEqual(["x.ts#a"]);
+  });
+});

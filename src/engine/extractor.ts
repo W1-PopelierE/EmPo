@@ -41,6 +41,18 @@ export interface Capture {
   targetKinds?: string[];
 }
 
+/** One exported symbol of one file, and the lines a `symbol`-strategy pack reads as belonging to it. */
+export interface ExtractedSymbol {
+  /** The exported name, group 1 of the pack's symbolPattern. */
+  name: string;
+  /** `<repo-relative file>#<name>`. */
+  id: string;
+  /** 1-based, inclusive. */
+  startLine: number;
+  /** 1-based, inclusive. Runs to the last line of the file for the final symbol. */
+  endLine: number;
+}
+
 export interface ExtractedFile {
   file: string;
   root: string;
@@ -53,6 +65,13 @@ export interface ExtractedFile {
   produces: SymbolRef[];
   consumes: SymbolRef[];
   captures: Capture[];
+  /**
+   * The exports this file was partitioned into. Empty for every pack that declares no
+   * `symbolPattern`, which is every pack whose strategy is not `symbol`, and empty too for a file
+   * of such a pack in which the pattern found nothing: that file keeps the single node its path
+   * already named.
+   */
+  symbols: ExtractedSymbol[];
   /**
    * Names this file declares itself, from the pack's `declares` patterns. Empty for a pack that
    * declares none, which is every pack before the field existed.
@@ -109,6 +128,8 @@ export interface CompiledPack {
   pack: Pack;
   namespaceRegex?: RegExp;
   nameRegex?: RegExp;
+  /** Undefined for every pack declaring no `symbolPattern`, which is every non-`symbol` strategy. */
+  symbolRegex?: RegExp;
   kindRules: CompiledKindRule[];
   edgeRules: CompiledEdgeRule[];
   produces: CompiledSymbolRule[];
@@ -142,6 +163,9 @@ export function compilePack(pack: Pack): CompiledPack {
     pack,
     namespaceRegex: optionalRegex(pack.node.id.namespacePattern),
     nameRegex: optionalRegex(pack.node.id.namePattern),
+    // Global, unlike the two above: those find the one class a file declares, this one finds every
+    // export in it, and a pattern without `g` would find the first and stop.
+    symbolRegex: optionalRegex(pack.node.id.symbolPattern, "gm"),
     kindRules: pack.node.kindRules.map((rule) => ({
       kind: rule.kind,
       matchesPath: rule.pathGlob ? picomatch(rule.pathGlob) : undefined,
@@ -219,6 +243,7 @@ export function extractFile(compiled: CompiledPack, scanned: ScannedFile): Extra
   const codeOnly = wantsCodeOnly(compiled) ? maskComments(scanned.source, syntax, true) : source;
 
   const starts = lineStarts(source);
+  const symbols = extractSymbolExtents(compiled.symbolRegex, source, scanned.file, starts);
   const isTest = compiled.testPaths.some((matches) => matches(scanned.relPath));
 
   return {
@@ -233,6 +258,7 @@ export function extractFile(compiled: CompiledPack, scanned: ScannedFile): Extra
     produces: extractSymbols(compiled.produces, source, scanned.relPath, starts),
     consumes: extractSymbols(compiled.consumes, source, scanned.relPath, starts),
     captures: extractCaptures(compiled.edgeRules, source, codeOnly, scanned.relPath, starts),
+    symbols,
     // Read from the string-blanked view where the pack asked any rule for one, on the same argument
     // the tag rules make: a name inside a quoted example is prose about a declaration, not one.
     declares: declaredNames(compiled.declares, codeOnly),
@@ -284,12 +310,15 @@ function identify(
   // Repo-relative, not root-relative. Root-relative ids collide the moment a monorepo holds two
   // roots of one language (both have a src/index.ts), and an import that crosses a root
   // ("../../packages/ui/src/Button") only resolves against repo-relative ids. See docs/05.
-  if (strategy === "module-path") {
+  // `symbol` answers the same way, and it is not a placeholder: this is the file's own identity,
+  // which is what a file the pack's pattern found no export in keeps, and it is the path every
+  // symbol id of the file is built on. The per-symbol ids live in `symbols` rather than here,
+  // because a file yields a list of them and this function answers with one node.
+  if (strategy === "module-path" || strategy === "symbol") {
     return { id: scanned.file, name: baseName(scanned.relPath) };
   }
 
-  // No `symbol` arm: `compilePack` refused the pack before any file reached here, so the only
-  // strategy left is `fqcn`. A second guard would be a second answer to a question already settled.
+  // Only `fqcn` is left, the two arms above having taken the path-shaped strategies.
   const name = firstCapture(compiled.nameRegex, source);
   if (name !== null) {
     const namespace = firstCapture(compiled.namespaceRegex, source);
@@ -379,6 +408,51 @@ function declaredNames(patterns: RegExp[], source: string): string[] {
     }
   }
   return [...names].sort(compareStrings);
+}
+
+/**
+ * The symbols one file exports, each holding the lines from its own declaration to the line before
+ * the next one. A file is partitioned rather than parsed, which is the whole bargain of this engine:
+ * every rule in it is a regex over masked text, and a real scope tree would need a parser per
+ * language, which is the thing a language-agnostic pack contract exists to avoid.
+ *
+ * What makes the partition safe enough to answer with is the pack's pattern, not this function. A
+ * pattern anchored at `^` matches only a declaration written at column 0, and every language this
+ * strategy suits indents a nested declaration, so a function declared inside another function does
+ * not open an extent of its own. That is a real ceiling and it is stated in docs/04-language-packs.md
+ * rather than hidden here: text between two exports belongs to the earlier one, so a helper written
+ * at column 0 between two exports is read as part of the export above it.
+ *
+ * ponytail: line partition, no brace balancing. Upgrade to hazards.ts's enclosure walk if a pack
+ * appears whose declarations are not written at column 0.
+ */
+function extractSymbolExtents(
+  regex: RegExp | undefined,
+  source: string,
+  file: string,
+  starts: number[],
+): ExtractedSymbol[] {
+  if (regex === undefined) return [];
+
+  const found: { name: string; startLine: number }[] = [];
+  const seen = new Set<string>();
+  for (const match of matchAll(regex, source)) {
+    const name = match.groups[1];
+    // A pattern that matches and captures nothing is the pack's own bug and not a declaration, the
+    // same bargain `declaredNames` makes above. A name seen twice keeps its first extent, so one
+    // file can never carry one id twice.
+    if (name === undefined || name === "" || seen.has(name)) continue;
+    seen.add(name);
+    found.push({ name, startLine: lineAt(starts, match.index) });
+  }
+
+  const lastLine = starts.length;
+  return found.map((entry, position) => ({
+    name: entry.name,
+    id: `${file}#${entry.name}`,
+    startLine: entry.startLine,
+    endLine: (found[position + 1]?.startLine ?? lastLine + 1) - 1,
+  }));
 }
 
 function extractCaptures(
@@ -517,8 +591,8 @@ function compileSymbolRule(rule: SymbolRule): CompiledSymbolRule {
   };
 }
 
-function optionalRegex(pattern: string | undefined): RegExp | undefined {
-  return pattern === undefined ? undefined : new RegExp(pattern, "m");
+function optionalRegex(pattern: string | undefined, flags = "m"): RegExp | undefined {
+  return pattern === undefined ? undefined : new RegExp(pattern, flags);
 }
 
 function firstCapture(regex: RegExp | undefined, source: string): string | null {

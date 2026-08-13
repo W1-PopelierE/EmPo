@@ -31,8 +31,9 @@ function node(id: string, name: string, filePath: string, captures: Capture[] = 
     consumes: [],
     captures,
     declares: [],
-    // The resolver reads neither, but an ExtractedFile carries them, and a hand-made one that
+    // The resolver reads none of these, but an ExtractedFile carries them, and a hand-made one that
     // omitted them would stop compiling rather than quietly resolve differently.
+    symbols: [],
     dispatches: [],
     defersCommit: false,
   };
