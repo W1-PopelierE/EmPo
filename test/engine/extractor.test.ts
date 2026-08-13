@@ -940,6 +940,45 @@ describe("symbol extents", () => {
     expect(extracted.symbols).toEqual([]);
   });
 
+  /**
+   * A pack that spells strings, which is what the partition has to be read against: an export
+   * written inside a template literal is a string's contents and not a declaration of the file.
+   */
+  const quotingPack: Pack = {
+    ...withNode(basePack, {
+      ...basePack.node,
+      id: { strategy: "symbol", symbolPattern: SYMBOL_PATTERN, indexNames: ["index"] },
+    }),
+    comments: {
+      line: ["//"],
+      block: [["/*", "*/"]],
+      stringQuotes: ['"', "'", "`"],
+      stringEscape: "\\",
+      multilineQuotes: ["`"],
+    },
+    edges: { import: [{ pattern: "^import\\b.*$", resolve: "module-path" }] },
+  };
+
+  test("opens no extent for an export written inside a string literal", () => {
+    const source = [
+      'import { dep } from "./dep";', // 1
+      "", // 2
+      "export function render() {", // 3
+      "  return `", // 4
+      "export const snippet = 1;", // 5
+      "` + dep();", // 6
+      "}", // 7
+    ].join("\n");
+
+    const extracted = extract(quotingPack, file("src/render.ts", source));
+
+    expect(extracted.symbols).toEqual([
+      { name: "render", id: "src/render.ts#render", startLine: 3, endLine: 7 },
+    ]);
+    // The real consumer of ./dep, rather than a node that is a string's contents.
+    expect(extracted.captures[0]?.owners).toEqual(["src/render.ts#render"]);
+  });
+
   test("keeps two exports of one name as one symbol", () => {
     // A file cannot export one name twice; if a pattern matches it twice the first wins, so an id is
     // never duplicated inside one file.

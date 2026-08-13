@@ -250,7 +250,13 @@ export function extractFile(compiled: CompiledPack, scanned: ScannedFile): Extra
   const codeOnly = wantsCodeOnly(compiled) ? maskComments(scanned.source, syntax, true) : source;
 
   const starts = lineStarts(source);
-  const symbols = extractSymbolExtents(compiled.symbolRegex, source, scanned.file, starts);
+  // The string-blanked view, never the one that still holds string contents. A template literal in
+  // a code generator or a test fixture writes whole declarations inside quotes, and read from the
+  // other view each of those opens an extent and takes a node id in `graph.json` off text that
+  // declares nothing. The export whose body wrote the string then ends at the quote, so every import
+  // its real body needs is attributed to the string instead of to it, which is the under-attribution
+  // this partition exists to avoid.
+  const symbols = extractSymbolExtents(compiled.symbolRegex, codeOnly, scanned.file, starts);
   const isTest = compiled.testPaths.some((matches) => matches(scanned.relPath));
   // Built once, over the same masked view every rule below reads, so a name written inside a
   // commented-out line is not evidence that an export needs an import.
@@ -378,7 +384,12 @@ function wantsCodeOnly(compiled: CompiledPack): boolean {
     // `declares` reads this view unconditionally, so a pack declaring it and no `maskStrings` rule
     // would otherwise read the raw source: `"const Badge = ..."` inside a string would declare
     // `Badge` locally and suppress a real edge the tag rules resolve.
-    compiled.declares.length > 0
+    compiled.declares.length > 0 ||
+    // The symbol partition reads it unconditionally too, and it makes the same mistake one level
+    // worse: `declares` reading a string invents a local name that suppresses an edge, while the
+    // partition reading one invents a node id and writes it into `graph.json`, then hands that
+    // invented node the imports the export whose body held the string actually needed.
+    compiled.symbolRegex !== undefined
   );
 }
 
