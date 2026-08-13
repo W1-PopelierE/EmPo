@@ -153,6 +153,60 @@ function symbolGraph(): Graph {
 }
 
 /**
+ * The reach of a covered flow as a `symbol` pack records it: four test nodes living in two test
+ * files, because one of those files exports three test cases. The two counts are the same reach in
+ * two units, and the whole of what these specs are about is which unit a reader is told
+ * (docs/05-graph-model.md).
+ *
+ * Written by hand and stated rather than indexed, for the reason `coverageGraph` gives further
+ * down: no fixture in the tree holds a test file with several exported cases, and the two numbers
+ * only differ once one does. Under `fqcn` and `module-path` they are always equal and every printer
+ * looks correct whichever list it counted, which is exactly why the defect survived.
+ */
+const CHARGE = "src/checkout.ts#charge";
+const CHARGE_TEST = "src/checkout.test.ts";
+const REFUND_TEST = "src/refund.test.ts";
+
+function symbolCoverageGraph(): Graph {
+  return {
+    ...symbolGraph(),
+    nodes: [
+      {
+        id: CHARGE,
+        file: "src/checkout.ts",
+        root: ".",
+        lang: "typescript",
+        kind: "module",
+        name: "charge",
+        symbol: "charge",
+        produces: [],
+        consumes: [],
+        isTest: false,
+        assertsValue: false,
+      },
+    ],
+    edges: [],
+    fanin: {},
+    flows: { checkout: [CHARGE] },
+    coverage: {
+      checkout: {
+        flow: "checkout",
+        testNodes: [
+          `${CHARGE_TEST}#chargesTheCard`,
+          `${CHARGE_TEST}#refusesAnExpiredCard`,
+          `${CHARGE_TEST}#roundsToTheCent`,
+          `${REFUND_TEST}#refundsInFull`,
+        ],
+        testFiles: [CHARGE_TEST, REFUND_TEST],
+        reaches: true,
+        assertsValue: false,
+        blind: true,
+      },
+    },
+  };
+}
+
+/**
  * One component imported and rendered by one page, which is what every React and Vue file does and
  * what no php file did until the typescript pack declared a `template` family. Both edges are real
  * and the graph keeps both; what the two must not do is make one consumer read as two.
@@ -815,6 +869,23 @@ describe("queryCommand", () => {
     expect(printed).toMatch(/via \S+ \(\d+ of \d+ nodes? reached\)/);
   });
 
+  test("counts a flow's reach in test files, so one file of three cases is not three tests", () => {
+    // The count this tool exists not to inflate. Under a `symbol` pack a test file exporting three
+    // cases is three test nodes, and a line reading "4 tests reach it" over two files tells a
+    // reader their flow is twice as covered as it is, which is the one direction an honest coverage
+    // answer must never round in (docs/05-graph-model.md).
+    const dir = repoWithGraph(symbolCoverageGraph());
+
+    const printed = capture(() => queryCommand(dir, CHARGE));
+    const answer = JSON.parse(capture(() => queryCommand(dir, CHARGE, { json: true })));
+
+    expect(printed).toContain("2 tests reach it");
+    expect(printed).not.toContain("4 tests");
+    // The JSON `tests` field is the same claim in the machine form, read by the agent that never
+    // sees the printed line, so it has to be the same unit rather than the raw node count.
+    expect(answer.flows[0].tests).toBe(2);
+  });
+
   test("prints the floor-not-ceiling sentence on every answer, --gods included", () => {
     const printed = capture(() => queryCommand(repo, undefined, { gods: true }));
 
@@ -1184,6 +1255,24 @@ describe("queryCommand --blind", () => {
     expect(printed).toContain(
       "of 3 flows, 2 are reached by a test and 1 has one that asserts a value",
     );
+  });
+
+  test("names each reaching test file once, rather than once per exported case", () => {
+    // The same unit rule on the list rather than on the count. A "reached by" line per test node
+    // prints one file three times, and a reader scanning that block reads three reaching tests off
+    // three identical lines, which is the printed form of the same inflation.
+    const dir = repoWithGraph(symbolCoverageGraph());
+
+    const printed = capture(() => queryCommand(dir, undefined, { blind: true }));
+    const answer = JSON.parse(
+      capture(() => queryCommand(dir, undefined, { blind: true, json: true })),
+    );
+
+    expect(printed.split("\n").filter((line) => line.startsWith("    reached by "))).toEqual([
+      `    reached by ${CHARGE_TEST}`,
+      `    reached by ${REFUND_TEST}`,
+    ]);
+    expect(answer.rows[0].tests).toEqual([CHARGE_TEST, REFUND_TEST]);
   });
 
   test("says no flow is curated rather than letting an empty list read as good news", () => {

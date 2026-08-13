@@ -290,7 +290,13 @@ export function blastRadius(graph: Graph, set: GraphNode[]): BlastRadius {
         flow,
         blind: coverage?.blind ?? false,
         reaches: coverage?.reaches ?? false,
-        tests: coverage?.testNodes.length ?? 0,
+        // Files and not nodes, which is what "N tests" means everywhere EmPo says it
+        // (docs/05-graph-model.md). Under a `symbol` pack one test file exporting three cases is
+        // three test nodes, so counting nodes reports one reaching test file as three and inflates
+        // the apparent coverage of exactly the flows this tool exists to be honest about. The two
+        // lists are the same reach in two units and are equal under `fqcn` and `module-path`, which
+        // is why the wrong one read as correct for as long as no pack ided by symbol.
+        tests: coverage?.testFiles.length ?? 0,
         // How much of the flow this change can reach. One node of twelve and twelve of twelve are
         // both "reached", and a reader judging a blast radius needs to be able to tell them apart.
         reachedNodes: reached.length,
@@ -416,6 +422,12 @@ function gods(graph: Graph): GodsAnswer {
 
 export interface BlindAnswer {
   mode: "blind";
+  /**
+   * `tests` is the reaching test **files**, one entry per file, because a "reached by" line per
+   * test node prints the same file once per exported case and a reader counts the lines. It is the
+   * same unit the blast radius counts and the same one `empo review` prints, and the unit rule is
+   * `docs/05-graph-model.md`'s: every surface that says "N tests" means files.
+   */
   rows: { flow: string; tests: string[]; nodes: number }[];
   /**
    * The denominator `rows` is a numerator of. Always present, all three counts, even when every
@@ -449,7 +461,7 @@ function blindFlows(graph: Graph): BlindAnswer {
     .filter((entry) => entry.blind)
     .map((entry) => ({
       flow: entry.flow,
-      tests: entry.testNodes,
+      tests: entry.testFiles,
       nodes: graph.flows[entry.flow]?.length ?? 0,
     }));
 
