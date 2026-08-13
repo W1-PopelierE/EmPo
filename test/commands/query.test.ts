@@ -750,12 +750,24 @@ describe("blastRadius", () => {
     // listed against itself under a heading that says cross-language.
     const answer = blastRadius(graph, resolveNodes(graph, "apps/mobile/src/api/client.ts"));
 
-    expect(answer.bridges).toContainEqual({
-      from: "apps/mobile/src/api/client.ts",
-      to: "apps/api/routes/api.php",
-      symbol: "http-route",
-      evidence: expect.stringMatching(/^apps\/mobile\/src\/api\/client\.ts:\d+$/),
-    });
+    // Two rows and not one, which is what per-export ids bought here. The client calls two routes
+    // the api declares, from two different exports, and at file granularity both joins collapsed
+    // into one row naming the file: a reader was told the client reaches the route file and not
+    // which of its functions does. Each row still cites the line the call is written on.
+    expect(answer.bridges).toEqual([
+      {
+        from: "apps/mobile/src/api/client.ts#createOrder",
+        to: "apps/api/routes/api.php",
+        symbol: "http-route",
+        evidence: "apps/mobile/src/api/client.ts:2",
+      },
+      {
+        from: "apps/mobile/src/api/client.ts#fetchOrder",
+        to: "apps/api/routes/api.php",
+        symbol: "http-route",
+        evidence: "apps/mobile/src/api/client.ts:6",
+      },
+    ]);
   });
 
   test("counts every bridge edge in the graph, whether or not one is in this radius", () => {
@@ -764,7 +776,9 @@ describe("blastRadius", () => {
     const admin = blastRadius(graph, resolveNodes(graph, ADMIN_CONTROLLER));
 
     expect(admin.bridges).toEqual([]);
-    expect(admin.bridgeEdgesInGraph).toBe(2);
+    // Three: the inertia-page join, and one http-route join per export of the mobile client that
+    // calls a declared route. It was two while a file was a node and both calls shared one.
+    expect(admin.bridgeEdgesInGraph).toBe(3);
   });
 
   test("keeps the page's own coverage on its own side of the bridge", () => {
@@ -1045,8 +1059,10 @@ describe("queryCommand cross-language reach", () => {
       // The claim and its citation, separated by a word. Both halves of this line are paths, so
       // without one it reads as a list of two files and neither is labelled.
       `                consumes ${INERTIA_PAGE}  named at ${evidence("inertia-page")}`,
-      "  http-route    apps/mobile/src/api/client.ts",
+      "  http-route    apps/mobile/src/api/client.ts#createOrder",
       `                consumes apps/api/routes/api.php  named at ${evidence("http-route")}`,
+      "  http-route    apps/mobile/src/api/client.ts#fetchOrder",
+      "                consumes apps/api/routes/api.php  named at apps/mobile/src/api/client.ts:6",
     ]);
   });
 
@@ -1056,7 +1072,7 @@ describe("queryCommand cross-language reach", () => {
     const answer = JSON.parse(capture(() => queryCommand(repo, PAGE_CONTROLLER, { json: true })));
 
     expect(answer.bridges.length).toBeGreaterThan(0);
-    expect(answer.bridgeEdgesInGraph).toBe(2);
+    expect(answer.bridgeEdgesInGraph).toBe(3);
   });
 
   test("says which of the two silences an empty block is in", () => {
@@ -1066,7 +1082,7 @@ describe("queryCommand cross-language reach", () => {
     const near = block(capture(() => queryCommand(repo, ADMIN_CONTROLLER)));
 
     expect(near).toEqual([
-      "  none: of the 2 bridge edges in the graph, none is in this blast radius",
+      "  none: of the 3 bridge edges in the graph, none is in this blast radius",
     ]);
 
     const none = block(

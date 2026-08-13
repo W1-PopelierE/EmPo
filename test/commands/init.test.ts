@@ -975,10 +975,17 @@ describe("the map brief", () => {
     // the graph this brief reads holds the page's produced symbol and no edge into it. The fixture's
     // own committed config does declare the bridge, and there the controller that renders the page
     // references it, which is the difference between the two graphs and not a defect in either.
+    //
+    // The fifth row is what per-export ids added. `apps/mobile/src/api/client.ts` exports three
+    // functions and two of them are imported by the order screen; `fetchLoyaltyPoints` is imported
+    // by nothing, so it is an entrypoint and the file it lives in is not. That row is spelled with
+    // its export name for exactly that reason: printing the path would say the api client is
+    // referenced by nothing, which the two rows of fan-in above it flatly contradict.
     expect(section(printed, "entrypoints").map((row) => row.split(" ")[0])).toEqual([
       ROUTES_FILE,
       "apps/api/app/Http/Controllers/AdminController.php",
       "apps/api/app/Providers/AppServiceProvider.php",
+      "apps/mobile/src/api/client.ts#fetchLoyaltyPoints",
       PAGE_FILE,
     ]);
     expect(section(printed, "entrypoints")[0]).toBe(`${ROUTES_FILE} route-file arrived by user`);

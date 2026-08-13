@@ -160,8 +160,9 @@ describe("buildRoot", () => {
 /**
  * What a root looks like when its pack identifies a node by an export rather than by a file.
  *
- * Built from the shipped TypeScript pack with its `node.id` block replaced, because that pack does
- * not declare the strategy yet and the engine is what is under test here. The fixture is
+ * Built from the shipped TypeScript pack with its `node.id` block replaced by a pattern of this
+ * file's own, so the engine stays under test here rather than the shipped pack's pattern, which
+ * `test/packs/typescript.test.ts` gates. The fixture is
  * `fixtures/symbol-fixture`, four files written so each case is visible at once: a file exporting
  * two names, a file importing one of them by name, a file importing the same module for its side
  * effects, and a file exporting nothing.
@@ -229,11 +230,19 @@ describe("the symbol id strategy", () => {
   });
 
   test("leaves the symbol field off a file-level node", () => {
-    // A pack that never asked for per-export ids must not carry the key in its graph.json.
+    // A pack that never asked for per-export ids must not carry the key in its graph.json. The
+    // shipped TypeScript pack declares `symbol` now, so the control is that same pack with its
+    // `node.id` block put back the way it read before: this asserts the absence of the key is a
+    // property of the strategy and not of the language, which is what a reader of a `fqcn` or
+    // `module-path` graph is owed.
+    const pack = loadPack("typescript");
     const graph = buildRoot({
       repoRoot: symbolFixture,
       root: { path: ".", lang: "typescript" },
-      pack: loadPack("typescript"),
+      pack: {
+        ...pack,
+        node: { ...pack.node, id: { strategy: "module-path", indexNames: ["index"] } },
+      },
     });
 
     expect(graph.nodes.map((node) => node.id)).toContain("src/money.ts");

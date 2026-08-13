@@ -415,7 +415,11 @@ describe("the brief", () => {
 
     expect(row).toBeDefined();
     // Both ends and the separator word, the same three things the query pin holds.
-    expect(row ?? "").toContain("apps/mobile/src/api/client.ts consumes apps/api/routes/api.php");
+    // The near end is one export of the client now, not the file: two of its functions call a route
+    // the api declares and the row says which. `#` and not a bare path is the claim to notice.
+    expect(row ?? "").toContain(
+      "apps/mobile/src/api/client.ts#createOrder consumes apps/api/routes/api.php",
+    );
     expect(row ?? "").toMatch(/named at apps\/mobile\/src\/api\/client\.ts:\d+$/);
   });
 
