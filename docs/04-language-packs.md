@@ -7,7 +7,7 @@ into the engine.
 
 ## What a pack is
 
-A pack is **declarative and nothing else**: a JSON (or YAML) document of extraction rules, with no
+A pack is **declarative and nothing else**: a JSON document of extraction rules, with no
 JavaScript escape hatch (see [9](#9-there-is-no-escape-hatch)). The engine loads the pack, runs its
 rules over the pack's files, and emits normalized nodes and edges into the shared graph. The engine
 contains no language-specific logic. All of it lives in packs.

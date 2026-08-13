@@ -328,7 +328,9 @@ stops it. `empo review` asks `hasCapability(adapter, "post")` twice: once in the
 after the adapter is built, which is the earliest the question can be answered at all; and once in
 the gate, before the loop that posts one comment per surviving finding. The second is not a
 duplicate of the first. That loop is the only place a refusal could land halfway, with some findings
-up and the rest not, so asking before the first `comment` is what makes posting all-or-nothing.
+up and the rest not, so asking before the first `comment` is what keeps the refusal out of that
+state. It does not make posting atomic: an adapter that has `post` and fails partway through the
+loop leaves the earlier findings up, and nothing takes them down.
 
 The adapters' own throws stay, and they are what the interface header calls them: `approve` and
 `requestChanges` still have no caller anywhere in the shipped code, and all three mutating methods

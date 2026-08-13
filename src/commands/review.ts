@@ -1555,9 +1555,11 @@ function postFindings(repoRoot: string, pr: string | undefined, result: GateResu
   // called "local".
   const forge = createForge(config, repoRoot, { base: "HEAD", pr });
   // Asked again here, and not because phase 1 might have missed it. This loop posts one comment per
-  // finding, so an adapter that throws on the first call is a review half-posted: some findings up,
-  // the rest not, and no record of which. Refusing before the first `comment` is what makes posting
-  // all-or-nothing, and it is also the only guard on the path of a gate run on its own.
+  // finding and nothing undoes a posted one, so a refusal raised from inside it is a review
+  // half-posted: some findings up, the rest not, and no record of which. Asking before the first
+  // `comment` is what keeps this refusal out of that state, and it is also the only guard on the
+  // path of a gate run on its own. It does not make posting itself atomic: a `post`-capable adapter
+  // that fails on the fourth `comment` leaves the first three up, and that is not handled anywhere.
   //
   // No note. This forge was built with no payload, for the capability question alone, so its note
   // would describe a review reading the local diff, which is not the review being refused.

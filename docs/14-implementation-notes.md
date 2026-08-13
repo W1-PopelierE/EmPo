@@ -36,8 +36,9 @@ Three deviations from what this table first pinned, recorded here as the rule ab
 best-effort: a repository that is not a git checkout still indexes, it just cannot report staleness.
 
 No AST parser is a dependency. Extraction is regex-over-source per pack ([04-language-packs](04-language-packs.md)),
-which is the deliberate portability/blind-spot tradeoff. A pack that genuinely needs AST ships its
-own parser inside its optional `module`, it does not pull one into the engine.
+which is the deliberate portability/blind-spot tradeoff. A pack cannot buy its way out of that
+tradeoff on its own, either: a pack is rules and holds no code, so a rule family that genuinely
+needs AST is a change to the engine, argued on the engine's terms below.
 
 ### tree-sitter, evaluated and declined
 
@@ -97,7 +98,7 @@ empo  (this repo)
       pack.ts                # `empo pack test <name>`
     engine/
       config.ts              # load + zod-validate config.json
-      pack-loader.ts         # load a pack (json rules + optional module), validate
+      pack-loader.ts         # load a pack's json rules, validate
       scanner.ts             # walk roots, apply ignore, yield {root, file, source}
       mask.ts                # blank comments before any rule runs, keeping offsets and lines
       order.ts               # the one string comparator every sort in the engine uses
