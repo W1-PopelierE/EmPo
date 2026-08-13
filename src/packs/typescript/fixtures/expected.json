@@ -238,6 +238,18 @@
       "assertsValue": false
     },
     {
+      "id": "src/components/CartTray.vue",
+      "file": "src/components/CartTray.vue",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "CartTray",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
       "id": "src/components/OrderBadge.tsx#OrderBadge",
       "file": "src/components/OrderBadge.tsx",
       "root": ".",
@@ -262,6 +274,18 @@
       "isTest": false,
       "assertsValue": false,
       "symbol": "PriceRow"
+    },
+    {
+      "id": "src/components/cartFlag.vue",
+      "file": "src/components/cartFlag.vue",
+      "root": ".",
+      "lang": "typescript",
+      "kind": "component",
+      "name": "cartFlag",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
     },
     {
       "id": "src/components/index.ts",
@@ -931,6 +955,46 @@
       }
     },
     {
+      "from": "src/components/CartTray.vue",
+      "to": "src/components/cartFlag.vue",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/components/CartTray.vue",
+        "line": 2
+      }
+    },
+    {
+      "from": "src/components/CartTray.vue",
+      "to": "src/components/cartFlag.vue",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/components/CartTray.vue",
+        "line": 25
+      }
+    },
+    {
+      "from": "src/components/CartTray.vue",
+      "to": "src/shared/money.ts#Money",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/components/CartTray.vue",
+        "line": 3
+      }
+    },
+    {
+      "from": "src/components/CartTray.vue",
+      "to": "src/shared/money.ts#formatMoney",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/components/CartTray.vue",
+        "line": 3
+      }
+    },
+    {
       "from": "src/components/OrderBadge.tsx#OrderBadge",
       "to": "src/shared/money.ts#Money",
       "kind": "import",
@@ -968,6 +1032,26 @@
       "evidence": {
         "file": "src/components/PriceRow.tsx",
         "line": 1
+      }
+    },
+    {
+      "from": "src/components/cartFlag.vue",
+      "to": "src/shared/money.ts#Money",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/components/cartFlag.vue",
+        "line": 2
+      }
+    },
+    {
+      "from": "src/components/cartFlag.vue",
+      "to": "src/shared/money.ts#formatMoney",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "src/components/cartFlag.vue",
+        "line": 2
       }
     },
     {
@@ -1525,7 +1609,7 @@
   "names": [
     {
       "family": "template",
-      "resolved": 18,
+      "resolved": 19,
       "unknown": 1,
       "ambiguous": 3,
       "wrongKind": 1,

@@ -591,10 +591,20 @@ describe("typescript pack", () => {
     // `Badge` row above is: the tag rule adds reach where a name is unique and subtracts none where
     // it is not. What would be a regression, and is not what happened, is a file-level coupling
     // present at 1.10.0 and absent now; the snapshot holds none such.
+    //
+    // One of the 19 is there to hold the case fold under a gate, and only that. Adopting the
+    // `symbol` strategy left the fold exercised by nothing in this corpus: an export and the tag
+    // that renders it are spelled the same, so the exact map answered every reference before the
+    // fold was consulted, and gutting `foldedCandidates` to return an empty list left this snapshot
+    // byte-identical. The fold is still load-bearing in the product, because a single-file component
+    // exports nothing the symbolPattern matches and so is still named by its basename. CartTray.vue
+    // renders `<CartFlag />` against cartFlag.vue, whose node is named `cartFlag`, and the import in
+    // its script is the corroboration witness the fold demands. Gut the fold and this count drops to
+    // 18 and unknown rises to 2.
     expect(actual.names).toEqual([
       {
         family: "template",
-        resolved: 18,
+        resolved: 19,
         local: 1,
         vendor: 1,
         unknown: 1,
