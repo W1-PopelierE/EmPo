@@ -1,6 +1,6 @@
 {
   "name": "php",
-  "version": "1.8.0",
+  "version": "1.9.0",
 
   "match": {
     "extensions": [".php"],
@@ -158,7 +158,6 @@
 
   "tests": {
     "paths": ["tests/"],
-    "importsRule": "import",
     "assertionTerms": [
       "assertSame",
       "assertNotSame(",

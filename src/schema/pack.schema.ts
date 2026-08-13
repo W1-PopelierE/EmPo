@@ -528,7 +528,6 @@ export const packSchema = z
     tests: z
       .object({
         paths: z.array(z.string()).default([]),
-        importsRule: z.string().default("import"),
         assertionTerms: z.array(z.string()).default([]),
         /**
          * Occurrences removed from the source before the terms are matched, so a term whose value
@@ -540,7 +539,7 @@ export const packSchema = z
          */
         assertionExcludes: z.array(z.string()).default([]),
       })
-      .default({ paths: [], importsRule: "import", assertionTerms: [], assertionExcludes: [] }),
+      .default({ paths: [], assertionTerms: [], assertionExcludes: [] }),
     /**
      * Optional, and optional is the point: a pack that declares nothing here says this language has
      * no hazard worth looking for, which is a different answer from finding none. `empo query
@@ -623,7 +622,6 @@ export const packSchema = z
      * config rather than being resolved live.
      */
     aliasSources: z.array(aliasSourceSchema).optional(),
-    module: z.string().optional(),
   })
   .superRefine((pack, ctx) => {
     // `maskStrings` is answered by the masker, and the masker finds a string literal only through

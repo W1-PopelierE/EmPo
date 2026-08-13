@@ -24,7 +24,7 @@ const basePack: Pack = {
   edges: {},
   produces: [],
   consumes: [],
-  tests: { paths: [], importsRule: "import", assertionTerms: [], assertionExcludes: [] },
+  tests: { paths: [], assertionTerms: [], assertionExcludes: [] },
 };
 
 /** The same pack, but keeping files that declare no class, the way php keeps a route file. */
@@ -606,7 +606,6 @@ describe("value assertions", () => {
     ...basePack,
     tests: {
       paths: ["tests/"],
-      importsRule: "import",
       assertionTerms: ["assertTrue(", "assertSame(", "class_exists("],
       assertionExcludes: ["assertTrue(method_exists(", "assertTrue(class_exists("],
     },

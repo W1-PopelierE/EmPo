@@ -31,12 +31,13 @@ import { installedPacks, loadPack } from "../../src/engine/pack-loader";
  *
  * **`version` is the only field excluded**, because it is the claim under test rather than part of
  * the behaviour it claims about. Nothing else in the schema is decoration. `name` cannot move on its
- * own, since `loadPack` refuses a pack whose name disagrees with its directory. `module` is inert
- * today, declared in the pack contract and loaded by no engine code, and it is hashed anyway: an
- * exclusion written now would put the day somebody wires it up straight back into "whoever
- * remembers", which is the failure being closed here. The whole design errs toward one bump nobody
- * needed rather than one stale answer nobody hears about, the same direction `commitsAhead` picks
- * when it returns null rather than zero.
+ * own, since `loadPack` refuses a pack whose name disagrees with its directory. Every other field
+ * the schema declares is read by code somewhere, `aliasSources` by `empo init` rather than by the
+ * graph build, and no second exclusion is to be added for a field that
+ * looks inert: an exclusion written for a field somebody later wires up puts that day straight back
+ * into "whoever remembers", which is the failure being closed here. The design errs toward one bump
+ * nobody needed rather than one stale answer nobody hears about, the same direction `commitsAhead`
+ * picks when it returns null rather than zero.
  *
  * The canonical form sorts object keys with `compareStrings`, never `localeCompare`, which is banned
  * here because it disagrees with itself across ICU builds and this hash is checked in. Arrays keep

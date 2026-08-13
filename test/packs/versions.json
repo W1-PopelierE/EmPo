@@ -1,10 +1,10 @@
 {
   "php": {
-    "version": "1.8.0",
-    "hash": "fe115e4faf5187bf79d4e80a22848b4ba6e4152bef93716d5494be38597ec833"
+    "version": "1.9.0",
+    "hash": "16d55a8308976d79ad76174b7b272cafc1ed1a01f983e002fa9252baaad1aa31"
   },
   "typescript": {
-    "version": "1.9.0",
-    "hash": "d0e4afd0086d627d688ecf15d97f920b22369b5d3b95b56bdf03764ddb9e1f9e"
+    "version": "1.10.0",
+    "hash": "300f405797a4af4b1c9d131f3197be29d2c91c35c53515c903d904506d96f0b0"
   }
 }

@@ -7,10 +7,10 @@ into the engine.
 
 ## What a pack is
 
-A pack is **declarative first**: a JSON (or YAML) document of extraction rules, plus an optional
-JavaScript escape hatch for the few things regex cannot express. The engine loads the pack, runs
-its rules over the pack's files, and emits normalized nodes and edges into the shared graph. The
-engine contains no language-specific logic. All of it lives in packs.
+A pack is **declarative and nothing else**: a JSON (or YAML) document of extraction rules, with no
+JavaScript escape hatch (see [9](#9-there-is-no-escape-hatch)). The engine loads the pack, runs its
+rules over the pack's files, and emits normalized nodes and edges into the shared graph. The engine
+contains no language-specific logic. All of it lives in packs.
 
 Extraction is **regex rules over source** and not an AST parse: imports, inline FQCNs, class-name
 strings, template references, observer registrations. That approach generalizes cleanly across
@@ -127,7 +127,6 @@ exactly the honesty this tradeoff requires.
   // 6. how tests look, so the engine can compute coverage
   "tests": {
     "paths": ["tests/"],
-    "importsRule": "import",                 // declared and validated; nothing reads it (see 6)
     "assertionTerms": ["assertEquals", "assertSame", "->toBe(", "assertTrue(", "assertDatabaseHas("],
     "assertionExcludes": ["assertTrue(method_exists("]  // the liveness spelling of a term above
   },
@@ -155,10 +154,7 @@ exactly the honesty this tradeoff requires.
       "paths": "compilerOptions.paths",      // dotted field path to the map
       "base": "compilerOptions.baseUrl",     // dotted field path; what targets are relative to
       "extends": "extends" }                 // dotted field path; a relative spelling is followed
-  ],
-
-  // 9. optional escape hatch for what rules cannot express
-  "module": "./packs/php/hard-cases.js"      // refine(node, edges, source); nothing loads it (see 9)
+  ]
 }
 ```
 
@@ -1044,15 +1040,11 @@ test that asserts a value from a test that only asserts HTTP 200. The spine laye
 ([08-spines](08-spines.md)) refines this per spine (a money spine wants assertions on amounts in
 cents), but the pack sets the language-wide default.
 
-`importsRule` names an edge family and is read by nothing. Both shipped packs set it to `import`,
-the schema defaults it to `import` for a pack that omits it, and no engine code looks at the value.
-Coverage walks out of a test node along every edge that is not a cross-root bridge
-(`engine/coverage.ts`), so a test reaches code through `fqcn`, `string` and `hook` edges exactly as
-it does through `import` ones. That is both the wider behaviour and the more useful one, because a
-test naming a class in a string couples to it as hard as one importing it, so the field describes a
-narrowing the engine deliberately does not do. It is written down here rather than quietly left in
-the packs, because a reader who takes the field at its word would conclude that a test's reach stops
-at one family and would misread every coverage answer that came through another.
+**A test reaches code along every edge family, not just `import`.** Coverage walks out of a test
+node along every edge that is not a cross-root bridge (`engine/coverage.ts`), so `fqcn`, `string`
+and `hook` edges carry a test to its subject exactly as `import` edges do. That is deliberate and it
+is the more useful reading: a test naming a class in a string couples to it as hard as one
+importing it, and a pack cannot narrow coverage to one family.
 
 A `tests.paths` entry is a directory prefix (`tests/`) or a glob (`**/*.test.ts`), decided by whether
 it holds a glob character. Both conventions are real and a pack should not have to pick: PHP puts its
@@ -1411,25 +1403,27 @@ which is the argument the php pack's `arrivedBy` edit used for staying at 1.5.0.
 over-demands on purpose: the maintained list of which fields stale a graph is exactly the "whoever
 remembers" the pin exists to end, so one bump nobody needed is the direction to fail in.
 
-### 9. `module`: the escape hatch
+### 9. There is no escape hatch
 
-**Declared, not built.** Regex handles the overwhelming majority. For the residue (a framework macro
-that registers routes in a loop, a re-export barrel file that needs resolving) a pack was to ship a
-small JS module exporting `refine(node, edges, source)`, running after the rules and free to add or
-correct edges. The declaration half of that exists: `module` is an optional string on the pack
-schema and `PackModule` is an interface in `schema/types.ts`. The loading half does not. No engine
-code imports, requires or calls whatever path a pack puts there, so a pack naming a module is
-validated, accepted, and has its escape hatch dropped without a word, which is precisely the
-silent-failure shape this document argues against everywhere else. Neither shipped pack names one,
-so nothing is broken today, and this is unscheduled work rather than a regression: a pack `module`
-is where AST-level precision would go if a repository ever genuinely needed it, and nothing
-schedules the loader. Whoever builds it should make an unloadable `module` fail
-loudly, the way a pack naming a `resolve` strategy the engine does not implement already does.
+**A pack is rules and nothing else.** An early sketch gave a pack an optional `module`: a path to a
+small JS file exporting `refine(node, edges, source)`, run after the rules and free to correct what
+regex could not express. The declaration shipped and the loader never did, so for as long as the
+field existed the schema accepted a path to a file no engine code ever opened, and a pack asking for
+an escape hatch had it dropped without a word — the silent-failure shape this document argues
+against in every other section. Neither shipped pack ever named one, so the field was removed rather
+than repaired: a contract that advertises a hatch is worse than one that never offered it.
 
-The design constraint stands for whoever gets there. Keep it small; every line in such a module is
-language-specific code the declarative rules were meant to avoid. If a pack's `module` grows large,
-the rule vocabulary is missing something and the engine should grow a new `resolve` strategy
-instead.
+Removing the declaration does not make a pack that still names `module` fail. Unknown keys are
+stripped at load like any other the schema does not name, which is the schema's general rule and is
+written down where that rule lives (`assertionExcludes` in `schema/pack.schema.ts`, and the header
+of `test/packs/versions.test.ts`). What changed is that the contract no longer promises something
+the engine cannot deliver, which is the half of the silence a deletion can actually fix.
+
+The design constraint that closed it stands, and is the reason not to reopen it. Every line in such
+a module would be language-specific code the declarative rules exist to avoid, and a pack growing
+one is the signal that the rule vocabulary is short a word. When a pack needs something the rules
+cannot express, the engine grows a new `resolve` strategy — engine-side, spelled the same way for
+every language, and rejected at load when a pack names one that does not exist.
 
 ## How patterns are compiled and anchored
 

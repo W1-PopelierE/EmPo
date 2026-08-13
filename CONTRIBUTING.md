@@ -236,8 +236,9 @@ test through the real `loadPack` and assert the field survives.
 
 `aliasSources` is the one pack block **`empo index` never reads**: it says where this language's
 toolchain keeps its import aliases, and only `empo init` opens it, to seed config `roots[].aliases`.
-The `module` escape hatch is declared in the pack contract and **no engine code loads it**; a pack
-naming one is accepted with its hatch silently dropped. A pack version and the CLI version are
+A pack ships **no JavaScript at all** and there is no escape hatch: what the declarative rules
+cannot express is a missing `resolve` strategy in the engine, not language-specific code in a pack
+([04-language-packs](docs/04-language-packs.md) section 9). A pack version and the CLI version are
 unrelated numbers, and pack bumping is pinned by `test/packs/versions.test.ts`.
 
 ## Testing discipline

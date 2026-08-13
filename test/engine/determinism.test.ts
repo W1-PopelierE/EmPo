@@ -72,7 +72,7 @@ const hazardPack: Pack = {
   edges: {},
   produces: [],
   consumes: [],
-  tests: { paths: [], importsRule: "", assertionTerms: [], assertionExcludes: [] },
+  tests: { paths: [], assertionTerms: [], assertionExcludes: [] },
   hazards: {
     transactions: [{ pattern: "^begin$", extent: "span", endPattern: "^commit$" }],
     dispatches: [{ pattern: "send\\(([A-Za-z]+)\\)", job: 1 }],
