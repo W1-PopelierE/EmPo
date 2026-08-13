@@ -19,6 +19,13 @@ export interface SymbolRef {
   symbol: string; // "http-route", "event", ...
   key: string; // normalized key, e.g. "POST v1/orders"
   line: number;
+  /**
+   * The nodes this belongs to, for a pack whose file yields more than one. Absent where the file
+   * yields a single node, which is every file of a `fqcn` or `module-path` pack: "all of them" and
+   * "the only one" are the same answer there, and writing it out would put a node id in `graph.json`
+   * for every ref of every pack that never asked for one.
+   */
+  owners?: string[];
 }
 
 export interface GraphNode {

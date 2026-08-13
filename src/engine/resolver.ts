@@ -1,7 +1,7 @@
 import { posix } from "node:path";
 import { configError } from "../errors";
 import type { GraphEdge, NameOutcome, NameVerdict, PackViews } from "../schema/types";
-import type { Capture, ExtractedFile } from "./extractor";
+import { type Capture, type ExtractedFile, isSideEffectImport } from "./extractor";
 import { compareStrings } from "./order";
 import { packageOf } from "./packages";
 
@@ -245,10 +245,9 @@ export function resolveEdges(
     // shape read here carries a clause or call parens beside the path, so the name is matched in
     // text a file wrote about a symbol; `import "@mui/material/Button/Button.css"` writes `Button`
     // twice and means neither of them as a binding. Read whole it refuses the local `Button.tsx`
-    // the file renders, which is the one thing this check must never do. A dynamic
-    // `import("@calcom/…/AlbyPriceComponent")` is deliberately not this shape: it holds the parens,
-    // and the name in its specifier is the file the line means.
-    if (/^[ \t]*import\s*(['"`])[^'"`]*\1[ \t]*;?[ \t]*$/.test(statement)) return false;
+    // the file renders, which is the one thing this check must never do. The predicate lives in
+    // engine/extractor.ts because attribution asks the same question of the same text.
+    if (isSideEffectImport(statement)) return false;
 
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     if (!new RegExp(`(?:^|[^A-Za-z0-9_$])${escaped}(?:[^A-Za-z0-9_$]|$)`).test(statement)) {

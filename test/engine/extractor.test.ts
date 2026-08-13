@@ -897,13 +897,15 @@ describe("a symbol node id strategy", () => {
  * declared, so what needs pinning is where one extent ends and the next begins, that a pack asking
  * for no symbols gets none, and that one name never opens two extents.
  */
+const SYMBOL_PATTERN =
+  "^export\\s+(?:default\\s+)?(?:async\\s+)?(?:function\\s*\\*?|class|const|let|var|type|interface|enum)\\s+([A-Za-z0-9_$]+)";
+
 describe("symbol extents", () => {
   const symbolPack: Pack = withNode(basePack, {
     ...basePack.node,
     id: {
       strategy: "symbol",
-      symbolPattern:
-        "^export\\s+(?:default\\s+)?(?:async\\s+)?(?:function\\s*\\*?|class|const|let|var|type|interface|enum)\\s+([A-Za-z0-9_$]+)",
+      symbolPattern: SYMBOL_PATTERN,
       indexNames: ["index"],
     },
   });
@@ -947,5 +949,83 @@ describe("symbol extents", () => {
     );
 
     expect(extracted.symbols.map((symbol) => symbol.id)).toEqual(["x.ts#a"]);
+  });
+});
+
+/**
+ * Which symbols a capture belongs to. An import sits above every extent, so the file's own text is
+ * the only evidence of which export needed it, and a capture inside an extent belongs to that export
+ * and to nothing else. What needs pinning is both halves of that, and that a pack yielding one node
+ * per file writes no owners at all rather than an owners list naming its single node.
+ */
+describe("capture owners", () => {
+  const symbolNode: Pack["node"] = {
+    ...basePack.node,
+    id: { strategy: "symbol", symbolPattern: SYMBOL_PATTERN, indexNames: ["index"] },
+  };
+
+  const ownerPack: Pack = {
+    ...withNode(basePack, symbolNode),
+    edges: { import: [{ pattern: "^import\\b.*$", resolve: "module-path" }] },
+    consumes: [{ symbol: "http-route", pattern: 'fetch\\("([^"]+)"\\)', map: { path: 1 } }],
+  };
+
+  const filePack: Pack = {
+    ...ownerPack,
+    node: { ...basePack.node, id: { strategy: "module-path" } },
+  };
+
+  test("gives an import to the exports that reference what it binds", () => {
+    const source = [
+      'import { formatMoney } from "./money";',
+      'import { parseMoney } from "./parse";',
+      "",
+      "export function total(items) {",
+      "  return formatMoney(items);",
+      "}",
+      "",
+      "export const LABEL = 'x';",
+    ].join("\n");
+
+    const extracted = extract(ownerPack, file("src/total.ts", source));
+    const byLine = new Map(extracted.captures.map((capture) => [capture.line, capture.owners]));
+
+    expect(byLine.get(1)).toEqual(["src/total.ts#total"]);
+    // Nothing references parseMoney, so no export can be said to be the one that needs it.
+    expect(byLine.get(2)).toEqual(["src/total.ts#total", "src/total.ts#LABEL"]);
+  });
+
+  test("gives a capture inside an extent to that symbol alone", () => {
+    const source = [
+      "export function a() {",
+      '  return fetch("/api/one");',
+      "}",
+      "export function b() {}",
+    ].join("\n");
+
+    const extracted = extract(ownerPack, file("src/x.ts", source));
+
+    expect(extracted.consumes[0]?.owners).toEqual(["src/x.ts#a"]);
+  });
+
+  test("gives a side-effect import to every export, because it binds no name to argue from", () => {
+    const source = ['import "./polyfill";', "export const a = 1;", "export const b = 2;"].join(
+      "\n",
+    );
+
+    const extracted = extract(ownerPack, file("src/x.ts", source));
+
+    expect(extracted.captures[0]?.owners).toEqual(["src/x.ts#a", "src/x.ts#b"]);
+  });
+
+  test("leaves owners absent, not empty, for a pack whose file yields one node", () => {
+    const extracted = extract(
+      filePack,
+      file("src/x.ts", 'import { y } from "./y";\nexport const a = fetch("/api/one");'),
+    );
+
+    expect(extracted.captures[0]?.owners).toBeUndefined();
+    expect(extracted.consumes[0]?.owners).toBeUndefined();
+    expect("owners" in (extracted.captures[0] ?? {})).toBe(false);
   });
 });

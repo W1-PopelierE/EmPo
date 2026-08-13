@@ -39,6 +39,13 @@ export interface Capture {
   line: number;
   /** The rule's `targetKinds`, carried to the resolver, which is where a node's kind is known. */
   targetKinds?: string[];
+  /**
+   * The nodes this belongs to, for a pack whose file yields more than one. Absent where the file
+   * yields a single node, which is every file of a `fqcn` or `module-path` pack: "all of them" and
+   * "the only one" are the same answer there, and writing it out would put a node id in `graph.json`
+   * for every capture of every pack that never asked for one.
+   */
+  owners?: string[];
 }
 
 /** One exported symbol of one file, and the lines a `symbol`-strategy pack reads as belonging to it. */
@@ -245,6 +252,9 @@ export function extractFile(compiled: CompiledPack, scanned: ScannedFile): Extra
   const starts = lineStarts(source);
   const symbols = extractSymbolExtents(compiled.symbolRegex, source, scanned.file, starts);
   const isTest = compiled.testPaths.some((matches) => matches(scanned.relPath));
+  // Built once, over the same masked view every rule below reads, so a name written inside a
+  // commented-out line is not evidence that an export needs an import.
+  const ownersAt = ownerAttributor(symbols, source);
 
   return {
     file: scanned.file,
@@ -255,9 +265,16 @@ export function extractFile(compiled: CompiledPack, scanned: ScannedFile): Extra
     kind: kindOf(compiled, source, codeOnly, scanned.relPath),
     isTest,
     assertsValue: isTest && assertsValue(compiled.pack, source),
-    produces: extractSymbols(compiled.produces, source, scanned.relPath, starts),
-    consumes: extractSymbols(compiled.consumes, source, scanned.relPath, starts),
-    captures: extractCaptures(compiled.edgeRules, source, codeOnly, scanned.relPath, starts),
+    produces: extractSymbols(compiled.produces, source, scanned.relPath, starts, ownersAt),
+    consumes: extractSymbols(compiled.consumes, source, scanned.relPath, starts, ownersAt),
+    captures: extractCaptures(
+      compiled.edgeRules,
+      source,
+      codeOnly,
+      scanned.relPath,
+      starts,
+      ownersAt,
+    ),
     symbols,
     // Read from the string-blanked view where the pack asked any rule for one, on the same argument
     // the tag rules make: a name inside a quoted example is prose about a declaration, not one.
@@ -455,12 +472,131 @@ function extractSymbolExtents(
   }));
 }
 
+/**
+ * Whether a statement is a side-effect import, which binds no name at all.
+ *
+ * Its specifier is the whole statement, so anything read out of it is whatever the path happens to
+ * spell: `import "@mui/material/Button/Button.css"` writes `Button` twice and means neither of them
+ * as a binding. Both callers need exactly this and would otherwise each carry the regex and the
+ * argument for it: extraction asks which exports a statement can be attributed to, and the
+ * resolver's fold asks whether a statement corroborates one name (engine/resolver.ts). A dynamic
+ * `import("@calcom/…/AlbyPriceComponent")` is deliberately not this shape, because it holds the
+ * parens and the name in its specifier is the file the line means.
+ */
+export function isSideEffectImport(statement: string): boolean {
+  return /^[ \t]*import\s*(['"`])[^'"`]*\1[ \t]*;?[ \t]*$/.test(statement);
+}
+
+/**
+ * The names an import statement binds, read out of the clause and never out of the specifier. A
+ * renamed binding binds the new name and not the old one, because the new name is what the rest of
+ * the file writes.
+ *
+ * It is looser than it looks and can afford to be. Both readers intersect what it returns against
+ * something the repository already knows to be real, the exports the target file declares or the
+ * names the symbols of this file reference, so a word the clause happens to hold that binds nothing
+ * matches nothing and drops out. What it must never do is miss a real binding, which is why the
+ * keyword list subtracts rather than the pattern trying to describe every import shape a language
+ * writes.
+ */
+export function boundNames(statement: string): string[] {
+  if (isSideEffectImport(statement)) return [];
+  const clause = statement.slice(0, statement.search(/\bfrom\b|$/));
+  const names = new Set<string>();
+  for (const match of clause.matchAll(
+    /([A-Za-z_$][A-Za-z0-9_$]*)(?:\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*))?/g,
+  )) {
+    const bound = match[2] ?? match[1];
+    if (bound !== undefined && !RESERVED_CLAUSE_WORDS.has(bound)) names.add(bound);
+  }
+  return [...names].sort(compareStrings);
+}
+
+const RESERVED_CLAUSE_WORDS = new Set([
+  "import",
+  "export",
+  "type",
+  "as",
+  "from",
+  "require",
+  "const",
+]);
+
+/**
+ * Which symbols own a line, for one file, or undefined throughout where the file yields a single
+ * node and the question does not arise.
+ *
+ * The enclosing extent answers it wherever there is one. An import has none: imports are written
+ * above every declaration in the file, so no extent encloses them, and attributing them to the first
+ * symbol or to all of them are both wrong in the direction that matters. The first invents a
+ * dependency, and all of them is the file-level answer this strategy exists to stop giving. A
+ * reference to a name the statement binds, inside an extent, is the evidence that that symbol needs
+ * what the line brought in.
+ *
+ * Falling back to every symbol when nothing references the binding is deliberate. A side-effect
+ * import binds no name at all, and a binding used by nothing is either dead or reached in a way this
+ * engine cannot see, a re-export or a type position stripped before it is read. Both are cases where
+ * the honest answer is that any export of the file may depend on it, and the closing line of every
+ * report already says the flow list is a floor.
+ *
+ * Owners come back in the order the file declares its exports, not sorted. That is deterministic,
+ * which is what `graph.json` needs, and it is the order a reader of the file already has.
+ *
+ * The extent texts are cut once per file rather than once per question, because the alternative is a
+ * split of the whole source per capture per symbol per bound name, which is quadratic in the size of
+ * the file for no answer that changes.
+ */
+function ownerAttributor(
+  symbols: ExtractedSymbol[],
+  source: string,
+): (line: number, statement: string) => string[] | undefined {
+  if (symbols.length === 0) return () => undefined;
+
+  const lines = source.split("\n");
+  const extentText = new Map(
+    symbols.map((symbol) => [
+      symbol.id,
+      lines.slice(symbol.startLine - 1, symbol.endLine).join("\n"),
+    ]),
+  );
+  const everyId = symbols.map((symbol) => symbol.id);
+
+  return (line, statement) => {
+    const enclosing = symbols.find((symbol) => line >= symbol.startLine && line <= symbol.endLine);
+    if (enclosing !== undefined) return [enclosing.id];
+
+    const bound = boundNames(statement);
+    if (bound.length === 0) return everyId;
+
+    const referencing = symbols
+      .filter((symbol) =>
+        bound.some((name) => referencedWithin(extentText.get(symbol.id) ?? "", name)),
+      )
+      .map((symbol) => symbol.id);
+    return referencing.length > 0 ? referencing : everyId;
+  };
+}
+
+/**
+ * Does this text write `name` as an identifier of its own? The leading class excludes a dot as well,
+ * so `order.total` does not count as a reference to an imported `total`: a property of something
+ * else is not the binding, and reading it as one would hand an import to an export that never
+ * touched it. The name is escaped before it is spliced in, because a strategy that one day reads a
+ * name holding a regex metacharacter would otherwise turn a pack's capture into a pattern this
+ * engine compiles.
+ */
+function referencedWithin(text: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|[^A-Za-z0-9_$.])${escaped}(?:[^A-Za-z0-9_$]|$)`).test(text);
+}
+
 function extractCaptures(
   rules: CompiledEdgeRule[],
   source: string,
   codeOnly: string,
   relPath: string,
   starts: number[],
+  ownersAt: (line: number, statement: string) => string[] | undefined,
 ): Capture[] {
   const captures: Capture[] = [];
   for (const rule of rules) {
@@ -471,6 +607,10 @@ function extractCaptures(
     // holds both answers: a JSX tag is code and can only be code, while php's `@livewire('cart')`
     // names its component inside the quotes the other view blanks.
     for (const match of matchAll(rule.regex, rule.maskStrings ? codeOnly : source)) {
+      const line = lineAt(starts, match.index);
+      // The statement as written, which is what attribution reads: the clause that binds the names
+      // and the specifier are both in it, unnormalized.
+      const owners = ownersAt(line, match.groups[0] ?? "");
       captures.push({
         family: rule.family,
         resolve: rule.resolve,
@@ -480,7 +620,10 @@ function extractCaptures(
         groups: match.groups.map((group, position) =>
           position === 0 || group === undefined ? group : applyNormalizers(group, rule.normalize),
         ),
-        line: lineAt(starts, match.index),
+        line,
+        // Spread rather than assigned, so a pack that yields one node per file writes no key at all
+        // instead of a key holding undefined.
+        ...(owners === undefined ? {} : { owners }),
       });
     }
   }
@@ -492,6 +635,7 @@ function extractSymbols(
   source: string,
   relPath: string,
   starts: number[],
+  ownersAt: (line: number, statement: string) => string[] | undefined,
 ): SymbolRef[] {
   const refs: SymbolRef[] = [];
   for (const compiled of rules) {
@@ -499,12 +643,20 @@ function extractSymbols(
       // The identity is the whole file, so the anchor is line 1. A produced symbol's line is never
       // surfaced (a bridge edge's evidence is the consumer's call site, engine/bridger.ts), so this
       // only has to be a stable, in-range number.
+      //
+      // Attributed from no line and no statement, which is how it reaches every symbol of the file:
+      // a rule matching the path says the whole file is the thing, an Inertia page's identity being
+      // the file it lives in, and there is no clause here to argue one export over another. Asking
+      // from the anchor line instead would hand the page to whichever export happens to be declared
+      // there, and handing over the matched path text would hand it to whichever export a directory
+      // name happens to spell.
       const match = compiled.regex.exec(relPath);
-      if (match !== null) refs.push(refFrom(compiled, [...match], 1));
+      if (match !== null) refs.push(refFrom(compiled, [...match], 1, ownersAt(0, "")));
       continue;
     }
     for (const match of matchAll(compiled.regex, source)) {
-      refs.push(refFrom(compiled, match.groups, lineAt(starts, match.index)));
+      const line = lineAt(starts, match.index);
+      refs.push(refFrom(compiled, match.groups, line, ownersAt(line, match.groups[0] ?? "")));
     }
   }
   return refs.sort(
@@ -516,6 +668,7 @@ function refFrom(
   compiled: CompiledSymbolRule,
   groups: (string | undefined)[],
   line: number,
+  owners: string[] | undefined,
 ): SymbolRef {
   const parts: Record<string, string> = {};
   for (const part of compiled.parts) {
@@ -526,6 +679,9 @@ function refFrom(
     symbol: compiled.rule.symbol,
     key: symbolKey(compiled.rule, compiled.parts, parts),
     line,
+    // Spread rather than assigned, for the same reason a capture's is: a pack yielding one node per
+    // file writes no key at all rather than a key holding undefined.
+    ...(owners === undefined ? {} : { owners }),
   };
 }
 
