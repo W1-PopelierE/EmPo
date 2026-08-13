@@ -275,6 +275,15 @@ Output (human-readable, and `--json` for machines):
 - **flows reached**: every flow this change can reach, across roots, not just the obvious one.
 - **blind flows**: the flows that reach this code but have no value-asserting test, printed in
   capitals, because a wrong result ships silently there.
+- **the reaching tests, counted in files**: the `N tests reach it` beside a flow and the
+  `reached by` lines under `--blind` are both read from `coverage[].testFiles` and never from
+  `testNodes`, which is the same unit `empo review` prints and the one
+  [05-graph-model](05-graph-model.md) fixes for every surface that says "N tests". It only ever
+  mattered under `symbol`: a test file exporting three cases is three test nodes and one file, so
+  counting nodes reports one reaching test as three and inflates the apparent coverage of exactly
+  the flows this command exists to be honest about. Under `fqcn` and `module-path` the two lists are
+  the same reach in two units, which is why the wrong one read as correct for as long as no pack
+  ided by symbol.
 - **top consumers**: the highest-fan-in nodes that depend on this one, each row naming the
   consumer's own kind and the edge family the reference was written in. The two columns are what
   make the list readable once a template can be a sink: a changed Laravel layout is consumed both by
@@ -372,7 +381,19 @@ file is not, and an agent that deletes a file off an orphan row is now deleting 
 merely unused code. So the unit is stated on the answer rather than left to be inferred from the
 shape of an id: the
 heading reads `orphans: nothing in the graph references these exports` there and `… references
-these` everywhere else. The same two fallbacks that widen an import edge widen this list's silence in
+these` everywhere else.
+
+**The unit is named only where the whole graph agrees on one**, which is a third case and not a
+rounding of the first two. The heading says `these exports` where **every** node in the graph carries
+a symbol, and not where merely some do, because a monorepo holding a php root beside a TypeScript one
+yields a list whose rows are class names, route files and exports together, and one word cannot be
+true of all three. So `fixtures/acme-platform` prints the unit-neutral heading even though
+`apps/mobile/src/api/client.ts#fetchLoyaltyPoints` sits on it beside
+`Acme\Http\Controllers\AdminController`: the ids on the rows still say which each one is, and the
+heading declines to say it for them. The rule is the one every heading in this tool follows, that a
+summary line may not claim more than the answer under it supports.
+
+The same two fallbacks that widen an import edge widen this list's silence in
 the safe direction: an
 export reached only through a side-effect, dynamic or default import is credited with the fan-in of
 the whole module and so never appears here, which is a floor on what the list claims is unused.
@@ -960,7 +981,8 @@ convention answering, while a fold is the engine guessing a naming style is in p
 corroborates counts as `in no node` rather than `ambiguous` — it was never admitted as a candidate, so
 nothing was weighed — and since the witness is asked per candidate and before the uniqueness test, a
 name two files carry once case is set aside still resolves where the reading file imports exactly one
-of them. `targetKinds` still filters the survivor. On the 186-file React Native application above,
+of them. `targetKinds` narrows whatever the fold admitted before that uniqueness question rather
+than after it, exactly as it does for the exact map. On the 186-file React Native application above,
 whose components live in `src/components/badge.tsx`, `template` went from 3 of 1531 tag references
 resolved to 735 of 1531, and not one of the 1528 misses had been an ambiguity anybody could have
 repaired by renaming a file. **This is why a `names` yield can jump between runs of two empo
@@ -1008,7 +1030,7 @@ the component.
 
 A family that refused something adds a clause per refusal it made: `, N ambiguous` for a name several
 nodes carry, `, N in no node` for a name no node carries (a vendor component, a Blade built-in like
-`<x-slot>`), `, N of the wrong kind` for a name in exactly one node of a kind the rule's
+`<x-slot>`), `, N of the wrong kind` for a name every node carrying it holds under a kind the rule's
 `targetKinds` does not list, `, N declared where they are used` for a name the file that wrote
 the reference declares itself, through the pack's `declares` patterns, and
 `, N imported from a package` for a name that file imports from a package the repository depends on,

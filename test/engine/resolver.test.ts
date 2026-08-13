@@ -853,6 +853,53 @@ describe("resolveEdges, the names it declined", () => {
     ]);
   });
 
+  test("still refuses a vendor tag the kind filter leaves exactly one local candidate for", () => {
+    // The measured case that argued against this order when it was first tried, re-run against the
+    // resolver as it now stands. A repository holds `components/Link.tsx` and `util/Link.ts`, and a
+    // file renders `<Link />` meaning react-router's component. Under uniqueness-first the two
+    // candidates refuse each other and nothing is emitted; under kind-first the type module is
+    // dropped, one local component is left, and the fear was that the tag would land on it. That is
+    // a confident wrong answer where the refusal had been merely unhelpful, and it is why the
+    // filter-last order was kept at the time.
+    //
+    // It no longer holds, and for a reason that has nothing to do with the order. `importsVendorName`
+    // was added afterwards and is asked of the one name that was about to become an edge, which is
+    // exactly the position this order delivers a name into. The file's own import says `Link` came
+    // from a package the repository depends on and does not carry, so the verdict is `vendor` and no
+    // edge is written. The guard that catches this is the one built for it, rather than an ambiguity
+    // standing in for it by accident, and an ambiguity standing in for a vendor check was never
+    // load-bearing: it only ever fired where a second local file happened to share the name.
+    const component = kinded(
+      "src/components/Link.tsx",
+      "Link",
+      "src/components/Link.tsx",
+      "component",
+    );
+    const type = kinded("src/util/Link.ts", "Link", "src/util/Link.ts", "module");
+    const view = {
+      ...kinded("src/screens/Nav.tsx", "Nav", "src/screens/Nav.tsx", "component"),
+      captures: [
+        {
+          family: "import" as const,
+          resolve: "module-path" as const,
+          groups: ['import { Link } from "react-router-dom"', "react-router-dom"],
+          line: 2,
+        },
+        kindedCapture("Link", 9, ["component"]),
+      ],
+    };
+
+    const resolved = resolveEdges(view, buildNodeIndex([component, type, view]), {
+      ...TS,
+      vendorPackages: new Set(["react-router-dom"]),
+    });
+
+    expect(resolved.edges).toEqual([]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "Link", outcome: "vendor", candidates: 1 },
+    ]);
+  });
+
   test("records both names of an observer capture even when the first one already refused", () => {
     // The `&&`-short-circuit trap the production code carries a comment about. `Order` is ambiguous,
     // and a resolver that read the listener only when the observed name resolved would leave

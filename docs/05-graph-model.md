@@ -163,10 +163,14 @@ is not one of them). The typescript rules are scoped twice over, and both halves
 `pathGlob` confines them to the `.tsx`, `.jsx` and `.vue` files that can hold a tag, so no `.ts`
 module produces one, and `targetKinds` lets them land only on a node kinded `component` or `screen`,
 so a tag whose name belongs to a package cannot fall onto the lone local file that happens to share
-the basename. That filter is applied to the survivor of the uniqueness test and not before it, so
-where two local files carry the name the tag resolves to nothing, which is what `short-name` already
-did. Section 4 carries what each was measured to cost, what it did not, and why the other order
-invents an edge. Two further refusals are asked of the survivor of both tests, out of the pack's
+the basename. That filter is applied **before** the uniqueness test and not to its survivor, because
+a node of a kind the rule does not list was never a second reading of the tag: the pack has already
+said what a reference of this family can denote, so a `Total.ts` type module is not competing with
+`Total.tsx` over `<Total />`, it is a different thing that happens to be spelled the same. Where two
+nodes the rule's own kinds both admit carry the name, the tag still resolves to nothing, which is
+what `short-name` always did and the half of the refusal that was never in question. Section 4
+carries what each was measured to cost, what it did not, and why the other order loses edges nothing
+else covers. Two further refusals are asked of the survivor of both tests, out of the pack's
 `declares` patterns and its `packages` block: a tag naming something the rendering file declares
 itself, and a tag naming something that file imports from a package the repository depends on,
 produce no edge either.
@@ -182,13 +186,14 @@ through the exact map and can never be answered by a fold.
 file is the language's own convention answering; a fold is the engine guessing that a naming style is
 in play, and a guess needs a witness. The witness is the rendering file's own imports: a folded
 candidate stands only where that file carries an `import` capture whose statement text binds the name
-and whose specifier resolves — through `resolveModulePath`, so relative paths and the root's
+and whose specifier resolves — through `resolveModuleFile`, so relative paths and the root's
 configured aliases — to exactly that candidate. Because the witness is asked per candidate and
 **before** the uniqueness test, a name two files carry once case is set aside still resolves where
 the reading file imports exactly one of them. That is not the ambiguity the exact map refuses: there
 nothing in the file says which is meant, and here the file has said. A fold no import corroborates is
 `unknown` and not `ambiguous` — nothing was weighed, because nothing was admitted as a candidate.
-`targetKinds` still filters the survivor.
+`targetKinds` then narrows whatever the fold did admit, before the uniqueness question, as it does
+for the exact map.
 
 What the fold is worth is the whole yield of the family on such a repository rather than a margin: on
 a real 186-file React Native application whose components live in `src/components/badge.tsx`,
@@ -501,10 +506,10 @@ repair, the same as above.
 ```jsonc
 {
   "family": "template",        // the edge family whose rules read the name; never "bridge"
-  "resolved": 41,              // the name is in exactly one node, of a kind the rule accepts
+  "resolved": 41,              // exactly one node of a kind the rule accepts carries the name
   "unknown": 12,               // the name is in no node, in any case: a vendor component, `<x-slot>`
-  "ambiguous": 7,              // the name is in several nodes, so no edge is emitted to any of them
-  "wrongKind": 3,              // one node carries it, of a kind the rule's `targetKinds` excludes
+  "ambiguous": 7,              // several nodes the rule accepts carry it, so no edge is emitted
+  "wrongKind": 3,              // every node carrying it is of a kind the rule's `targetKinds` bars
   "local": 2,                  // the file that wrote the reference declares that name itself
   "vendor": 1,                 // that file imports the name from a package this repository installs
   "ambiguousNames": [ { "name": "OrderTable", "nodes": 2, "references": 5 }, … ]
@@ -549,18 +554,21 @@ numerator and denominator together, and `empo index` already names root overlap 
 ordinary cost of reading a language whose vendor components are spelled exactly like local ones: a
 JSX tag naming a package's component, a Blade built-in like `<x-slot>`. Nobody can act on it, and a
 healthy typescript repository carries a lot of it. `wrongKind` is a rule's own `targetKinds` doing
-precisely what it was declared for, refusing to land a tag on the one local `.ts` module that
-happens to share a basename with a package (the Edge section above, and
-[04-language-packs](04-language-packs.md) section 4, carry why that filter runs on the survivor of
-the uniqueness test rather than before it). `local` and `vendor` are the two where the index did
-answer and its answer is still not what the line names. `local` is the reference answering itself:
+precisely what it was declared for, refusing to land a tag on the local `.ts` module that happens to
+share a basename with a package. It is counted where **every** node carrying the name failed the
+kind test, and its `candidates` reports how many were found, so what a reader takes from it is that
+the name is in the graph and the rule declined all of it rather than that nothing carried it (the
+Edge section above, and [04-language-packs](04-language-packs.md) section 4, carry why that filter
+runs before the uniqueness test rather than on its survivor). `local` and `vendor` are the two where
+the index did answer and its answer is still not what the line names. `local` is the reference
+answering itself:
 the file that wrote it declares that name, through the pack's `declares` patterns, so whatever a node
 of the same basename elsewhere in the tree holds, it is not what this line means. `vendor` is the
 reference answered by somebody else's code: that file imports the name from a package this repository
 declares a dependency on ([04-language-packs](04-language-packs.md) section 4's `packages` block), so
 the node carrying the name is a basename collision — `import Button from '@mui/material/Button'`
-beside a local `Button.tsx`. **Both are asked last**, of the one name that had survived uniqueness
-and `targetKinds` and was about to become an edge, and both carry `candidates: 1` because exactly
+beside a local `Button.tsx`. **Both are asked last**, of the one name that had survived `targetKinds`
+and then uniqueness and was about to become an edge, and both carry `candidates: 1` because exactly
 one node was weighed and then declined. That ordering is the honest one: a name in no node was never
 at risk of a wrong edge, so it stays `unknown` whatever the reading file declares or imports, and
 asking these two first billed every vendor tag in a repository as a refusal that reads like a

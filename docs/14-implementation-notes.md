@@ -1195,7 +1195,7 @@ naming style is in play, and a guess needs a witness. So an exact match resolves
 folded candidate has to be corroborated by the rendering file's own imports: `importsNameFrom` in
 `resolveEdges` walks that file's `module-path` captures and keeps the candidate only where a capture's
 statement text binds the name (group 0, the `import` as written) **and** its specifier resolves through
-`resolveModulePath` — relative paths and the root's configured aliases — to exactly that candidate id.
+`resolveModuleFile` — relative paths and the root's configured aliases — to the file that holds it.
 No new pack rule is needed for any of it: the `import` captures are already there.
 
 The number is again the argument. cal.com names its shadcn-style files `toaster.tsx`,

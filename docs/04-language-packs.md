@@ -613,20 +613,41 @@ a bare name, and only they read it. It exists because a name is only as safe as 
 resolves into, and a JSX tag's namespace is mostly other people's packages: `<View>`, `<Text>` and
 `<Link>` name nothing in this repository, their vendor import resolves to no node and leaves no
 competing edge, so a local file that happens to share the basename collects the tag and is then the
-only thing the graph says about that pair. **The uniqueness question is asked first and the filter is
-applied to the survivor**, which is the order that only ever refuses: a name in several nodes yields
-nothing whatever the kinds are, and a name in exactly one node yields nothing if that node is of a
-kind the rule does not list. This document said the opposite order at first, on the
-argument that two files named `Badge` of which one is a component and one a type module would leave
-exactly one candidate and resolve. **Running it is what settled it**: in a repository holding both
+only thing the graph says about that pair. **The filter is applied first and the uniqueness question
+is asked of what survives it.** A node of a kind the rule does not list was never a second reading of
+the reference: the rule declaring `["component"]` is the pack saying what a tag of this family can
+denote, so such a node is a different thing that happens to be spelled the same, and counting it
+makes the name ambiguous against a candidate that could not have won. Two nodes the rule's own kinds
+both admit are still refused, because there the field really does hold two readings and narrowing it
+would be a guess.
+
+This order was tried, rejected, and adopted, and the record of why is worth keeping whole rather than
+quietly reversing. It was rejected on a measurement: in a repository holding both
 `components/Link.tsx` and `util/Link.ts`, a `<Link />` that names react-router's component resolved
-to the local component under the filter-first order and to nothing under the shipped one, and the tag
-names neither file. Narrowing the candidate list does not make an unreadable name readable; it hides
+to the local component under the filter-first order and to nothing under the filter-last one, and the
+tag names neither file. Narrowing the candidate list did not make an unreadable name readable, it hid
 the ambiguity behind a plausible pick, which is a confident wrong answer where the refusal was merely
-a missing edge. So the field closes the case where the basename twin is the **only** candidate and
-leaves the ambiguous case exactly as `short-name` already had it. Which kinds a tag can name is a
-fact about the language, so it stays pack data like every other language fact, and the kind and the
-rule are declared in the same file.
+a missing edge.
+
+Two things changed. **`importsVendorName` was added afterwards**, and it is asked of the one name that
+was about to become an edge, which is exactly the position this order delivers a name into. The
+`<Link />` case is now caught by the guard built for it: the file's own import says the name came from
+a package the repository depends on and does not carry, so the verdict is `vendor` and no edge is
+written. An ambiguity standing in for a vendor check was never load-bearing anyway, since it only
+fired where a second local file happened to share the name.
+
+And **the `symbol` node-id strategy made the cost of the old order unpayable**. While a node was a
+file, a short name was a file basename and two files of different kinds rarely shared one, so asking
+the kind last cost almost nothing. Under per-export ids the namespace is every exported name in the
+repository, and a single `export const Modal = ...` in a constants file is then enough to refuse every
+`<Modal />` in the codebase. That refusal takes every edge to the name with it, including the ones
+nothing else covers: a globally registered component that no import binds has no other evidence, so
+the coupling disappears and no count reports that it went missing. Both orders can lose an edge; only
+the old one loses edges that nothing else records. `resolveName` in `engine/resolver.ts` carries the
+argument and `test/engine/resolver.test.ts` pins all three cases, the vendor one included.
+
+Which kinds a tag can name is a fact about the language, so it stays pack data like every other
+language fact, and the kind and the rule are declared in the same file.
 
 The strategy list is engine-side and closed: a pack selects one, it cannot define one. All six are
 built. Note that `view` and `short-name` are different strategies for different jobs and neither
@@ -724,10 +745,13 @@ tally is recorded on the graph as `names`, one record per edge family, counted p
 and not per distinct name, and both `empo index` and `empo doctor` print it
 ([06-cli](06-cli.md)).
 The five refusals are asked in a fixed order and the order is load-bearing.
-Where the rule declares `targetKinds`, the uniqueness question is asked first and the
-filter is applied to whatever survived it, so a name carried by two nodes is ambiguous even where
-only one of the two is a legal target: `resolveName` in `engine/resolver.ts` refuses on the count
-before it looks at a kind, and its docstring records why. `local` and `vendor` are asked **last**, of
+Where the rule declares `targetKinds`, the filter is applied first and the uniqueness question is
+asked of what survived it, so a name carried by two nodes of which only one is a legal target
+resolves to that one, and a name carried by two legal targets is still ambiguous: `resolveName` in
+`engine/resolver.ts` drops what the rule could never have named before it counts, and its docstring
+records why. Where the filter leaves nothing the verdict is `wrong-kind` and it reports how many were
+found, because the name is in the graph and what a reader needs to know is that the rule declined it,
+not that nothing carried it. `local` and `vendor` are asked **last**, of
 the one name that was about to become an edge, for the reason the two paragraphs on them below give.
 That order is also why the refusals are
 counted apart: `ambiguous` is the only one of the five that hides a coupling this repository really
@@ -774,7 +798,7 @@ the safety and the half a first version of this section did without. A tag spell
 is the language's own convention answering; a fold is the engine guessing that a naming style is in
 play, and a guess needs a witness. The witness is the rendering file's own imports: a folded candidate
 stands only where that file carries an `import` capture whose statement text binds the name and whose
-specifier resolves — through `resolveModulePath`, so relative paths and the root's configured aliases
+specifier resolves — through `resolveModuleFile`, so relative paths and the root's configured aliases
 — to exactly that candidate. **Measured** on cal.com, which names its shadcn-style files
 `toaster.tsx`, `collapsible.tsx` and `textarea.tsx`: the uncorroborated fold produced 53 extra
 template edges there, and a sample of 6 was 5 wrong — `<Toaster />` imported from the `sonner`
