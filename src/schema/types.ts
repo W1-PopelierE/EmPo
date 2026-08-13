@@ -340,7 +340,8 @@ export interface PackKindRule {
  * How a transaction's extent is found once its opening pattern matched. Two forms, because the two
  * ways to open one are structurally different and neither expresses the other.
  *
- * `balanced` is the closure form (`DB::transaction(function () { ... })`): the extent runs from the
+ * `balanced` is the callback form (`DB::transaction(function () { ... })`, or the arrow
+ * `DB::transaction(fn () => ...)` balancing `(`/`)` rather than `{`/`}`): the extent runs from the
  * match to the delimiter that balances the first `open` after it. `span` is the manual form
  * (`DB::beginTransaction() ... DB::commit()`): the extent runs to the next `endPattern` match, or to
  * the end of the file when none arrives, because an unclosed transaction is the worse hazard rather

@@ -14,7 +14,7 @@ describe("php pack", () => {
 
   test("loads with its declared identity", () => {
     expect(pack.name).toBe("php");
-    expect(pack.version).toBe("1.7.0");
+    expect(pack.version).toBe("1.8.0");
   });
 
   test("reproduces the expected nodes", () => {

@@ -236,7 +236,8 @@ function transactionExtents(compiled: CompiledHazards, source: string): Extent[]
 }
 
 /**
- * The closure form. From the end of the opener match, find the first `open` delimiter, then walk
+ * The callback form, whether it balances braces around a closure body or parens around an arrow
+ * function's call. From the end of the opener match, find the first `open` delimiter, then walk
  * counting `open` and `close` until the depth returns to zero. The offset just past that balancing
  * `close` ends the extent, so the closing delimiter itself is inside it, which costs nothing: no
  * dispatch pattern starts at a bare delimiter.
