@@ -121,7 +121,7 @@ export interface CompiledPack {
 }
 
 export function compilePack(pack: Pack): CompiledPack {
-  refuseUnbuiltIdStrategy(pack);
+  refuseIncompleteIdStrategy(pack);
 
   const edgeRules: CompiledEdgeRule[] = [];
   for (const family of EDGE_FAMILIES) {
@@ -158,29 +158,27 @@ export function compilePack(pack: Pack): CompiledPack {
 }
 
 /**
- * `symbol` is declared in the pack schema and built by nothing (docs/04-language-packs.md, section
- * 2). It stays declared: it is what per-export granularity would be spelled as, `path#exportName`
- * against today's file-level nodes, and it lands with the first pack that wants it. Neither shipped
- * pack does, and inventing the strategy before a pack needs it would fix the shape of per-export
- * ids against no real language.
+ * A pack naming `symbol` must also say how a symbol is found, because that strategy is the only one
+ * whose ids are not derivable from what the engine already reads: `fqcn` reads one class declaration
+ * and `module-path` reads the path. Without a pattern the pack has named a granularity and handed
+ * the engine no way to reach it, and the honest answer is to refuse the pack rather than to fall back
+ * to the file-level node the other two strategies produce, which would answer every later question
+ * about that root with ids the pack did not ask for.
  *
- * What the refusal owes a pack author is the truth on time. It used to be raised from `identify`,
- * once per scanned file, which made it a fact about a file rather than about the pack that asked:
+ * What the refusal owes a pack author is the truth on time. It is raised at compile time, once,
+ * before a single file is read, and it names the pack that asked. Raising it per scanned file
+ * instead, as an earlier refusal here did, made it a fact about a file rather than about the pack:
  * the message named no pack, so a monorepo with four roots reported a strategy nobody could tell
  * which pack had declared, and a pack whose extensions matched no file at all was compiled, indexed
- * and reported as a success while its id strategy was never reached. Compiling is where the pack
- * itself is the subject, it happens once, and it happens before a single file is read.
- *
- * It throws rather than degrading to `module-path`, which is the bargain every unbuilt strategy in
- * this contract has made: silently handing back the file-level node the other two strategies produce
- * would answer every later question about that root with ids the pack did not ask for.
+ * and reported as a success while its id strategy was never reached.
  */
-function refuseUnbuiltIdStrategy(pack: Pack): void {
+function refuseIncompleteIdStrategy(pack: Pack): void {
   if (pack.node.id.strategy !== "symbol") return;
-  throw configError(`node id strategy "symbol" is not implemented yet`, [
-    `The "${pack.name}" pack declares it, and no version of EmPo builds it yet.`,
-    "Built strategies are fqcn (one file, one fully-qualified class) and module-path (the id is the repo-relative path).",
-    "See docs/04-language-packs.md, section 2, for which of the two fits the language.",
+  if (pack.node.id.symbolPattern !== undefined) return;
+  throw configError(`node id strategy "symbol" needs a symbolPattern`, [
+    `The "${pack.name}" pack declares the strategy and no pattern to find a symbol by.`,
+    "symbolPattern is a regex over the file's source whose group 1 is the exported name.",
+    "See docs/04-language-packs.md, section 2.",
   ]);
 }
 

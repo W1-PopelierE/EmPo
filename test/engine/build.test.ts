@@ -139,7 +139,7 @@ describe("buildRoot", () => {
    * a test that does not, and would pass whether or not the defect was ever fixed. The scan is what
    * has to run for the claim to mean anything, which makes this a `buildRoot` test.
    */
-  test("refuses a pack declaring an unbuilt id strategy even when the root matches no file", () => {
+  test("refuses a pack declaring an incomplete id strategy even when the root matches no file", () => {
     const pack = loadPack("php");
 
     expect(() =>
@@ -152,7 +152,7 @@ describe("buildRoot", () => {
           match: { extensions: [".nothing-here"] },
         },
       }),
-    ).toThrow(/not implemented yet/);
+    ).toThrow(/symbolPattern/);
   });
 });
 

@@ -850,28 +850,44 @@ describe("declared names", () => {
 });
 
 /**
- * The one node id strategy the schema accepts and the engine does not build. It is left declared
- * rather than dropped (docs/04-language-packs.md, section 2), so what needs pinning is that the
- * refusal is loud, arrives at the pack rather than at a file, and says whose pack it is.
+ * The one node id strategy that cannot be read off the path or off a single class declaration, so
+ * it is the one that needs the pack to say how a symbol is found. What needs pinning is that the
+ * refusal of an incomplete pack is loud, arrives at the pack rather than at a file, and says whose
+ * pack it is, and that a pack which does say survives compiling.
  */
-describe("an unbuilt node id strategy", () => {
-  const symbolPack: Pack = {
+describe("a symbol node id strategy", () => {
+  const patternless: Pack = {
     ...basePack,
     name: "wants-per-export",
     node: { ...basePack.node, id: { strategy: "symbol" } },
   };
 
-  test("refuses the pack at compile time, naming the pack that asked, with exit code 2", () => {
+  test("refuses a pack declaring no symbolPattern, naming the pack that asked, with exit code 2", () => {
     try {
-      compilePack(symbolPack);
-      expect.unreachable("compiling a pack that declares symbol should have thrown");
+      compilePack(patternless);
+      expect.unreachable("compiling a symbol pack with no pattern should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(EmpoError);
       expect((error as EmpoError).exitCode).toBe(2);
-      expect((error as EmpoError).message).toContain("not implemented yet");
+      expect((error as EmpoError).message).toMatch(/symbolPattern/);
       // Which pack asked, which a per-file throw could not say: a monorepo compiles one pack per
       // root, and "some pack wants symbol" sends the author to read all of them.
       expect((error as EmpoError).details.join("\n")).toContain("wants-per-export");
     }
+  });
+
+  test("compiles a pack that declares one", () => {
+    expect(() =>
+      compilePack({
+        ...patternless,
+        node: {
+          ...basePack.node,
+          id: {
+            strategy: "symbol",
+            symbolPattern: "^export\\s+(?:const|function)\\s+([A-Za-z0-9_$]+)",
+          },
+        },
+      }),
+    ).not.toThrow();
   });
 });

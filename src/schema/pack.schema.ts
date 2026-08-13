@@ -434,6 +434,7 @@ export const packSchema = z
         strategy: z.enum(["fqcn", "module-path", "symbol"]),
         namespacePattern: regex.optional(),
         namePattern: regex.optional(),
+        symbolPattern: regex.optional(),
         fallback: z.literal("path").optional(),
         indexNames: z.array(z.string().min(1)).optional(),
       }),

@@ -268,6 +268,12 @@ export interface PackNodeId {
   strategy: NodeStrategy;
   namespacePattern?: string;
   namePattern?: string;
+  /**
+   * How a `symbol`-strategy pack finds one exported symbol. Group 1 is the name. Declared by that
+   * strategy and by no other, because it is the only one whose ids are not derivable from the path
+   * or from a single class declaration.
+   */
+  symbolPattern?: string;
   /** What to do when the strategy cannot produce an id (a file with no class). */
   fallback?: "path";
   /**
