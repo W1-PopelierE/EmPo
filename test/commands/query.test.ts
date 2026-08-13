@@ -12,7 +12,7 @@ import {
   NO_FLOW_REACHED,
   NO_HAZARD_CLAIM,
   queryCommand,
-  resolveNode,
+  resolveNodes,
 } from "../../src/commands/query";
 import { run } from "../../src/engine/git";
 import { GRAPH_SCHEMA, graphPath, readGraph, serializeGraph } from "../../src/engine/graph";
@@ -28,7 +28,7 @@ import type { Graph, GraphEdge, GraphNode, Hazard } from "../../src/schema/types
  * because nothing here writes: these tests read the graph that `empo index` produced and ask the
  * blast-radius question against it.
  *
- * The assertions target `resolveNode` and `blastRadius` rather than the printed lines, so a change
+ * The assertions target `resolveNodes` and `blastRadius` rather than the printed lines, so a change
  * to the layout does not fail a test about reachability. Printing gets one smoke test, for the one
  * sentence that has to survive every layout change.
  */
@@ -95,6 +95,56 @@ function ambiguousGraph(): Graph {
     edges: [],
     flows: {},
     fanin: {},
+    coverage: {},
+    hazards: [],
+    hazardsScanned: [],
+    names: [],
+  };
+}
+
+/**
+ * A graph a `symbol`-strategy pack produced: one file holding two exports, and one consumer that
+ * imports both of them. Written by hand rather than indexed from a fixture because the shipped packs
+ * still id by path and by fqcn, so no fixture in the tree yields a graph of this shape yet, and the
+ * three things this shape is here to prove are all about a path that names more than one node.
+ */
+function symbolGraph(): Graph {
+  const node = (file: string, symbol: string): GraphNode => ({
+    id: `${file}#${symbol}`,
+    file,
+    root: ".",
+    lang: "typescript",
+    kind: "module",
+    name: symbol,
+    symbol,
+    produces: [],
+    consumes: [],
+    isTest: false,
+    assertsValue: false,
+  });
+  const edge = (to: string, line: number): GraphEdge => ({
+    from: "src/total.ts#total",
+    to,
+    kind: "import",
+    symbol: null,
+    evidence: { file: "src/total.ts", line },
+  });
+
+  return {
+    schema: GRAPH_SCHEMA,
+    builtAgainst: "",
+    builtAtCommitSubject: "",
+    roots: [{ path: ".", lang: "typescript" }],
+    packs: { typescript: loadPack("typescript").version },
+    stats: { files: 2, nodes: 3, edges: 2, bridgedEdges: 0 },
+    nodes: [
+      node("src/money.ts", "formatMoney"),
+      node("src/money.ts", "parseMoney"),
+      node("src/total.ts", "total"),
+    ],
+    edges: [edge("src/money.ts#formatMoney", 1), edge("src/money.ts#parseMoney", 1)],
+    flows: {},
+    fanin: { "src/money.ts#formatMoney": 1, "src/money.ts#parseMoney": 1 },
     coverage: {},
     hazards: [],
     hazardsScanned: [],
@@ -511,26 +561,31 @@ afterAll(() => {
   for (const dir of temporary) rmSync(dir, { recursive: true, force: true });
 });
 
-describe("resolveNode", () => {
+describe("resolveNodes", () => {
   test("finds a node by its full id", () => {
-    expect(resolveNode(graph, CALCULATOR).id).toBe(CALCULATOR);
+    expect(resolveNodes(graph, CALCULATOR).map((node) => node.id)).toEqual([CALCULATOR]);
   });
 
   test("finds a node by its repo-relative file path", () => {
-    expect(resolveNode(graph, CALCULATOR_FILE).id).toBe(CALCULATOR);
+    expect(resolveNodes(graph, CALCULATOR_FILE).map((node) => node.id)).toEqual([CALCULATOR]);
   });
 
   test("finds a node by a path suffix, so a reader can paste the tail of a path", () => {
-    expect(resolveNode(graph, "Price/PriceCalculator.php").id).toBe(CALCULATOR);
-    expect(resolveNode(graph, "PriceCalculator.php").id).toBe(CALCULATOR);
+    expect(resolveNodes(graph, "Price/PriceCalculator.php").map((node) => node.id)).toEqual([
+      CALCULATOR,
+    ]);
+    expect(resolveNodes(graph, "PriceCalculator.php").map((node) => node.id)).toEqual([CALCULATOR]);
   });
 
   test("finds a node by an unambiguous short name", () => {
-    expect(resolveNode(graph, "PriceCalculator").id).toBe(CALCULATOR);
+    expect(resolveNodes(graph, "PriceCalculator").map((node) => node.id)).toEqual([CALCULATOR]);
   });
 
   test("refuses an ambiguous name with exit code 2 and names every candidate", () => {
-    const error = expectEmpoError(2, () => resolveNode(ambiguousGraph(), "Invoice"));
+    // Two files wearing one name, which is what ambiguous now means and all it means: several nodes
+    // inside one file are the ordinary case under a `symbol` pack and are answered rather than
+    // refused, and only a name that spans files leaves a reader with nothing to act on.
+    const error = expectEmpoError(2, () => resolveNodes(ambiguousGraph(), "Invoice"));
     const details = error.details.join("\n");
 
     expect(details).toContain("Acme\\Billing\\Invoice");
@@ -538,13 +593,46 @@ describe("resolveNode", () => {
   });
 
   test("refuses a symbol that is not in the graph with exit code 2", () => {
-    expectEmpoError(2, () => resolveNode(graph, "Acme\\Nowhere\\NoSuchClass"));
+    expectEmpoError(2, () => resolveNodes(graph, "Acme\\Nowhere\\NoSuchClass"));
+  });
+
+  test("answers for every symbol of a path", () => {
+    const nodes = resolveNodes(symbolGraph(), "src/money.ts");
+
+    expect(nodes.map((node) => node.id)).toEqual([
+      "src/money.ts#formatMoney",
+      "src/money.ts#parseMoney",
+    ]);
+  });
+
+  test("answers for one symbol by its bare export name", () => {
+    expect(resolveNodes(symbolGraph(), "formatMoney").map((node) => node.id)).toEqual([
+      "src/money.ts#formatMoney",
+    ]);
   });
 });
 
 describe("blastRadius", () => {
+  test("counts a consumer of two symbols of one file once", () => {
+    // One import statement per line binding two names off one module is the ordinary shape of a
+    // TypeScript file, and it yields one edge per bound name. Asked about the module, the reader is
+    // owed the number of files that would have to change, not the number of edges that exist.
+    const answer = blastRadius(symbolGraph(), resolveNodes(symbolGraph(), "src/money.ts"));
+
+    expect(answer.faninDirect).toBe(1);
+    expect(answer.consumers.map((consumer) => consumer.id)).toEqual(["src/total.ts#total"]);
+  });
+
+  test("does not count a symbol of the queried file as its own consumer", () => {
+    // Both symbols of src/money.ts are in the set, so the transitive count must be the one consumer
+    // and not that consumer plus the sibling export the walk started from.
+    const answer = blastRadius(symbolGraph(), resolveNodes(symbolGraph(), "src/money.ts"));
+
+    expect(answer.faninTransitive).toBe(1);
+  });
+
   test("reports the controllers that use the calculator, each with file and line evidence", () => {
-    const answer = blastRadius(graph, resolveNode(graph, CALCULATOR));
+    const answer = blastRadius(graph, resolveNodes(graph, CALCULATOR));
     const consumers = answer.consumers.map((consumer) => consumer.id);
 
     expect(consumers).toContain(ORDER_CONTROLLER);
@@ -561,7 +649,7 @@ describe("blastRadius", () => {
     // came out above faninTransitive, which counts nodes and can never be the smaller of the two.
     // Hand-made, because the acme fixture's one such pair would make this assert the fixture.
     const rendered = renderedComponentGraph();
-    const answer = blastRadius(rendered, resolveNode(rendered, "src/Card.tsx"));
+    const answer = blastRadius(rendered, resolveNodes(rendered, "src/Card.tsx"));
 
     expect(answer.consumers.map((consumer) => consumer.id)).toEqual(["src/App.tsx"]);
     expect(answer.faninDirect).toBe(1);
@@ -580,14 +668,14 @@ describe("blastRadius", () => {
       { ...php.edges[1], kind: "fqcn", evidence: { file: "src/App.tsx", line: 9 } } as GraphEdge,
       { ...php.edges[0] } as GraphEdge,
     ];
-    const answer = blastRadius(php, resolveNode(php, "src/Card.tsx"));
+    const answer = blastRadius(php, resolveNodes(php, "src/Card.tsx"));
 
     expect(answer.consumers).toHaveLength(1);
     expect(answer.consumers[0]?.evidence).toBe("src/App.tsx:1");
   });
 
   test("reaches the orders and checkout flows, and marks only checkout blind", () => {
-    const answer = blastRadius(graph, resolveNode(graph, CALCULATOR));
+    const answer = blastRadius(graph, resolveNodes(graph, CALCULATOR));
     const flows = new Map(answer.flows.map((flow) => [flow.flow, flow]));
 
     expect(flows.get("checkout")?.blind).toBe(true);
@@ -600,7 +688,7 @@ describe("blastRadius", () => {
   test("says how much of each flow it reaches, not merely that it reaches one", () => {
     // One node of four and four of four are both "reached", and a reader judging a blast radius
     // has to be able to tell them apart. The calculator touches part of orders and all of checkout.
-    const answer = blastRadius(graph, resolveNode(graph, CALCULATOR));
+    const answer = blastRadius(graph, resolveNodes(graph, CALCULATOR));
     const flows = new Map(answer.flows.map((flow) => [flow.flow, flow]));
     const orders = flows.get("orders");
     const checkout = flows.get("checkout");
@@ -617,7 +705,7 @@ describe("blastRadius", () => {
     // This is the point of the whole feature. admin is a real flow with a real controller in it,
     // and a change to the price calculator cannot break it. Listing it anyway would be the false
     // positive that teaches a reader to stop reading the list.
-    const answer = blastRadius(graph, resolveNode(graph, CALCULATOR));
+    const answer = blastRadius(graph, resolveNodes(graph, CALCULATOR));
 
     expect(answer.flows.map((flow) => flow.flow)).not.toContain("admin");
     expect(graph.flows.admin?.length).toBeGreaterThan(0);
@@ -628,7 +716,7 @@ describe("blastRadius", () => {
     // move it, and what breaks? Nothing in either file names the other, so an import parser reading
     // either root on its own answers "nothing", and that answer is what the bridge exists to
     // correct. The flow the page reaches is on the far side of the bridge too, in the other root.
-    const answer = blastRadius(graph, resolveNode(graph, INERTIA_PAGE));
+    const answer = blastRadius(graph, resolveNodes(graph, INERTIA_PAGE));
 
     expect(answer.consumers.map((consumer) => consumer.id)).toEqual([PAGE_CONTROLLER]);
     expect(answer.consumers[0]?.evidence).toMatch(
@@ -648,7 +736,7 @@ describe("blastRadius", () => {
     // inertia-page bridge, so a row built from `edge.from` named the controller to somebody who had
     // just asked about the controller, and `edge.to`, the only file in the answer that is not
     // already in the question, was never printed at all.
-    const answer = blastRadius(graph, resolveNode(graph, PAGE_CONTROLLER));
+    const answer = blastRadius(graph, resolveNodes(graph, PAGE_CONTROLLER));
     const page = answer.bridges.filter((bridge) => bridge.symbol === "inertia-page");
 
     expect(page).toHaveLength(1);
@@ -660,7 +748,7 @@ describe("blastRadius", () => {
     // The oldest case of the same defect, and the one that has answered
     // `http-route  apps/mobile/src/api/client.ts` since the bridge was written: a typescript file
     // listed against itself under a heading that says cross-language.
-    const answer = blastRadius(graph, resolveNode(graph, "apps/mobile/src/api/client.ts"));
+    const answer = blastRadius(graph, resolveNodes(graph, "apps/mobile/src/api/client.ts"));
 
     expect(answer.bridges).toContainEqual({
       from: "apps/mobile/src/api/client.ts",
@@ -673,7 +761,7 @@ describe("blastRadius", () => {
   test("counts every bridge edge in the graph, whether or not one is in this radius", () => {
     // The denominator an empty `bridges` needs, so the printed form can tell "this repository
     // indexes no cross-language join" from "its joins are nowhere near this node".
-    const admin = blastRadius(graph, resolveNode(graph, ADMIN_CONTROLLER));
+    const admin = blastRadius(graph, resolveNodes(graph, ADMIN_CONTROLLER));
 
     expect(admin.bridges).toEqual([]);
     expect(admin.bridgeEdgesInGraph).toBe(2);
@@ -694,11 +782,11 @@ describe("blastRadius", () => {
   test("counts transitive dependents and never counts the node itself", () => {
     // The tests and the route file reach the calculator only through the controllers, so the
     // transitive count has to be the larger one.
-    const calculator = blastRadius(graph, resolveNode(graph, CALCULATOR));
+    const calculator = blastRadius(graph, resolveNodes(graph, CALCULATOR));
     expect(calculator.faninTransitive).toBeGreaterThan(calculator.faninDirect);
 
     // Nothing imports AdminController, so it depends on itself and on nothing else.
-    const admin = blastRadius(graph, resolveNode(graph, ADMIN_CONTROLLER));
+    const admin = blastRadius(graph, resolveNodes(graph, ADMIN_CONTROLLER));
     expect(admin.consumers).toEqual([]);
     expect(admin.faninTransitive).toBe(0);
   });
@@ -948,7 +1036,7 @@ describe("queryCommand cross-language reach", () => {
     // padding, and the second continuation line is the one that pays for the indent being computed
     // from the column width rather than from each symbol's own length.
     const lines = block(capture(() => queryCommand(repo, PAGE_CONTROLLER)));
-    const rows = blastRadius(graph, resolveNode(graph, PAGE_CONTROLLER)).bridges;
+    const rows = blastRadius(graph, resolveNodes(graph, PAGE_CONTROLLER)).bridges;
     const evidence = (symbol: string): string =>
       rows.find((bridge) => bridge.symbol === symbol)?.evidence ?? "";
 
