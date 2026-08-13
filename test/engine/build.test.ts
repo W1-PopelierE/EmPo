@@ -124,6 +124,36 @@ describe("buildRoot", () => {
       expect(graph.files).toEqual(graph.files.filter((file) => file.startsWith("apps/api/")));
     },
   );
+
+  /**
+   * A pack the engine cannot honour is refused even when the root holds nothing it would have read.
+   *
+   * This is the case the old refusal could not reach. It lived in `identify`, one call per scanned
+   * file, so a root whose `match.extensions` selected no file skipped the whole extraction loop:
+   * `buildRoot` returned an empty `RootGraph`, nothing downstream refuses one, and `empo index`
+   * reported the root as a success with the strategy it declared never looked at.
+   *
+   * It is pinned here and not beside the strategy's own test in test/engine/extractor.test.ts,
+   * because compiling is not what was broken. `compilePack` never reads `match.extensions` at all,
+   * so a test that calls it directly with an extension matching nothing exercises the same line as
+   * a test that does not, and would pass whether or not the defect was ever fixed. The scan is what
+   * has to run for the claim to mean anything, which makes this a `buildRoot` test.
+   */
+  test("refuses a pack declaring an unbuilt id strategy even when the root matches no file", () => {
+    const pack = loadPack("php");
+
+    expect(() =>
+      buildRoot({
+        repoRoot: fixture,
+        root: { path: "apps/api", lang: "php" },
+        pack: {
+          ...pack,
+          node: { ...pack.node, id: { strategy: "symbol" } },
+          match: { extensions: [".nothing-here"] },
+        },
+      }),
+    ).toThrow(/not implemented yet/);
+  });
 });
 
 /**

@@ -68,6 +68,11 @@ export interface BuildRootOptions {
 }
 
 export function buildRoot(options: BuildRootOptions): RootGraph {
+  // Compiled before the scan, because compiling is what refuses a pack the engine cannot honour
+  // (`compilePack` in engine/extractor.ts) and `scanRoot` reads the source of every file it globs.
+  // A pack that is going to be refused should be refused without a repository being read first.
+  const compiled = compilePack(options.pack);
+
   const scanned = scanRoot({
     repoRoot: options.repoRoot,
     root: options.root,
@@ -75,7 +80,6 @@ export function buildRoot(options: BuildRootOptions): RootGraph {
     ignore: options.ignore,
   });
 
-  const compiled = compilePack(options.pack);
   const extracted: ExtractedFile[] = [];
   for (const file of scanned) {
     const result = extractFile(compiled, file);

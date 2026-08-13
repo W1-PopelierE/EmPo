@@ -121,6 +121,8 @@ export interface CompiledPack {
 }
 
 export function compilePack(pack: Pack): CompiledPack {
+  refuseUnbuiltIdStrategy(pack);
+
   const edgeRules: CompiledEdgeRule[] = [];
   for (const family of EDGE_FAMILIES) {
     for (const rule of pack.edges[family] ?? []) {
@@ -153,6 +155,33 @@ export function compilePack(pack: Pack): CompiledPack {
     testPaths: pack.tests.paths.map(compileTestPath),
     hazards: compileHazards(pack),
   };
+}
+
+/**
+ * `symbol` is declared in the pack schema and built by nothing (docs/04-language-packs.md, section
+ * 2). It stays declared: it is what per-export granularity would be spelled as, `path#exportName`
+ * against today's file-level nodes, and it lands with the first pack that wants it. Neither shipped
+ * pack does, and inventing the strategy before a pack needs it would fix the shape of per-export
+ * ids against no real language.
+ *
+ * What the refusal owes a pack author is the truth on time. It used to be raised from `identify`,
+ * once per scanned file, which made it a fact about a file rather than about the pack that asked:
+ * the message named no pack, so a monorepo with four roots reported a strategy nobody could tell
+ * which pack had declared, and a pack whose extensions matched no file at all was compiled, indexed
+ * and reported as a success while its id strategy was never reached. Compiling is where the pack
+ * itself is the subject, it happens once, and it happens before a single file is read.
+ *
+ * It throws rather than degrading to `module-path`, which is the bargain every unbuilt strategy in
+ * this contract has made: silently handing back the file-level node the other two strategies produce
+ * would answer every later question about that root with ids the pack did not ask for.
+ */
+function refuseUnbuiltIdStrategy(pack: Pack): void {
+  if (pack.node.id.strategy !== "symbol") return;
+  throw configError(`node id strategy "symbol" is not implemented yet`, [
+    `The "${pack.name}" pack declares it, and no version of EmPo builds it yet.`,
+    "Built strategies are fqcn (one file, one fully-qualified class) and module-path (the id is the repo-relative path).",
+    "See docs/04-language-packs.md, section 2, for which of the two fits the language.",
+  ]);
 }
 
 /**
@@ -261,10 +290,8 @@ function identify(
     return { id: scanned.file, name: baseName(scanned.relPath) };
   }
 
-  if (strategy === "symbol") {
-    throw configError('node id strategy "symbol" is not implemented yet');
-  }
-
+  // No `symbol` arm: `compilePack` refused the pack before any file reached here, so the only
+  // strategy left is `fqcn`. A second guard would be a second answer to a question already settled.
   const name = firstCapture(compiled.nameRegex, source);
   if (name !== null) {
     const namespace = firstCapture(compiled.namespaceRegex, source);

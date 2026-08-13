@@ -198,11 +198,18 @@ abstracts what "a unit" means:
 - `symbol`: id is `path#exportName`, for languages where you want per-export granularity.
 
 The strategy list is engine-side and closed here too, and only two of the three are built. `fqcn`
-and `module-path` are implemented; `symbol` is declared and throws a "not implemented yet"
-configuration error from `engine/extractor.ts`, and it lands with the first pack that wants
-per-export granularity. A pack naming it fails loudly instead of quietly handing back the file-level
-node the other two strategies produce, which is the same bargain every unbuilt strategy in this
-contract has made: a pack naming one fails loudly rather than silently resolving nothing.
+and `module-path` are implemented; `symbol` is declared and refused with a "not implemented yet"
+configuration error by `compilePack` in `engine/extractor.ts`, and it lands with the first pack that
+wants per-export granularity. A pack naming it fails loudly instead of quietly handing back the
+file-level node the other two strategies produce, which is the same bargain every unbuilt strategy
+in this contract has made: a pack naming one fails loudly rather than silently resolving nothing.
+
+The refusal is raised when the pack is compiled, which happens once and before a single file is
+read, and it names the pack that asked. That matters for the two cases the older per-file refusal
+got wrong. A monorepo compiles one pack per root, so a message naming no pack sent the author to
+read all of them; and a pack whose `match.extensions` happened to select no file was compiled,
+indexed and reported as a success, with the strategy it declared never reached and its root silently
+empty.
 
 `fallback: "path"` covers the files the strategy cannot name: a route file, a bootstrap script,
 anything with no class declaration in it. Without it those files yield no node at all, and
