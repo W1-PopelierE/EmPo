@@ -76,8 +76,16 @@ export const LOCK_PATH = ".empo/generated/packs.lock.json";
  * this one: a schema 6 graph has no `testFiles` because a test file and a test node were the same
  * thing when it was written, and a reader defaulting the absence to the empty array would report
  * that nothing tests a flow whose tests it is holding the node ids of.
+ *
+ * 8 is `hazards`' case: an added key whose absence and whose emptiness say different things.
+ * `nodes[].extents` holds the lines a symbol node's declarations span, and `empo review` narrows a
+ * changed hunk to the exports that own it by reading them. A schema 7 graph has no `extents` on any
+ * node because nothing recorded them, and a reader taking that for "this export spans no lines"
+ * would narrow every diff to nothing and report an empty blast radius for a change that has one.
+ * Narrowing therefore falls back to the whole file wherever the key is absent, which is what a
+ * schema 7 graph gets until it is rebuilt: the answer it always gave.
  */
-export const GRAPH_SCHEMA = 7;
+export const GRAPH_SCHEMA = 8;
 
 export function graphPath(repoRoot: string): string {
   return join(repoRoot, GRAPH_PATH);

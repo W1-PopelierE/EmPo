@@ -11,7 +11,7 @@ import type { KeyMatch, Ticket, TrackerAdapter } from "../adapters/tracker/types
 import { type GateResult, gateFindings, type ReviewFinding } from "../discipline/findings";
 import { reviewWorkflow } from "../discipline/load";
 import { loadConfig } from "../engine/config";
-import { type ChangedFile, parseDiff } from "../engine/diff";
+import { type ChangedFile, changedLines, parseDiff } from "../engine/diff";
 import {
   addWorktree,
   currentBranch,
@@ -106,6 +106,12 @@ interface FileFacts {
    * the file's nodes is the answer they wanted from the start: what can changing this file reach.
    */
   radius: BlastRadius | null;
+  /**
+   * How many nodes the file yields in total, which is what makes the narrowing legible: a radius
+   * over one node of a twenty-export module and a radius over the only node the file has print the
+   * same row otherwise, and only one of them left nineteen exports out.
+   */
+  yielded: number;
 }
 
 /**
@@ -234,7 +240,12 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
   const facts = changed.files
     .map((file) => {
       const nodes = nodesFor(graph, file.path);
-      return { file, radius: nodes.length === 0 ? null : blastRadius(graph, nodes) };
+      const touched = narrowToChangedLines(nodes, file);
+      return {
+        file,
+        radius: touched.length === 0 ? null : blastRadius(graph, touched),
+        yielded: nodes.length,
+      };
     })
     .sort((a, b) => compareStrings(a.file.path, b.file.path));
 
@@ -280,9 +291,13 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
             added: entry.file.addedCount,
             removed: entry.file.removedCount,
             // Still a list, and now of at most one entry: one radius per changed file, whose own
-            // `nodes` holds every node the file yielded. A consumer reading the ids reads them
-            // from there rather than from one radius per node.
+            // `nodes` holds every node the diff's lines reached. A consumer reading the ids reads
+            // them from there rather than from one radius per node.
             nodes: entry.radius === null ? [] : [entry.radius],
+            // The denominator for that list: how many nodes the file yields in all. Fewer nodes in
+            // the radius than this means the hunks narrowed it, and a consumer that wants the whole
+            // file's radius back knows from these two numbers that it is not holding one.
+            nodesInFile: entry.yielded,
           })),
           // The denominator rides alongside the list, so a reader can tell "no spine claims this
           // change" from "this repository curates no spine". Both answer `spines: []`, and only one
@@ -1141,7 +1156,7 @@ function printChangedFiles(facts: FileFacts[]): void {
     const counts = `+${entry.file.addedCount} -${entry.file.removedCount}`;
     const mapped =
       entry.radius !== null
-        ? namesOf(entry.radius)
+        ? narrowing(entry) + namesOf(entry.radius)
         : entry.file.isBinary
           ? "binary"
           : "not in the graph (under no root, unindexed language, or a stale graph)";
@@ -1164,6 +1179,17 @@ function printChangedFiles(facts: FileFacts[]): void {
  * width of the terminal reads as noise, and the count says what was held back rather than letting
  * the truncation pass for the whole of it.
  */
+/**
+ * The prefix that says the row is a part of the file rather than the whole of it, printed only when
+ * the diff's lines narrowed the file's nodes down. Silence means every node the file yields is in
+ * the radius, which is both the unnarrowed answer and the answer for a file that yields one node,
+ * and those two need no telling apart: either way nothing was left out.
+ */
+function narrowing(entry: FileFacts): string {
+  const reached = entry.radius === null ? 0 : entry.radius.nodes.length;
+  return reached < entry.yielded ? `${reached} of ${entry.yielded} exports: ` : "";
+}
+
 function namesOf(radius: BlastRadius): string {
   const symbols = radius.nodes.flatMap((node) => (node.symbol === undefined ? [] : [node.symbol]));
   const names = symbols.length > 0 ? symbols : radius.nodes.map((node) => node.id);
@@ -1764,6 +1790,59 @@ export function reviewableFiles(files: ChangedFile[]): {
 
 function nodesFor(graph: Graph, path: string): GraphNode[] {
   return graph.nodes.filter((node) => node.file === path);
+}
+
+/**
+ * The nodes a changed file yields, narrowed to the ones whose lines the diff actually touched.
+ *
+ * A file was a node until the symbol strategy shipped, and a changed twenty-export module then
+ * reported the blast radius of all twenty exports for an edit to one. `nodes[].extents` says which
+ * lines each export spans and the hunks say which lines moved, so the two answer it together.
+ *
+ * The narrowing is refused for the whole file the moment any changed line cannot be attributed,
+ * which is the decision docs/14-implementation-notes.md asked whoever built this to make first:
+ *
+ * - a line no extent encloses, which is every edit to an import block: imports are written above
+ *   every declaration, so no extent covers them, and handing them to the first export below would
+ *   invent an attribution the partition cannot support;
+ * - a node with no `extents` at all: a `fqcn` or `module-path` pack, a symbol pack's file that
+ *   exports nothing, or a graph written before schema 8.
+ *
+ * Both fall back to every node of the file, which is what this reported before narrowing existed.
+ * The extents are a line partition and not a parse, so narrowing can over-attribute a helper
+ * written between two exports to the export above it; it must never under-attribute. A review that
+ * quietly drops the symbol a change really touched is worse than one naming too many.
+ *
+ * A removed line is read against the same extents as an added one, which is the same over-attributing
+ * direction rather than a second rule. Deleting a whole export writes no new line to attribute it
+ * by, and dropping the removals would answer a deletion with the blast radius of whatever survived
+ * around it. The coordinates are the old file's and the extents are the indexed one's, so where the
+ * graph is behind the branch the two disagree: a stale graph is reported as staleness, above, and
+ * the disagreement is bounded by naming a neighbouring export rather than by naming none.
+ */
+export function narrowToChangedLines(nodes: GraphNode[], file: ChangedFile): GraphNode[] {
+  if (nodes.length < 2) return nodes;
+  if (nodes.some((node) => node.extents === undefined)) return nodes;
+
+  const touched = new Set<GraphNode>();
+  for (const line of touchedLines(file)) {
+    const owner = nodes.find((node) =>
+      (node.extents ?? []).some((extent) => line >= extent.start && line <= extent.end),
+    );
+    if (owner === undefined) return nodes;
+    touched.add(owner);
+  }
+  // An empty diff for this file touches no line and so narrows to nothing, which would read as "not
+  // in the graph". It has no hunks to have missed, but the file is still what changed.
+  return touched.size === 0 ? nodes : nodes.filter((node) => touched.has(node));
+}
+
+/** Every line this file writes or cuts. Added ones are the new file's, removed ones the old file's. */
+function touchedLines(file: ChangedFile): number[] {
+  return [
+    ...changedLines(file),
+    ...file.hunks.flatMap((hunk) => hunk.removed.map((line) => line.line)),
+  ];
 }
 
 /** The first base ref that resolves. A repository with none has to be told one. */

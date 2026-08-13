@@ -245,8 +245,10 @@ describe("indexCommand", () => {
     // absence and its emptiness mean the same thing, and those are the two answers this one exists
     // to tell apart. 6 is 4's case twice over. 7 is 4's case at its widest: a pack may identify a
     // node by an exported symbol rather than by a file, so `nodes[].id`, `edges`, `fanin` and
-    // `flows` all keep their names and answer per export.
-    expect(graph.schema).toBe(7);
+    // `flows` all keep their names and answer per export. 8 is 3's and 5's case: `nodes[].extents`
+    // is added, and its absence means the lines were never recorded where its emptiness would mean
+    // the export spans none, which is a diff narrowed to nothing.
+    expect(graph.schema).toBe(8);
     expect(graph.roots).toEqual([
       { path: "apps/api", lang: "php" },
       { path: "apps/mobile", lang: "typescript" },

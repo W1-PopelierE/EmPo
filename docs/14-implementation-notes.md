@@ -381,6 +381,11 @@ export interface GraphNode {
   isTest: boolean;
   assertsValue: boolean;   // a test using one of the pack's assertionTerms. False on a non-test.
   symbol?: string;         // the export this node is, for a `symbol` pack. Absent on a file-level node.
+  extents?: { start: number; end: number }[];  // schema 8. The 1-based inclusive lines this node's
+                         // declarations span, one entry per run, present under exactly the condition
+                         // `symbol` is. Absent says the lines are unknown, never that the node spans
+                         // none: a file-level node spans the whole file, and a symbol node is made
+                         // out of its extents so it always owns at least one.
 }
 
 /** One end-user journey from flows.json. `paths` are repo-relative path prefixes. */
@@ -812,6 +817,34 @@ proven before anything depends on it. Order within phase 1:
    rule, and it is the concrete reason the pack version is major and the two sets of `names` counts
    are not comparable.
 
+10. **Done: a changed line narrowed to the exports that own it**, which is the payoff step 9 was
+    built for and the thing it deliberately left on the floor. What landed: `nodes[].extents` on
+    every symbol node, written by `toNodes` in `engine/build.ts` out of the extents
+    `extractSymbolExtents` already computed and threw away; graph schema 8; and
+    `narrowToChangedLines` in `commands/review.ts`, which resolves a changed file to the exports its
+    hunks touched instead of to every node the file yields. Editing one export of a twenty-export
+    module now reports that export's blast radius, and the changed-files row says
+    `1 of 20 exports` so the reader can see that something was left out.
+
+    What it decided, which is the question step 9 said to answer before writing anything: a hunk no
+    extent encloses does not narrow the file at all. Narrowing is per file and it is all or nothing.
+    A line above the file's first declaration is enclosed by no extent, which is the import block at
+    the top of a file; a line cut from the end of a file lies past every extent; and a node from a
+    `fqcn` pack or a schema 7 graph has no extents to compare against; each of the
+    three answers with every node of the file, exactly as this did before. The partition is why: it
+    hands a helper written between two exports to the export above it, so narrowing on top of it can
+    over-attribute, and the fallback is what keeps that documented over-attribution from ever
+    becoming a miss. A radius naming one export too many costs a reader a minute; a radius missing
+    the export the change is in is wrong and reads as right.
+
+    What it cost: nothing on the graph but a key, and one direction of imprecision that is worth
+    naming. A removed line is attributed by the coordinate it had in the **old** file while the
+    extents are the indexed file's, so a graph behind the branch can file a deletion under a
+    neighbouring export. Dropping the removals instead would answer a deletion with the radius of
+    whatever survived around the cut, which is a miss rather than a smear, so the imprecision was
+    taken on purpose and in the over-attributing direction. Staleness is already reported at the top
+    of every brief.
+
 Steps 1 through 5 need no network and no real repository. Everything is provable against synthetic
 fixtures, which is exactly the [11-security-boundaries](11-security-boundaries.md) requirement.
 Step 6 speaks to a host at runtime and is still proven the same way: every mapping from what `gh`
@@ -822,25 +855,8 @@ was pointed at. Step 8 is the same shape one level further out: the merge is a p
 text of a `settings.json` to the text of the next one, and a hook's whole answer is a pure function
 from a payload object to a string or to null, so the host contract is tested with no host running.
 
-Two things the design docs describe that these steps deliberately did not build, recorded here as
+One thing the design docs describe that these steps deliberately did not build, recorded here as
 the rule at the top of this doc requires:
-
-- **A changed line is not narrowed to the symbols it touches.** Step 9 gave the graph per-export
-  nodes, and each one carries the lines it spans, so "this diff touched lines 40 to 52" and "these
-  are the exports that own those lines" is now a question the data can answer. Nothing asks it. Both
-  halves are already on disk and neither is wired to the other: `touchesLine` in `engine/diff.ts`
-  reads a hunk, and `ExtractedSymbol` in `engine/extractor.ts` holds `startLine` and `endLine`.
-  `empo review` still resolves a changed **file** to every node that file yields, so editing one
-  export of a twenty-export module reports the blast radius of all twenty.
-
-  This is the payoff the strategy was built for rather than a nicety, and it is left out on purpose:
-  the ids had to exist and be trusted first, and the extents are a line partition rather than a parse
-  (section 2 of [04-language-packs](04-language-packs.md) says what that cannot see). Narrowing on
-  top of a partition that hands a helper written between two exports to the export above it would
-  turn a documented over-attribution into a **missed** one, and a review that quietly drops the
-  symbol a change really touched is worse than one that reports too many. Whoever builds it should
-  decide what happens to a hunk no extent encloses, which is every edit to an import block, before
-  writing anything else.
 
 - **`empo index --root <path>` is not implemented.** A partial rebuild is only safe while no edge
   crosses a root, and step 5 made that permanently untrue: a bridge edge has one end in each root, so

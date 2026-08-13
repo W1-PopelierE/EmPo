@@ -32,7 +32,13 @@
       ],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "cancelOrder"
+      "symbol": "cancelOrder",
+      "extents": [
+        {
+          "start": 16,
+          "end": 19
+        }
+      ]
     },
     {
       "id": "src/api/orders.ts#createOrder",
@@ -54,7 +60,13 @@
       ],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "createOrder"
+      "symbol": "createOrder",
+      "extents": [
+        {
+          "start": 4,
+          "end": 7
+        }
+      ]
     },
     {
       "id": "src/api/orders.ts#fetchOrder",
@@ -76,7 +88,13 @@
       ],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "fetchOrder"
+      "symbol": "fetchOrder",
+      "extents": [
+        {
+          "start": 8,
+          "end": 11
+        }
+      ]
     },
     {
       "id": "src/api/orders.ts#health",
@@ -98,7 +116,13 @@
       ],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "health"
+      "symbol": "health",
+      "extents": [
+        {
+          "start": 12,
+          "end": 15
+        }
+      ]
     },
     {
       "id": "src/browser/__tests__/tracker.js",
@@ -123,7 +147,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "reportTotal"
+      "symbol": "reportTotal",
+      "extents": [
+        {
+          "start": 6,
+          "end": 11
+        }
+      ]
     },
     {
       "id": "src/browser/analytics.test.js",
@@ -148,7 +178,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "instrument"
+      "symbol": "instrument",
+      "extents": [
+        {
+          "start": 4,
+          "end": 7
+        }
+      ]
     },
     {
       "id": "src/browser/legacy-bridge.cjs",
@@ -173,7 +209,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "trackOrder"
+      "symbol": "trackOrder",
+      "extents": [
+        {
+          "start": 3,
+          "end": 8
+        }
+      ]
     },
     {
       "id": "src/browser/widgets/PriceWidget.jsx#PriceWidget",
@@ -186,7 +228,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "PriceWidget"
+      "symbol": "PriceWidget",
+      "extents": [
+        {
+          "start": 3,
+          "end": 6
+        }
+      ]
     },
     {
       "id": "src/browser/widgets/priceRow.jsx#PriceRow",
@@ -199,7 +247,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "PriceRow"
+      "symbol": "PriceRow",
+      "extents": [
+        {
+          "start": 5,
+          "end": 8
+        }
+      ]
     },
     {
       "id": "src/components/CartBadge.vue",
@@ -260,7 +314,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "OrderBadge"
+      "symbol": "OrderBadge",
+      "extents": [
+        {
+          "start": 3,
+          "end": 6
+        }
+      ]
     },
     {
       "id": "src/components/PriceRow.tsx#PriceRow",
@@ -273,7 +333,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "PriceRow"
+      "symbol": "PriceRow",
+      "extents": [
+        {
+          "start": 6,
+          "end": 9
+        }
+      ]
     },
     {
       "id": "src/components/cartFlag.vue",
@@ -310,7 +376,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "OldOrderScreen"
+      "symbol": "OldOrderScreen",
+      "extents": [
+        {
+          "start": 7,
+          "end": 11
+        }
+      ]
     },
     {
       "id": "src/react/Pages/Orders/Index.tsx#Index",
@@ -332,7 +404,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "Index"
+      "symbol": "Index",
+      "extents": [
+        {
+          "start": 7,
+          "end": 21
+        }
+      ]
     },
     {
       "id": "src/react/Pages/Orders/Print.jsx#Print",
@@ -354,7 +432,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "Print"
+      "symbol": "Print",
+      "extents": [
+        {
+          "start": 6,
+          "end": 9
+        }
+      ]
     },
     {
       "id": "src/react/cards/Badge.tsx#Badge",
@@ -367,7 +451,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "Badge"
+      "symbol": "Badge",
+      "extents": [
+        {
+          "start": 1,
+          "end": 4
+        }
+      ]
     },
     {
       "id": "src/react/cards/CardDocs.tsx#CardDocs",
@@ -380,7 +470,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "CardDocs"
+      "symbol": "CardDocs",
+      "extents": [
+        {
+          "start": 20,
+          "end": 23
+        }
+      ]
     },
     {
       "id": "src/react/cards/CardDocs.tsx#examples",
@@ -393,7 +489,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "examples"
+      "symbol": "examples",
+      "extents": [
+        {
+          "start": 15,
+          "end": 19
+        }
+      ]
     },
     {
       "id": "src/react/cards/CardHeader.tsx#CardHeader",
@@ -406,7 +508,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "CardHeader"
+      "symbol": "CardHeader",
+      "extents": [
+        {
+          "start": 1,
+          "end": 8
+        }
+      ]
     },
     {
       "id": "src/react/cards/CardShelf.tsx#CardShelf",
@@ -419,7 +527,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "CardShelf"
+      "symbol": "CardShelf",
+      "extents": [
+        {
+          "start": 12,
+          "end": 19
+        }
+      ]
     },
     {
       "id": "src/react/cards/CardStory.tsx#CardStory",
@@ -432,7 +546,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "CardStory"
+      "symbol": "CardStory",
+      "extents": [
+        {
+          "start": 14,
+          "end": 22
+        }
+      ]
     },
     {
       "id": "src/react/cards/CardTemplates.tsx#missingCard",
@@ -445,7 +565,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "missingCard"
+      "symbol": "missingCard",
+      "extents": [
+        {
+          "start": 20,
+          "end": 21
+        }
+      ]
     },
     {
       "id": "src/react/cards/CardTemplates.tsx#templates",
@@ -458,7 +584,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "templates"
+      "symbol": "templates",
+      "extents": [
+        {
+          "start": 15,
+          "end": 19
+        }
+      ]
     },
     {
       "id": "src/react/cards/OrderCard.tsx#OrderCard",
@@ -471,7 +603,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "OrderCard"
+      "symbol": "OrderCard",
+      "extents": [
+        {
+          "start": 13,
+          "end": 28
+        }
+      ]
     },
     {
       "id": "src/react/cards/OrderList.tsx#OrderList",
@@ -484,7 +622,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "OrderList"
+      "symbol": "OrderList",
+      "extents": [
+        {
+          "start": 8,
+          "end": 16
+        }
+      ]
     },
     {
       "id": "src/react/cards/OrderRowList.tsx#OrderRowList",
@@ -497,7 +641,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "OrderRowList"
+      "symbol": "OrderRowList",
+      "extents": [
+        {
+          "start": 13,
+          "end": 24
+        }
+      ]
     },
     {
       "id": "src/react/cards/Total.tsx#Total",
@@ -510,7 +660,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "Total"
+      "symbol": "Total",
+      "extents": [
+        {
+          "start": 4,
+          "end": 7
+        }
+      ]
     },
     {
       "id": "src/react/cards/VendorCard.tsx#VendorCard",
@@ -523,7 +679,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "VendorCard"
+      "symbol": "VendorCard",
+      "extents": [
+        {
+          "start": 16,
+          "end": 24
+        }
+      ]
     },
     {
       "id": "src/react/cards/WidgetShelf.tsx#WidgetShelf",
@@ -536,7 +698,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "WidgetShelf"
+      "symbol": "WidgetShelf",
+      "extents": [
+        {
+          "start": 18,
+          "end": 26
+        }
+      ]
     },
     {
       "id": "src/react/cards/cardFooter.tsx#CardFooter",
@@ -549,7 +717,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "CardFooter"
+      "symbol": "CardFooter",
+      "extents": [
+        {
+          "start": 11,
+          "end": 14
+        }
+      ]
     },
     {
       "id": "src/react/registry.ts#examples",
@@ -562,7 +736,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "examples"
+      "symbol": "examples",
+      "extents": [
+        {
+          "start": 12,
+          "end": 16
+        }
+      ]
     },
     {
       "id": "src/react/types/OrderRow.ts#OrderRow",
@@ -575,7 +755,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "OrderRow"
+      "symbol": "OrderRow",
+      "extents": [
+        {
+          "start": 3,
+          "end": 7
+        }
+      ]
     },
     {
       "id": "src/react/types/Total.ts#Total",
@@ -588,7 +774,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "Total"
+      "symbol": "Total",
+      "extents": [
+        {
+          "start": 3,
+          "end": 4
+        }
+      ]
     },
     {
       "id": "src/react/widgets/Badge.jsx#Badge",
@@ -601,7 +793,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "Badge"
+      "symbol": "Badge",
+      "extents": [
+        {
+          "start": 3,
+          "end": 10
+        }
+      ]
     },
     {
       "id": "src/screens/CartScreen.spec.ts",
@@ -626,7 +824,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "CartScreen"
+      "symbol": "CartScreen",
+      "extents": [
+        {
+          "start": 8,
+          "end": 13
+        }
+      ]
     },
     {
       "id": "src/screens/OrderScreen.test.tsx",
@@ -651,7 +855,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "OrderScreen"
+      "symbol": "OrderScreen",
+      "extents": [
+        {
+          "start": 5,
+          "end": 14
+        }
+      ]
     },
     {
       "id": "src/screens/OrderScreenView.tsx#OrderScreenView",
@@ -664,7 +874,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "OrderScreenView"
+      "symbol": "OrderScreenView",
+      "extents": [
+        {
+          "start": 6,
+          "end": 9
+        }
+      ]
     },
     {
       "id": "src/shared/money.ts#Money",
@@ -677,7 +893,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "Money"
+      "symbol": "Money",
+      "extents": [
+        {
+          "start": 1,
+          "end": 2
+        }
+      ]
     },
     {
       "id": "src/shared/money.ts#formatMoney",
@@ -690,7 +912,13 @@
       "consumes": [],
       "isTest": false,
       "assertsValue": false,
-      "symbol": "formatMoney"
+      "symbol": "formatMoney",
+      "extents": [
+        {
+          "start": 3,
+          "end": 6
+        }
+      ]
     },
     {
       "id": "src/shared/register-handlers.ts",

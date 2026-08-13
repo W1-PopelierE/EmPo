@@ -14,7 +14,12 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { indexCommand } from "../../src/commands/index";
-import { type ReviewOptions, reviewableFiles, reviewCommand } from "../../src/commands/review";
+import {
+  narrowToChangedLines,
+  type ReviewOptions,
+  reviewableFiles,
+  reviewCommand,
+} from "../../src/commands/review";
 import type { ReviewFinding } from "../../src/discipline/findings";
 import { reviewWorkflow } from "../../src/discipline/load";
 import type { ChangedFile } from "../../src/engine/diff";
@@ -2026,6 +2031,143 @@ describe("reviewableFiles", () => {
 });
 
 /**
+ * Which of a file's exports a diff actually touched.
+ *
+ * The rule under test is a refusal as much as a narrowing: it names fewer exports only when every
+ * changed line is attributable, because the extents are a line partition rather than a parse and a
+ * review that drops the symbol a change really touched is worse than one naming too many
+ * (docs/14-implementation-notes.md).
+ */
+describe("narrowToChangedLines", () => {
+  function node(symbol: string, extents?: { start: number; end: number }[]): GraphNode {
+    return {
+      id: `src/money.ts#${symbol}`,
+      file: "src/money.ts",
+      root: ".",
+      lang: "typescript",
+      kind: "module",
+      name: symbol,
+      symbol,
+      produces: [],
+      consumes: [],
+      isTest: false,
+      assertsValue: false,
+      extents,
+    };
+  }
+
+  /** One hunk, `added` holding the new-file line numbers it writes. */
+  function changedAt(added: number[], newStart = added[0] ?? 1): ChangedFile {
+    return {
+      path: "src/money.ts",
+      oldPath: null,
+      status: "modified",
+      hunks: [
+        {
+          oldStart: newStart,
+          oldLines: added.length,
+          newStart,
+          newLines: added.length,
+          added: added.map((line) => ({ line, text: "  return 0;" })),
+          removed: [],
+        },
+      ],
+      addedCount: added.length,
+      removedCount: 0,
+      isBinary: false,
+    };
+  }
+
+  const formatMoney = node("formatMoney", [{ start: 1, end: 4 }]);
+  const parseMoney = node("parseMoney", [{ start: 5, end: 7 }]);
+
+  test("keeps only the export whose lines the diff touched", () => {
+    const narrowed = narrowToChangedLines([formatMoney, parseMoney], changedAt([6]));
+
+    expect(narrowed.map((entry) => entry.symbol)).toEqual(["parseMoney"]);
+  });
+
+  test("keeps both when the diff touches both", () => {
+    const narrowed = narrowToChangedLines([formatMoney, parseMoney], changedAt([2, 6]));
+
+    expect(narrowed.map((entry) => entry.symbol)).toEqual(["formatMoney", "parseMoney"]);
+  });
+
+  test("matches a name on either of the extents it owns", () => {
+    // Declaration merging: one node, two disjoint runs of lines, and an edit to the second one is
+    // an edit to that name and not to whatever is declared above it.
+    const merged = node("Money", [
+      { start: 1, end: 3 },
+      { start: 8, end: 10 },
+    ]);
+    const between = node("format", [{ start: 4, end: 7 }]);
+
+    expect(narrowToChangedLines([merged, between], changedAt([9])).map((n) => n.symbol)).toEqual([
+      "Money",
+    ]);
+  });
+
+  test("refuses to narrow when a changed line falls outside every extent", () => {
+    // The import block: written above every declaration, enclosed by nothing, and the case this
+    // fallback exists for.
+    const narrowed = narrowToChangedLines([formatMoney, parseMoney], changedAt([1, 6], 1));
+    const importEdit = narrowToChangedLines(
+      [node("formatMoney", [{ start: 3, end: 5 }]), node("parseMoney", [{ start: 6, end: 8 }])],
+      changedAt([1]),
+    );
+
+    expect(narrowed.map((entry) => entry.symbol)).toEqual(["formatMoney", "parseMoney"]);
+    expect(importEdit.map((entry) => entry.symbol)).toEqual(["formatMoney", "parseMoney"]);
+  });
+
+  function deletionAt(removed: number[]): ChangedFile {
+    const file = changedAt([]);
+    file.hunks = [
+      {
+        oldStart: removed[0] ?? 1,
+        oldLines: removed.length,
+        newStart: removed[0] ?? 1,
+        newLines: 0,
+        added: [],
+        removed: removed.map((line) => ({ line, text: "  return 0;" })),
+      },
+    ];
+    return file;
+  }
+
+  test("attributes a deletion by the lines it cut", () => {
+    // A hunk that only deletes writes no new line to narrow by, and answering it with whatever
+    // survived around the cut would report the blast radius of the code that did not change.
+    const narrowed = narrowToChangedLines([formatMoney, parseMoney], deletionAt([5, 6, 7]));
+
+    expect(narrowed.map((entry) => entry.symbol)).toEqual(["parseMoney"]);
+  });
+
+  test("refuses to narrow when a cut line lies past every extent", () => {
+    // Deleting the last export of a file: the lines it held are beyond anything the indexed file
+    // spans, so nothing owns them and the whole file answers.
+    const narrowed = narrowToChangedLines([formatMoney, parseMoney], deletionAt([8, 9]));
+
+    expect(narrowed.map((entry) => entry.symbol)).toEqual(["formatMoney", "parseMoney"]);
+  });
+
+  test("refuses to narrow a graph written before extents were recorded", () => {
+    // A schema 7 graph, or any pack that ids by file or by class. Absent lines are not "spans
+    // nothing": defaulting them that way would answer an empty blast radius for a real change.
+    const narrowed = narrowToChangedLines(
+      [node("formatMoney"), node("parseMoney")],
+      changedAt([6]),
+    );
+
+    expect(narrowed.map((entry) => entry.symbol)).toEqual(["formatMoney", "parseMoney"]);
+  });
+
+  test("leaves a file that yields one node alone", () => {
+    expect(narrowToChangedLines([formatMoney], changedAt([99]))).toEqual([formatMoney]);
+  });
+});
+
+/**
  * A brief over a graph whose ids name exported symbols rather than files.
  *
  * The acme fixture cannot ask this question: it is php under a pack that ids by class, where a file
@@ -2042,8 +2184,14 @@ describe("a changed file that holds several exports", () => {
   const MONEY = "src/money.ts";
   const SETUP_TEST = "src/setup.test.ts";
 
-  function symbolNode(file: string, symbol: string, isTest = false): GraphNode {
+  function symbolNode(
+    file: string,
+    symbol: string,
+    isTest = false,
+    extents?: { start: number; end: number }[],
+  ): GraphNode {
     return {
+      extents,
       id: `${file}#${symbol}`,
       file,
       root: ".",
@@ -2065,8 +2213,10 @@ describe("a changed file that holds several exports", () => {
    */
   function symbolGraph(): Graph {
     const nodes = [
-      symbolNode(MONEY, "formatMoney"),
-      symbolNode(MONEY, "parseMoney"),
+      // The extents of the fixture's own src/money.ts, so a diff can be narrowed to one of the two
+      // exports. Only this file carries them: the others are never the file under the edit here.
+      symbolNode(MONEY, "formatMoney", false, [{ start: 1, end: 4 }]),
+      symbolNode(MONEY, "parseMoney", false, [{ start: 5, end: 7 }]),
       symbolNode("src/total.ts", "LABEL"),
       symbolNode("src/total.ts", "total"),
       symbolNode(SETUP_TEST, "addsUp", true),
@@ -2152,6 +2302,23 @@ describe("a changed file that holds several exports", () => {
       .find((line) => line.trimStart().startsWith("modified") && line.includes(MONEY));
 
     expect(row ?? "").toContain("formatMoney, parseMoney");
+  });
+
+  test("reports the export the diff touched, not every export the file holds", () => {
+    const dir = symbolRepo();
+    const source = readFileSync(join(dir, MONEY), "utf8").split("\n");
+    // Line 6 only: the body of parseMoney, which is the second of the file's two exports.
+    source[5] = "  return Math.round(Number(text) * 1000);";
+    writeFileSync(join(dir, MONEY), source.join("\n"));
+
+    const printed = capture(() => reviewCommand(dir, undefined, { workflow: false }));
+    const row = printed
+      .split("\n")
+      .find((line) => line.trimStart().startsWith("modified") && line.includes(MONEY));
+
+    expect(row ?? "").toContain("1 of 2 exports: parseMoney");
+    // The fan-in is that one export's, not the union of the file's: only src/total.ts imports it.
+    expect(printed).toContain("fan-in 1 direct, 3 transitive");
   });
 
   test("names a test file once however many test nodes it exports", () => {
