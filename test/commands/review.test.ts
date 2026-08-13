@@ -1882,6 +1882,78 @@ describe("exit codes", () => {
     expect(error.message).toContain(missing);
   });
 
+  /**
+   * The order is the property, not the refusal. `--post` on a forge that cannot post always failed;
+   * it failed after the whole discipline had run and every verified finding was already on screen,
+   * from inside the posting loop. So each of these asserts what was printed before the throw as well
+   * as the throw itself, because a test that only caught the error would pass on the old behaviour.
+   */
+  test("refuses --post before the brief runs when no forge is configured, with exit code 2", () => {
+    const printed: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      printed.push(args.join(" "));
+    });
+
+    const error = expectEmpoError(2, () => reviewCommand(repo, undefined, { post: true }));
+
+    expect(error.message).toContain("cannot post");
+    // Exit 2 and not 3: with nothing in adapters.forge this is a config gap the author closes.
+    expect(error.details.join("\n")).toContain("Drop --post");
+    expect(printed).toEqual([]);
+  });
+
+  /**
+   * The exit code comes off the adapter that refuses and never off what is written in config, which
+   * is what keeps it the code that adapter's own throw would have produced. A configured forge that
+   * degraded to `local` is refused exactly as an unconfigured one is, because the thing with nowhere
+   * to post is the same thing in both, and a run reading the working diff is the author's config to
+   * fix rather than their machine's.
+   */
+  test("refuses --post as a config error when a configured forge degraded to local", () => {
+    configureAdapters(repo, { forge: { kind: "mcp", host: "bitbucket" } });
+
+    const error = expectEmpoError(2, () =>
+      capture(() => reviewCommand(repo, undefined, { post: true, workflow: false })),
+    );
+
+    // Named for the adapter that refused, not for the kind in config: with no pull request the mcp
+    // forge was never consulted, and telling this author "the bitbucket forge" would send them to
+    // debug a host this run never reached.
+    expect(error.message).toContain("The local forge cannot post");
+    // The capability set it does declare, so the reader can see `post` is the one absent from it.
+    expect(error.details.join("\n")).toContain("It declares: diff");
+    // The note, which is the only line saying this is not the forge that was configured.
+    expect(error.details.join("\n")).toContain("no pull request was named");
+  });
+
+  test("refuses --post even when nothing survived verification and there was nothing to post", () => {
+    // The case that used to print "posted 0 finding(s) to local" and exit 0: the loop never called
+    // the adapter, so nothing refused, and a run that could not have posted reported that it had.
+    capture(() => reviewCommand(repo, undefined, { workflow: false }));
+    const path = findingsPathOf(repo);
+    writeFileSync(path, `${JSON.stringify({ findings: [] }, null, 2)}\n`);
+
+    const error = expectEmpoError(2, () =>
+      capture(() => reviewCommand(repo, undefined, { findings: path, post: true })),
+    );
+
+    expect(error.message).toContain("cannot post");
+  });
+
+  test("refuses --post in the gate phase before it has posted anything", () => {
+    capture(() => reviewCommand(repo, undefined, { workflow: false }));
+    const path = findingsPathOf(repo);
+    writeFileSync(path, `${JSON.stringify({ findings: [realFinding()] }, null, 2)}\n`);
+
+    // The brief is what wrote the session, so posting is refused on a review that got all the way
+    // to having verified findings: the refusal is about the forge and never about the findings.
+    const error = expectEmpoError(2, () =>
+      capture(() => reviewCommand(repo, undefined, { findings: path, post: true })),
+    );
+
+    expect(error.message).toContain("cannot post");
+  });
+
   test("refuses --post together with --readonly, with exit code 2", () => {
     const error = expectEmpoError(2, () =>
       capture(() => reviewCommand(repo, undefined, { post: true, readonly: true })),

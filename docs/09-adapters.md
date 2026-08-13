@@ -323,15 +323,33 @@ already states:
 | `ci` | the payload carried a `ci` key |
 | `post` | never in this version |
 
-No `post` means `--post` has nowhere to go on an `mcp` forge, and it is worth being exact about what
-actually stops it, because the capability set is not what does. Nothing in the review consults that
-set before calling: `approve` and `requestChanges` have no caller anywhere in the shipped code, and
-`comment` is called directly for each surviving finding whenever `--post` was passed. What refuses is
-the adapter itself, whose three mutating methods throw an environment error naming the host rather
-than doing nothing. So the declared capability is what the brief prints, so a reader knows posting was
-unavailable, and the throw is what makes the refusal true. The interface does carry a `hasCapability`
-helper for the up-front check, and it has no call site; that is the same gap the last section of this
-doc names as the obvious next thing to add.
+No `post` means `--post` has nowhere to go on an `mcp` forge, and the capability set is now what
+stops it. `empo review` asks `hasCapability(adapter, "post")` twice: once in the brief, on the line
+after the adapter is built, which is the earliest the question can be answered at all; and once in
+the gate, before the loop that posts one comment per surviving finding. The second is not a
+duplicate of the first. That loop is the only place a refusal could land halfway, with some findings
+up and the rest not, so asking before the first `comment` is what makes posting all-or-nothing.
+
+The adapters' own throws stay, and they are what the interface header calls them: `approve` and
+`requestChanges` still have no caller anywhere in the shipped code, and all three mutating methods
+still throw rather than doing nothing, so a future caller that forgets the check finds out. What
+changed is which of the two a user meets. The declared capability is still what the brief prints, so
+a reader knows posting was unavailable; it is now also what refuses, before the review is spent.
+
+The exit code is read off the adapter that refuses and never off what is written in config, so it is
+the code that adapter's own throw would have produced: `local` has nowhere to post and says so as a
+config error (2), `mcp` reached a host it cannot write back to and says so as an environment error
+(3). Reading it off `adapters.forge` instead would move every degraded run to 3, including a forge
+configured `local`, whose author fixes it in `.empo/config.json` and not on their machine. The
+refusal prints the capabilities the forge does declare, so `post` is visibly the one absent from the
+list rather than a word in a sentence, and it names the adapter that refused rather than the kind in
+config: with no pull request named, telling an author "the bitbucket forge" would send them to debug
+a host the run never reached.
+
+It refuses whether or not any finding survived. A run with nothing to post used to reach the end of
+the loop without calling the adapter once and print "posted 0 finding(s)", a sentence about a write
+that never happened and could not have happened. The capability is a fact about the forge and not
+about the findings, so the answer does not depend on how many there were.
 
 ### Known limitations, stated rather than discovered
 
@@ -521,6 +539,12 @@ conventions are still unbuilt.
 posting is a write, and every write in this design would have to travel back out through the agent,
 which is a second round trip nobody has specified yet. So the honest reading is that this version
 reviews Bitbucket and GitLab pull requests without writing to them, and `--post` against an `mcp`
-forge fails as an environment error (exit 3) after the verified findings have been printed. The
-findings are not lost, but the refusal arrives later and louder than a capability check up front
-would make it, and that check is the obvious next thing to add here.
+forge is refused as an environment error (exit 3) before the review runs, off the capability the
+adapter declares.
+
+That refusal used to arrive at the other end: the discipline ran, the verified findings printed, and
+the command then died inside the posting loop on a capability the adapter had been declaring absent
+since it was constructed. Nothing was lost except the reviewer's time, which is the cost worth
+naming, because it was spent on an answer that was knowable before it was spent. A capability a host
+lacks is a fact about the host and not about the findings, so it is checked where facts about the
+host are: at the adapter, before anything is read.
