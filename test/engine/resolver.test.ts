@@ -277,7 +277,7 @@ describe("resolveEdges, view", () => {
 
   test("finds the root anywhere in a repo-relative path, so a monorepo resolves", () => {
     // `apps/api/resources/views/...` is as normal a Laravel layout as the bare one, and a node id
-    // is repo-relative for exactly the reason resolveModulePath's are.
+    // is repo-relative for exactly the reason resolveModuleFile's are.
     const show = template("apps/api/resources/views/orders/show.blade.php");
     const controller = node("Acme\\OrderController", "OrderController", "apps/api/app/O.php", [
       viewCapture("orders/show", 3),
@@ -1483,6 +1483,51 @@ describe("resolveEdges under a pack whose files yield many nodes", () => {
     expect(resolved.edges.map((edge) => edge.to)).toEqual([
       "src/money.ts#formatMoney",
       "src/money.ts#parseMoney",
+    ]);
+  });
+
+  test("corroborates a folded short name against a file that yields many nodes", () => {
+    // The regression this exists to catch is silent, which is why it is worth a test of its own.
+    // `importsNameFrom` asks whether this file imports a name from the file a candidate node lives
+    // in. A specifier names a module and never one export of it, so the only honest comparison is
+    // against the file. Comparing against a resolved **id** answers false for every file holding
+    // more than one export, because no specifier resolves to one of them, and the fold is then
+    // refused as a name that corroborated nothing. Nothing errors, no count drops to zero, and every
+    // JSX edge whose target module happens to export a second symbol simply stops existing.
+    const badge: ExtractedFile = {
+      ...node("src/components/badge.tsx", "badge", "src/components/badge.tsx"),
+      lang: "typescript",
+      kind: "component",
+      symbols: [
+        { name: "badge", id: "src/components/badge.tsx#badge", startLine: 1, endLine: 4 },
+        { name: "helper", id: "src/components/badge.tsx#helper", startLine: 5, endLine: 9 },
+      ],
+    };
+    const screen: ExtractedFile = {
+      ...node("src/screens/Cart.tsx", "Cart", "src/screens/Cart.tsx"),
+      lang: "typescript",
+      kind: "screen",
+      captures: [
+        {
+          family: "import" as const,
+          resolve: "module-path" as const,
+          groups: ['import { Badge } from "../components/badge"', "../components/badge"],
+          line: 1,
+        },
+        { ...shortNameCapture("Badge", 7), targetKinds: ["component", "screen"] },
+      ],
+    };
+
+    const resolved = resolveEdges(screen, buildNodeIndex([badge, screen]), TS);
+
+    // The template edge is the one under test. The import capture emits its own edges to both
+    // exports beside it, which is the documented fallback: the clause binds `Badge`, that file
+    // exports no such name, and an import this engine cannot pin to one export reaches the module.
+    expect(
+      resolved.edges.filter((edge) => edge.kind === "template").map((edge) => edge.to),
+    ).toEqual(["src/components/badge.tsx#badge"]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "Badge", outcome: "resolved", candidates: 1 },
     ]);
   });
 });

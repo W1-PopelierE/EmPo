@@ -83,7 +83,7 @@ const repoPath = name.transform(normalizeRepoPath).refine((path) => !path.starts
  * toolchain the alias is copied from does not make that decision either.
  *
  * A pattern beginning `./` or `../` is refused rather than accepted and ignored. A relative
- * specifier never reaches the alias map at all, because `resolveModulePath` resolves it against the
+ * specifier never reaches the alias map at all, because `resolveModuleFile` resolves it against the
  * importing file first and answers before it looks here, so such a key would sit in a config file
  * looking like it did something and match nothing forever. That is the same silent-no-match failure
  * `normalizeRepoPath` above exists to make impossible, arriving through a different field.

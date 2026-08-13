@@ -4,7 +4,7 @@ import { runPackFixtures } from "../../src/commands/pack";
 import { compilePack, compileTestPath, extractFile } from "../../src/engine/extractor";
 import { maskComments } from "../../src/engine/mask";
 import { fixturesDir, loadPack } from "../../src/engine/pack-loader";
-import { resolveModulePath } from "../../src/engine/resolver";
+import { resolveModuleFile } from "../../src/engine/resolver";
 import type { GraphEdge, GraphNode } from "../../src/schema/types";
 
 /**
@@ -266,7 +266,7 @@ describe("typescript pack", () => {
     };
 
     expect(
-      resolveModulePath("src/browser/analytics.js", "../shared/money", index, {
+      resolveModuleFile("src/browser/analytics.js", "../shared/money", index, {
         extensions: pack.match.extensions,
         indexNames: pack.node.id.indexNames ?? [],
       }),

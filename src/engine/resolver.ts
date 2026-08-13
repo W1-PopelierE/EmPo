@@ -186,7 +186,7 @@ export function buildNodeIndex(files: ExtractedFile[], views?: PackViews): NodeI
  *
  * The root is matched **anywhere in the path** rather than only at its start, because a node id is
  * repo-relative and a Laravel application is as often `apps/api/resources/views/` as it is
- * `resources/views/`. That is the same reason `resolveModulePath` resolves against repo-relative
+ * `resources/views/`. That is the same reason `resolveModuleFile` resolves against repo-relative
  * ids: a monorepo is the normal case, not the odd one.
  *
  * ponytail: two applications in one repository each holding `orders/show` make that name ambiguous
@@ -285,13 +285,28 @@ export function resolveEdges(
     return !new RegExp(`(?:^|[^A-Za-z0-9_$])${escaped}\\s+as\\s`).test(statement);
   };
 
+  /**
+   * Does this file import `name` from the file that holds the candidate node?
+   *
+   * The question is asked of the **file**, not of the id, and under a strategy that gives one file
+   * many nodes those are two different questions. A specifier names a module and never one export of
+   * it, so `import { Button } from "./Button"` corroborates the candidate `.../Button.tsx#Button`
+   * exactly as it corroborates the file-level `.../Button.tsx`: the import is evidence that this file
+   * reached into that module, and which node of the module carries the name is settled by the
+   * candidate list this is filtering, not by the specifier.
+   *
+   * Comparing against a resolved id instead would answer false for every multi-export file, because
+   * no specifier resolves to one. That is not a stricter rule, it is a broken one: it would refuse
+   * every folded short name whose target happens to export more than one symbol, and refuse it
+   * silently, as a name that corroborated nothing.
+   */
   const importsNameFrom = (name: string, id: string): boolean =>
-    file.captures.some(
-      (capture) =>
-        capture.resolve === "module-path" &&
-        statementBinds(capture.groups[0] ?? "", name) &&
-        resolveModulePath(file.file, capture.groups[1] ?? "", index, context) === id,
-    );
+    file.captures.some((capture) => {
+      if (capture.resolve !== "module-path") return false;
+      if (!statementBinds(capture.groups[0] ?? "", name)) return false;
+      const target = resolveModuleFile(file.file, capture.groups[1] ?? "", index, context);
+      return target !== null && (index.byFile.get(target) ?? []).includes(id);
+    });
 
   /**
    * Does this file import `name` from a package the repository installs? Asked last, of a name the
@@ -530,28 +545,6 @@ export function resolveModuleFile(
     if (index.byFile.has(candidate)) return candidate;
   }
   return null;
-}
-
-/**
- * The same resolution answered as a node id, for the one caller that has an id in hand and needs to
- * know whether this specifier names it: `importsNameFrom` above, corroborating a folded short name.
- *
- * A file yielding one node answers with that node, which is every file of a `fqcn` or `module-path`
- * pack and a single-export file of a `symbol` one. A file yielding several has no single id to give,
- * so it answers with its path: the question the caller asks is an equality against a node id, and a
- * path is never one under that strategy, so the answer is honestly negative rather than one of the
- * exports picked out of several the statement may not have named.
- */
-export function resolveModulePath(
-  fromFile: string,
-  specifier: string,
-  index: NodeIndex,
-  context: ResolveContext,
-): string | null {
-  const file = resolveModuleFile(fromFile, specifier, index, context);
-  if (file === null) return null;
-  const ids = index.byFile.get(file) ?? [];
-  return ids.length === 1 ? (ids[0] ?? null) : file;
 }
 
 /**
