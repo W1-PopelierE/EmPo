@@ -85,11 +85,6 @@ export interface QueryOptions {
 
 export interface BlastRadius {
   /**
-   * The first of `nodes` by id, kept for the printers and callers that need one node's file, kind
-   * and language, all of which are file-level facts every node in the set shares.
-   */
-  node: GraphNode;
-  /**
    * Every node the answer is about. One under a pack that ids by file or by class, and one per
    * export under a pack that ids by symbol, where the reader typed a path and the file holds several.
    */
@@ -253,14 +248,11 @@ function sortedById(nodes: GraphNode[]): GraphNode[] {
  * union is the honest answer to "what can changing this file reach": every consumer of every export
  * it holds. The set is subtracted from its own radius throughout, so a file whose one export imports
  * its sibling is not reported as its own consumer, which is a number no reader could act on.
- *
- * `GraphNode | GraphNode[]` for one caller: `empo review` still walks node by node until it is
- * collapsed to one block per changed file. ponytail: narrow to the array once it is.
  */
-export function blastRadius(graph: Graph, nodes: GraphNode | GraphNode[]): BlastRadius {
-  const set = Array.isArray(nodes) ? nodes : [nodes];
-  const first = set[0];
-  if (first === undefined) throw configError("empo query was asked for the radius of no node", []);
+export function blastRadius(graph: Graph, set: GraphNode[]): BlastRadius {
+  if (set[0] === undefined) {
+    throw configError("empo query was asked for the radius of no node", []);
+  }
   const ids = new Set(set.map((node) => node.id));
 
   const incoming = new Map<string, string[]>();
@@ -309,7 +301,6 @@ export function blastRadius(graph: Graph, nodes: GraphNode | GraphNode[]): Blast
     .sort((a, b) => compareStrings(a.flow, b.flow));
 
   return {
-    node: first,
     nodes: set,
     faninDirect: direct.length,
     // The queried nodes are in the reachable set and are not their own consumers.
@@ -716,8 +707,24 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
+/**
+ * Any node of a radius, for the callers that want a file-level fact off it: the file, the kind, the
+ * language and the root are properties of the file every node in the set lives in, and `resolveNodes`
+ * is what guarantees they all live in one. Asking for the first by id rather than for a particular
+ * one is therefore not a choice between different answers, it is picking any of several copies.
+ *
+ * The refusal is unreachable, `blastRadius` having already refused an empty set, and it is written
+ * out anyway so this returns a node rather than a maybe-node and no caller has to handle a case
+ * that cannot happen.
+ */
+export function radiusNode(answer: BlastRadius): GraphNode {
+  const node = answer.nodes[0];
+  if (node === undefined) throw configError("a blast radius was built over no node", []);
+  return node;
+}
+
 function printBlastRadius(answer: BlastRadius): void {
-  const { node } = answer;
+  const node = radiusNode(answer);
 
   // Every id the answer is about, and not the first of them. A path naming four exports gives four
   // ids, and printing one of them under a fan-in computed over all four would put a number beside a

@@ -880,7 +880,7 @@ describe("queryCommand", () => {
     // and never sees the printed sentence.
     const answer = JSON.parse(capture(() => queryCommand(repo, CALCULATOR, { json: true })));
 
-    expect(answer.node.id).toBe(CALCULATOR);
+    expect(answer.nodes.map((node: { id: string }) => node.id)).toEqual([CALCULATOR]);
     expect(answer.caveat).toBe(FLOOR_NOT_CEILING);
   });
 
