@@ -109,7 +109,7 @@ export function buildRoot(options: BuildRootOptions): RootGraph {
     edges.push(...resolved.edges);
     names.push(...resolved.names);
   }
-  const deduped = dedupeNodes(extracted.map(toNode));
+  const deduped = dedupeNodes(extracted.flatMap(toNodes));
 
   return {
     nodes: deduped.nodes,
@@ -180,14 +180,45 @@ function resolveJob(index: NodeIndex, job: string): string | null {
   return candidates[0] ?? null;
 }
 
-function toNode(file: ExtractedFile): GraphNode {
+/**
+ * The nodes one file yields. A file whose pack found symbols in it yields one per symbol and no node
+ * of its own, which is what keeps this from doubling every name in the index: a `Button.tsx`
+ * exporting `Button` carried one node named `Button` before and carries one now. A file whose pack
+ * found none yields exactly the node it always did, so nothing about a `fqcn` or a `module-path`
+ * pack moves, and neither does a `symbol` pack's file that exports nothing.
+ *
+ * `kind`, `isTest` and `assertsValue` are file-level facts copied onto each node, and honestly so: a
+ * kind rule reads a path glob and a content pattern over the whole file, and a test file asserts or
+ * does not assert as a file. Naming them per symbol would invent a distinction the pack contract
+ * does not draw. `produces` and `consumes` are the two that are not, because extraction attributed
+ * every one of them to the exports whose lines wrote it.
+ */
+function toNodes(file: ExtractedFile): GraphNode[] {
+  if (file.symbols.length === 0) return [fileNode(file, file.id, file.name)];
+  return file.symbols.map((symbol) => ({
+    ...fileNode(file, symbol.id, symbol.name),
+    symbol: symbol.name,
+    produces: file.produces.filter((ref) => owns(ref.owners, symbol.id)),
+    consumes: file.consumes.filter((ref) => owns(ref.owners, symbol.id)),
+  }));
+}
+
+/**
+ * Absent owners mean every node the file yields, which is what an unattributable line says: the
+ * whole file may be the thing. See `Capture.owners` in engine/extractor.ts.
+ */
+function owns(owners: string[] | undefined, id: string): boolean {
+  return owners === undefined || owners.includes(id);
+}
+
+function fileNode(file: ExtractedFile, id: string, name: string): GraphNode {
   return {
-    id: file.id,
+    id,
     file: file.file,
     root: file.root,
     lang: file.lang,
     kind: file.kind,
-    name: file.name,
+    name,
     produces: file.produces,
     consumes: file.consumes,
     isTest: file.isTest,

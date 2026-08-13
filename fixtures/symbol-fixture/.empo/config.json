@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "roots": [{ "path": ".", "lang": "typescript" }],
+  "packs": { "typescript": { "version": "^1" } },
+  "bridges": [],
+  "ignore": [],
+  "commit": []
+}

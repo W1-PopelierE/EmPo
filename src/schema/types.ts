@@ -40,6 +40,13 @@ export interface GraphNode {
   isTest: boolean;
   /** A test that uses one of the pack's assertionTerms. Always false on a non-test node. */
   assertsValue: boolean;
+  /**
+   * The name this node is the export of, for a `symbol`-strategy pack. Absent on a file-level node,
+   * which is every node of a `fqcn` or a `module-path` pack and the node a `symbol` pack's file
+   * yields when its pattern found no export in it. Present is what tells a printer that a path names
+   * several nodes and that saying "export" rather than "file" is the truth about this graph.
+   */
+  symbol?: string;
 }
 
 /** One end-user journey from flows.json. `paths` are repo-relative path prefixes. */

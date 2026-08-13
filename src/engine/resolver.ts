@@ -1,7 +1,7 @@
 import { posix } from "node:path";
 import { configError } from "../errors";
 import type { GraphEdge, NameOutcome, NameVerdict, PackViews } from "../schema/types";
-import { type Capture, type ExtractedFile, isSideEffectImport } from "./extractor";
+import { boundNames, type Capture, type ExtractedFile, isSideEffectImport } from "./extractor";
 import { compareStrings } from "./order";
 import { packageOf } from "./packages";
 
@@ -19,6 +19,20 @@ import { packageOf } from "./packages";
 
 export interface NodeIndex {
   ids: Set<string>;
+  /**
+   * Repo-relative path to the node ids that file yields, sorted. One entry for a pack whose files
+   * each yield a single node, one per export for a `symbol` pack.
+   *
+   * It is what module resolution walks, and that is not a convenience. Resolution turns a specifier
+   * into a **file**: it tries the pack's extensions and index names against a path, and a path is
+   * only a node id by the accident that two of the three strategies name a node after one. Under
+   * `symbol` no path is an id at all, so a walk ending in `ids.has(candidate)` would answer null for
+   * every import in every repository the moment a pack adopted the strategy, and it would do it
+   * silently: an import that resolves to nothing is the same shape as a vendor import, which this
+   * file drops by design. Keyed by file it asks the question it means, and the two path-shaped
+   * strategies answer exactly as they did, `byFile` holding every path they ever put in `ids`.
+   */
+  byFile: Map<string, string[]>;
   /** Short name to node ids. More than one id means the name is ambiguous and is not resolved. */
   byShortName: Map<string, string[]>;
   /**
@@ -127,30 +141,43 @@ export function compileAliases(aliases: Record<string, string[]> | undefined): A
 
 export function buildNodeIndex(files: ExtractedFile[], views?: PackViews): NodeIndex {
   const ids = new Set<string>();
+  const byFile = new Map<string, string[]>();
   const byShortName = new Map<string, string[]>();
   const byFoldedName = new Map<string, string[]>();
   const kindById = new Map<string, string>();
   const byViewName = new Map<string, string[]>();
 
   for (const file of files) {
-    ids.add(file.id);
-    kindById.set(file.id, file.kind);
-    const bucket = byShortName.get(file.name);
-    if (bucket) bucket.push(file.id);
-    else byShortName.set(file.name, [file.id]);
-    const folded = file.name.toLowerCase();
-    const foldedBucket = byFoldedName.get(folded);
-    if (foldedBucket) foldedBucket.push(file.id);
-    else byFoldedName.set(folded, [file.id]);
+    // The nodes this file yields, which is the same list `toNodes` in engine/build.ts builds and for
+    // the same reason: a file the pack found exports in is those exports, and a file it found none in
+    // is itself. The two are written apart because one produces nodes and this one indexes them, and
+    // an index built from the nodes instead would need the graph before the edges that need the index.
+    const entries =
+      file.symbols.length === 0
+        ? [{ id: file.id, name: file.name }]
+        : file.symbols.map((symbol) => ({ id: symbol.id, name: symbol.name }));
+    byFile.set(file.file, entries.map((entry) => entry.id).sort(compareStrings));
+
     const viewName = views === undefined ? null : viewNameOf(file.file, views);
-    if (viewName !== null) {
-      const viewBucket = byViewName.get(viewName);
-      if (viewBucket) viewBucket.push(file.id);
-      else byViewName.set(viewName, [file.id]);
+    for (const entry of entries) {
+      ids.add(entry.id);
+      kindById.set(entry.id, file.kind);
+      const bucket = byShortName.get(entry.name);
+      if (bucket) bucket.push(entry.id);
+      else byShortName.set(entry.name, [entry.id]);
+      const folded = entry.name.toLowerCase();
+      const foldedBucket = byFoldedName.get(folded);
+      if (foldedBucket) foldedBucket.push(entry.id);
+      else byFoldedName.set(folded, [entry.id]);
+      if (viewName !== null) {
+        const viewBucket = byViewName.get(viewName);
+        if (viewBucket) viewBucket.push(entry.id);
+        else byViewName.set(viewName, [entry.id]);
+      }
     }
   }
 
-  return { ids, byShortName, byFoldedName, kindById, byViewName };
+  return { ids, byFile, byShortName, byFoldedName, kindById, byViewName };
 }
 
 /**
@@ -365,27 +392,49 @@ export function resolveEdges(
 
   for (const capture of file.captures) {
     const evidence = { file: file.file, line: capture.line };
+    // Which of this file's nodes wrote the reference. One for every pack that yields a node per
+    // file, and for a `symbol` pack the exports extraction attributed the line to: an edge out of
+    // the whole file is the answer that strategy exists to stop giving.
+    const sources = capture.owners ?? [file.id];
 
     switch (capture.resolve) {
       case "fqcn":
       case "fqcn-string": {
         const target = normalizeFqcn(capture.groups[1] ?? "");
-        if (target !== "" && target !== file.id && index.ids.has(target)) {
-          edges.push({ from: file.id, to: target, kind: capture.family, symbol: null, evidence });
+        if (target !== "" && index.ids.has(target)) {
+          for (const from of sources) {
+            if (target !== from) {
+              edges.push({ from, to: target, kind: capture.family, symbol: null, evidence });
+            }
+          }
         }
         break;
       }
 
       case "module-path": {
-        const target = resolveModulePath(file.file, capture.groups[1] ?? "", index, context);
-        if (target !== null && target !== file.id) {
-          edges.push({ from: file.id, to: target, kind: capture.family, symbol: null, evidence });
+        const targetFile = resolveModuleFile(file.file, capture.groups[1] ?? "", index, context);
+        if (targetFile === null || targetFile === file.file) break;
+        const available = index.byFile.get(targetFile) ?? [];
+        // The names the statement binds that the target file actually exports. Where it binds none
+        // this engine can match to an export, the import reaches the whole module: a side-effect
+        // import runs the file, a default or a namespace import can reach any of it, and a file
+        // yielding one node has that node named by every import of it either way.
+        const bound = boundNames(capture.groups[0] ?? "");
+        const named = available.filter((id) => bound.includes(id.slice(id.indexOf("#") + 1)));
+        const targets = named.length > 0 ? named : available;
+        for (const from of sources) {
+          for (const to of targets) {
+            if (to === from) continue;
+            edges.push({ from, to, kind: capture.family, symbol: null, evidence });
+          }
         }
         break;
       }
 
       // The registration site coupled two other files: the edge runs from the observed node to
       // its listener, and the evidence stays on the file that registered it.
+      // Neither end of this one is the file that wrote it, so `sources` says nothing about it: the
+      // edge runs between the two classes the registration coupled, and this file is the witness.
       case "observer": {
         // Both names are read, and both unconditionally: `&&` would stop at the first refusal and
         // the second name would go uncounted, so a registration whose observed class is ambiguous
@@ -407,8 +456,12 @@ export function resolveEdges(
       // could see from either pack.
       case "short-name": {
         const target = read(capture.groups[1], capture);
-        if (target !== null && target !== file.id) {
-          edges.push({ from: file.id, to: target, kind: capture.family, symbol: null, evidence });
+        if (target !== null) {
+          for (const from of sources) {
+            if (target !== from) {
+              edges.push({ from, to: target, kind: capture.family, symbol: null, evidence });
+            }
+          }
         }
         break;
       }
@@ -420,8 +473,12 @@ export function resolveEdges(
       // never named the view it renders — the direction a reviewer actually asks about.
       case "view": {
         const target = readView(capture.groups[1], capture);
-        if (target !== null && target !== file.id) {
-          edges.push({ from: file.id, to: target, kind: capture.family, symbol: null, evidence });
+        if (target !== null) {
+          for (const from of sources) {
+            if (target !== from) {
+              edges.push({ from, to: target, kind: capture.family, symbol: null, evidence });
+            }
+          }
         }
         break;
       }
@@ -453,7 +510,7 @@ export function resolveEdges(
  * ("../../packages/ui/src/Button") resolves, which is the whole point of a monorepo-native graph.
  * An alias target is repo-relative for the same reason and can point out of its own root too.
  */
-export function resolveModulePath(
+export function resolveModuleFile(
   fromFile: string,
   specifier: string,
   index: NodeIndex,
@@ -470,9 +527,31 @@ export function resolveModulePath(
   if (base === "" || base === ".." || base.startsWith("../")) return null;
 
   for (const candidate of candidatePaths(base, context)) {
-    if (index.ids.has(candidate)) return candidate;
+    if (index.byFile.has(candidate)) return candidate;
   }
   return null;
+}
+
+/**
+ * The same resolution answered as a node id, for the one caller that has an id in hand and needs to
+ * know whether this specifier names it: `importsNameFrom` above, corroborating a folded short name.
+ *
+ * A file yielding one node answers with that node, which is every file of a `fqcn` or `module-path`
+ * pack and a single-export file of a `symbol` one. A file yielding several has no single id to give,
+ * so it answers with its path: the question the caller asks is an equality against a node id, and a
+ * path is never one under that strategy, so the answer is honestly negative rather than one of the
+ * exports picked out of several the statement may not have named.
+ */
+export function resolveModulePath(
+  fromFile: string,
+  specifier: string,
+  index: NodeIndex,
+  context: ResolveContext,
+): string | null {
+  const file = resolveModuleFile(fromFile, specifier, index, context);
+  if (file === null) return null;
+  const ids = index.byFile.get(file) ?? [];
+  return ids.length === 1 ? (ids[0] ?? null) : file;
 }
 
 /**
@@ -488,6 +567,9 @@ export function resolveModulePath(
  *
  * A target that resolves above the repository root, or to the root itself, names nothing this graph
  * holds, on the same rule the relative path above follows.
+ *
+ * It answers with a file and not a node id, because it is half of `resolveModuleFile` and an alias
+ * is a spelling of a path rather than a second kind of target.
  */
 function resolveAlias(specifier: string, index: NodeIndex, context: ResolveContext): string | null {
   const rule = (context.aliases ?? []).find((candidate) => matches(candidate, specifier));
@@ -502,7 +584,7 @@ function resolveAlias(specifier: string, index: NodeIndex, context: ResolveConte
     if (base === "" || base === "." || base === ".." || base.startsWith("../")) continue;
 
     for (const candidate of candidatePaths(base, context)) {
-      if (index.ids.has(candidate)) return candidate;
+      if (index.byFile.has(candidate)) return candidate;
     }
   }
   return null;

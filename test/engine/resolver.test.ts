@@ -1424,3 +1424,65 @@ describe("resolveEdges, a name bound from a workspace package", () => {
     ]);
   });
 });
+
+/**
+ * What resolution does once a file yields several nodes. `test/engine/build.test.ts` pins the same
+ * strategy end to end over a fixture; these are the two decisions this file makes on its own, and
+ * both fail silently if they are wrong: an import that resolves to nothing looks exactly like a
+ * vendor import, which this file drops by design.
+ */
+describe("resolveEdges under a pack whose files yield many nodes", () => {
+  /** A file partitioned into exports, as extraction hands it over. */
+  function exporting(filePath: string, names: string[], captures: Capture[] = []): ExtractedFile {
+    return {
+      ...module_(filePath, captures),
+      symbols: names.map((name, position) => ({
+        name,
+        id: `${filePath}#${name}`,
+        startLine: 10 + position,
+        endLine: 10 + position,
+      })),
+    };
+  }
+
+  function importer(filePath: string, statement: string, specifier: string): ExtractedFile {
+    const owners = [`${filePath}#use`];
+    return exporting(
+      filePath,
+      ["use"],
+      [
+        {
+          family: "import",
+          resolve: "module-path",
+          groups: [statement, specifier],
+          line: 1,
+          owners,
+        },
+      ],
+    );
+  }
+
+  test("resolves a specifier against the files the index holds, no path being a node id", () => {
+    const money = exporting("src/money.ts", ["formatMoney", "parseMoney"]);
+    const total = importer("src/total.ts", 'import { formatMoney } from "./money"', "./money");
+
+    const resolved = resolveEdges(total, buildNodeIndex([money, total]), TS);
+
+    expect(resolved.edges.map((edge) => edge.to)).toEqual(["src/money.ts#formatMoney"]);
+    expect(resolved.edges.map((edge) => edge.from)).toEqual(["src/total.ts#use"]);
+  });
+
+  test("reaches the whole module where the statement binds no name the target exports", () => {
+    // A default import names the module and not one of its exports, so every export of it is in
+    // reach and the floor stays a floor.
+    const money = exporting("src/money.ts", ["formatMoney", "parseMoney"]);
+    const total = importer("src/total.ts", 'import money from "./money"', "./money");
+
+    const resolved = resolveEdges(total, buildNodeIndex([money, total]), TS);
+
+    expect(resolved.edges.map((edge) => edge.to)).toEqual([
+      "src/money.ts#formatMoney",
+      "src/money.ts#parseMoney",
+    ]);
+  });
+});

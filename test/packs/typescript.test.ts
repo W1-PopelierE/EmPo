@@ -252,6 +252,13 @@ describe("typescript pack", () => {
     const pack = loadPack("typescript");
     const index = {
       ids: new Set(["src/shared/money.js", "src/shared/money.ts"]),
+      // The candidate walk reads this one, a specifier naming a file and not a node: see NodeIndex
+      // in engine/resolver.ts. Both spellings are a node of their own here, which is what a
+      // module-path pack indexes.
+      byFile: new Map([
+        ["src/shared/money.js", ["src/shared/money.js"]],
+        ["src/shared/money.ts", ["src/shared/money.ts"]],
+      ]),
       byShortName: new Map<string, string[]>(),
       byFoldedName: new Map<string, string[]>(),
       kindById: new Map<string, string>(),
