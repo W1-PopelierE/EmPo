@@ -581,9 +581,10 @@ the load-bearing half of it. An extent is a line partition rather than a parse
 the export above it, and a review that names one export too many costs a reader a minute where one
 that silently drops the export a change really touched is a blast radius that is wrong and reads as
 right. Three cases fall back to every node of the file, which is the answer this printed before
-narrowing existed: a changed line no extent encloses, which is every edit to an import block, since
-imports are written above every declaration and belong to no extent; a cut line lying past every
-extent, which is what deleting the last export of a file looks like; and a file whose nodes carry no
+narrowing existed: a changed line no extent encloses, which is every edit above the file's first
+declaration and the import block at the top of a file is the ordinary one, while an import written
+between two exports falls inside the extent of the one above it; a cut line lying past every extent,
+which is what deleting the last export of a file looks like; and a file whose nodes carry no
 `extents` at all, which is a `fqcn` or `module-path` pack, a `symbol` pack's file that exports
 nothing, and every node of a graph written before schema 8. A removed line is read against the same
 extents as an added one, by the coordinates it had in the old file, because a hunk that only deletes

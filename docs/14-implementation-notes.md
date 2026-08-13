@@ -381,6 +381,11 @@ export interface GraphNode {
   isTest: boolean;
   assertsValue: boolean;   // a test using one of the pack's assertionTerms. False on a non-test.
   symbol?: string;         // the export this node is, for a `symbol` pack. Absent on a file-level node.
+  extents?: { start: number; end: number }[];  // schema 8. The 1-based inclusive lines this node's
+                         // declarations span, one entry per run, present under exactly the condition
+                         // `symbol` is. Absent says the lines are unknown, never that the node spans
+                         // none: a file-level node spans the whole file, and a symbol node is made
+                         // out of its extents so it always owns at least one.
 }
 
 /** One end-user journey from flows.json. `paths` are repo-relative path prefixes. */
@@ -823,8 +828,9 @@ proven before anything depends on it. Order within phase 1:
 
     What it decided, which is the question step 9 said to answer before writing anything: a hunk no
     extent encloses does not narrow the file at all. Narrowing is per file and it is all or nothing.
-    An import block belongs to no extent, a line cut from the end of a file lies past every extent,
-    and a node from a `fqcn` pack or a schema 7 graph has no extents to compare against; each of the
+    A line above the file's first declaration is enclosed by no extent, which is the import block at
+    the top of a file; a line cut from the end of a file lies past every extent; and a node from a
+    `fqcn` pack or a schema 7 graph has no extents to compare against; each of the
     three answers with every node of the file, exactly as this did before. The partition is why: it
     hands a helper written between two exports to the export above it, so narrowing on top of it can
     over-attribute, and the fallback is what keeps that documented over-attribution from ever
