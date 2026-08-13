@@ -210,6 +210,13 @@ function toNodes(file: ExtractedFile): GraphNode[] {
   return symbolNodes(file.symbols).map((symbol) => ({
     ...fileNode(file, symbol.id, symbol.name),
     symbol: symbol.name,
+    // Every extent this id owns, not the first: the two the fold above collapses are two runs of
+    // lines, and a node that reported only one of them would hand the other one's edits to whatever
+    // export happens to be declared above it. `empo review` reads these to narrow a hunk to the
+    // exports that own it.
+    extents: file.symbols
+      .filter((extent) => extent.id === symbol.id)
+      .map((extent) => ({ start: extent.startLine, end: extent.endLine })),
     produces: file.produces.filter((ref) => owns(ref.owners, symbol.id)),
     consumes: file.consumes.filter((ref) => owns(ref.owners, symbol.id)),
   }));

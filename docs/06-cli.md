@@ -567,6 +567,32 @@ printed two columns to the left, so the export names are the only new informatio
 carry. Where the nodes carry no export name the column falls back to the ids, which under a `fqcn`
 pack is usually the class name and is then the whole answer.
 
+**The nodes in that block are the exports the diff's lines touched, not every export the file
+holds.** Each symbol node carries the lines it spans (`nodes[].extents`,
+[05-graph-model](05-graph-model.md)) and the hunks say which lines moved, so editing one export of a
+twenty-export module reports that one export's radius and the column reads
+`1 of 20 exports: parseMoney`. The count is printed only where something was left out; a file whose
+every node is in the block says nothing, because there is nothing to have missed. Under `--json` the
+same pair rides as `files[].nodesInFile` beside `files[].nodes`.
+
+**The narrowing is refused whole-file the moment a changed line cannot be attributed**, and that is
+the load-bearing half of it. An extent is a line partition rather than a parse
+([04-language-packs](04-language-packs.md)), so it can hand a helper written between two exports to
+the export above it, and a review that names one export too many costs a reader a minute where one
+that silently drops the export a change really touched is a blast radius that is wrong and reads as
+right. Three cases fall back to every node of the file, which is the answer this printed before
+narrowing existed: a changed line no extent encloses, which is every edit to an import block, since
+imports are written above every declaration and belong to no extent; a cut line lying past every
+extent, which is what deleting the last export of a file looks like; and a file whose nodes carry no
+`extents` at all, which is a `fqcn` or `module-path` pack, a `symbol` pack's file that exports
+nothing, and every node of a graph written before schema 8. A removed line is read against the same
+extents as an added one, by the coordinates it had in the old file, because a hunk that only deletes
+writes no new line to attribute it by and answering a deletion with whatever survived around it
+reports the radius of the code that did not change. Those coordinates are the old file's and the
+extents are the indexed file's, so a graph that is behind the branch can attribute a cut to a
+neighbouring export; that is staleness, it is reported as staleness at the top of the brief, and its
+error is in the over-attributing direction.
+
 **Usually, and not always.** A `fqcn` pack that declares `fallback: "path"` ids a file holding no
 class by its path, so the id and the path are one string and the column repeats verbatim what is
 already two columns to its left. `fixtures/acme-platform` has the case in

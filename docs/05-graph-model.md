@@ -7,7 +7,7 @@ specifies its schema. It is written only by `empo index`, never by hand, never b
 
 ```jsonc
 {
-  "schema": 7,                          // the format this file was written in, not the one empo writes
+  "schema": 8,                          // the format this file was written in, not the one empo writes
   "builtAgainst": "9cd9b6278…",         // git sha graph was built from
   "builtAtCommitSubject": "…",          // for human sanity when reading the file
   "roots": [ { "path": "apps/api", "lang": "php" }, … ],
@@ -65,8 +65,9 @@ layer between the types and the disk format. A rename layer is where drift start
   // between.
   "isTest": false,
   "assertsValue": false
-  // a node a `symbol` pack ided by an export carries one key more:
-  //   "id": "src/money.ts#formatMoney", "name": "formatMoney", "symbol": "formatMoney"
+  // a node a `symbol` pack ided by an export carries two keys more:
+  //   "id": "src/money.ts#formatMoney", "name": "formatMoney", "symbol": "formatMoney",
+  //   "extents": [ { "start": 1, "end": 4 } ]
 }
 ```
 
@@ -82,6 +83,15 @@ It is absent, not empty, on every node ided by a file or a class, including the 
 itself yields for a file whose pattern matched nothing. Its absence is therefore the reliable test
 for "this node is the whole file", which is what a printer needs before it decides whether to name an
 export beside a path.
+
+`extents` sits beside it and is present under exactly the same condition: the 1-based inclusive line
+runs this node's declarations span, in the order the file writes them. It is a list because a name
+declared twice owns one extent per declaration, and a single `start`/`end` pair over the two would
+swallow every export written between them. Its absence and an empty list are different answers — a
+graph written before schema 8 recorded no lines at all, where an empty list would say the export
+spans none — which is why a reader that narrows by these lines must fall back to the whole file
+where the key is missing rather than narrow to nothing. `empo review` is that reader
+([06-cli](06-cli.md)), and the fallback is spelled out there.
 
 Repo-relative and not root-relative, which is what this said until the typescript pack was built
 against it. Root-relative ids collide the moment a monorepo holds two roots of one language, because
@@ -723,6 +733,14 @@ strategy and a repository holding one pack has no second pack whose version woul
 So a schema 6 graph and a schema 7 graph are the same shape holding two different meanings, and the
 number is the only thing that separates them. `empo doctor` reports the drift and `empo index` is
 the repair, the same as above.
+
+**`schema` goes from 7 to 8 with `nodes[].extents`**, and it is `hazards`' case rather than 7's: a
+field that arrives, whose absence and whose emptiness say different things. A schema 7 graph records
+no line for any export because nothing kept them, and a reader taking that for "this export spans no
+lines" would find no owner for a single changed line and answer an empty blast radius for a change
+that has one. The field is what lets `empo review` narrow a diff to the exports it touched instead of
+naming every export of the file, so the whole point of it is a reader that acts on which lines are
+missing. `empo doctor` reports the drift and `empo index` is the repair, the same as above.
 
 `names` is not a health finding and never becomes one. An ambiguous component name is the normal
 shape of a React tree with feature directories, and a `TextInput` under two namespaces is the normal

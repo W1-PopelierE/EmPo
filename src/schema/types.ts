@@ -47,6 +47,20 @@ export interface GraphNode {
    * several nodes and that saying "export" rather than "file" is the truth about this graph.
    */
   symbol?: string;
+  /**
+   * The lines this node's declarations span, 1-based and inclusive, in the order the file declares
+   * them. Present exactly where `symbol` is: a file-level node spans the whole file and saying so
+   * would be a range nobody can narrow with.
+   *
+   * A list and not a single pair, because a name declared twice owns two disjoint runs of lines
+   * (declaration merging, see `extractSymbolExtents` in engine/extractor.ts) and is still one node.
+   * A min/max span over the two would swallow every export written between them.
+   *
+   * It is a line partition and not a parse (section 2 of docs/04-language-packs.md), so a helper
+   * written between two exports falls inside the extent of the one above it. Whoever narrows by
+   * these lines owes the over-attribution that fact allows, never a miss.
+   */
+  extents?: { start: number; end: number }[];
 }
 
 /** One end-user journey from flows.json. `paths` are repo-relative path prefixes. */
