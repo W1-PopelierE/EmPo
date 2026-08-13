@@ -798,12 +798,23 @@ describe("resolveEdges, the names it declined", () => {
     ]);
   });
 
-  test("calls two nodes of which one is a legal kind ambiguous, never wrong-kind", () => {
-    // Uniqueness is asked before the kind filter, and this is where that order is visible. Exactly
-    // one of these two `Badge`s is a "component", so a filter-first resolver would narrow the field
-    // to one candidate, resolve, and report `resolved`. It would also be guessing: a name shared by
-    // two files is a name this strategy cannot read, and narrowing the field only hides that behind
-    // a plausible pick. The verdict has to stay `ambiguous`, or the record would launder the guess.
+  test("resolves past a node of a kind the rule cannot name, and still refuses two of one kind", () => {
+    // The kind filter runs before the uniqueness test, and this is where that order is visible.
+    //
+    // It used to run after, on the argument that narrowing the field hides a guess behind a
+    // plausible pick. That argument reads a `targetKinds` list as a tiebreaker, and it is not one: a
+    // rule declaring `["component"]` is the pack saying what a reference of this family can denote,
+    // so a node of another kind was never a second reading of the tag. It is a different thing that
+    // happens to be spelled the same, and counting it makes the name ambiguous against a candidate
+    // that could not have won.
+    //
+    // What forced the order is the `symbol` strategy. While a node was a file, a short name was a
+    // file basename and two files of different kinds rarely shared one, so asking last cost almost
+    // nothing. Under per-export ids the namespace is every exported name in the repository, and one
+    // `export const Modal = ...` in a constants file is then enough to refuse every `<Modal />` in
+    // the codebase. The refusal takes every edge to that name with it, including the ones nothing
+    // else covers: a globally registered component that no import binds has no other evidence, so
+    // the coupling disappears and no count reports that it went missing.
     const component = kinded(
       "Acme\\View\\Components\\Badge",
       "Badge",
@@ -820,8 +831,24 @@ describe("resolveEdges, the names it declined", () => {
 
     const resolved = resolveEdges(view, buildNodeIndex([component, type, view]), PHP);
 
-    expect(resolved.edges).toEqual([]);
+    expect(resolved.edges.map((edge) => edge.to)).toEqual(["Acme\\View\\Components\\Badge"]);
     expect(resolved.names).toEqual([
+      { family: "template", name: "Badge", outcome: "resolved", candidates: 1 },
+    ]);
+
+    // The refusal this did not weaken: two nodes the rule's own kinds both admit are still a name
+    // this strategy cannot read, and narrowing there really would be a guess. Only the impossible
+    // candidate is removed, never a possible one.
+    const second = kinded(
+      "Acme\\View\\Components\\Widgets\\Badge",
+      "Badge",
+      "app/View/Components/Widgets/Badge.php",
+      "component",
+    );
+    const both = resolveEdges(view, buildNodeIndex([component, second, view]), PHP);
+
+    expect(both.edges).toEqual([]);
+    expect(both.names).toEqual([
       { family: "template", name: "Badge", outcome: "ambiguous", candidates: 2 },
     ]);
   });

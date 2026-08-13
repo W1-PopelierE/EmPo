@@ -1355,6 +1355,16 @@
       }
     },
     {
+      "from": "src/react/cards/OrderRowList.tsx#OrderRowList",
+      "to": "src/react/cards/Total.tsx#Total",
+      "kind": "template",
+      "symbol": null,
+      "evidence": {
+        "file": "src/react/cards/OrderRowList.tsx",
+        "line": 17
+      }
+    },
+    {
       "from": "src/react/cards/Total.tsx#Total",
       "to": "src/react/types/Total.ts#Total",
       "kind": "import",
@@ -1609,9 +1619,9 @@
   "names": [
     {
       "family": "template",
-      "resolved": 19,
+      "resolved": 20,
       "unknown": 1,
-      "ambiguous": 3,
+      "ambiguous": 2,
       "wrongKind": 1,
       "local": 1,
       "vendor": 1,
@@ -1623,11 +1633,6 @@
         },
         {
           "name": "PriceRow",
-          "nodes": 2,
-          "references": 1
-        },
-        {
-          "name": "Total",
           "nodes": 2,
           "references": 1
         }

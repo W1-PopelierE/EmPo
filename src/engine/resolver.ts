@@ -667,19 +667,38 @@ function resolveName(
     }
   }
 
-  const candidates =
+  const found =
     index.byShortName.get(shortName) ??
     foldedCandidates(index, shortName).filter((id) => file.importsNameFrom(shortName, id));
-  if (candidates.length === 0) return { id: null, outcome: "unknown", candidates: 0 };
+  if (found.length === 0) return { id: null, outcome: "unknown", candidates: 0 };
+
+  // Narrowed by the rule's own `targetKinds` **before** the uniqueness test, because a rival of the
+  // wrong kind was never a rival. A `<PriceRow />` names a component, and a rule that says so has
+  // already declared which kinds can answer it, so a node of some other kind carrying the same name
+  // is not a second reading of the reference. It is a different thing that happens to be spelled the
+  // same, and counting it makes the name ambiguous against a candidate that could never have won.
+  //
+  // Asking the kind afterwards was harmless while a node was a file, because a file's name was its
+  // basename and two files of different kinds rarely share one. Under per-export ids the namespace
+  // is every exported name in the repository, so one `export const Modal = ...` in a constants file
+  // is enough to refuse every `<Modal />` in the codebase. That is the whole loss: the refusal takes
+  // every edge to that name with it, including the ones nothing else covers. A rendered component
+  // that no import binds, which is what a globally registered component is, then has no edge at all
+  // and no count says one went missing.
+  //
+  // Where every candidate fails the kind test the verdict stays `wrong-kind` rather than becoming
+  // `unknown`, and it reports how many were found: the name is in the graph, and what a reader needs
+  // to know is that the rule declined them, not that nothing carried the name.
+  const candidates = found.filter((id) => kindAllowed(index, id, targetKinds));
+  if (candidates.length === 0) {
+    return { id: null, outcome: "wrong-kind", candidates: found.length };
+  }
   if (candidates.length > 1) {
     return { id: null, outcome: "ambiguous", candidates: candidates.length };
   }
 
   const id = candidates[0];
   if (id === undefined) return { id: null, outcome: "unknown", candidates: 0 };
-  if (!kindAllowed(index, id, targetKinds)) {
-    return { id: null, outcome: "wrong-kind", candidates: 1 };
-  }
 
   // Asked last, of the one name that was about to become an edge, because that is the only case
   // either question can change. A name in no node was never at risk of a wrong edge and its honest

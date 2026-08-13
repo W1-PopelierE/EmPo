@@ -555,17 +555,23 @@ describe("typescript pack", () => {
     // OrderRowList renders `<OrderRow />` from a package, so that import resolves to no node and
     // leaves no competing edge, while src/react/types/OrderRow.ts shares the basename. Without
     // targetKinds the tag resolves to the type module and the invented edge is the only thing the
-    // graph says about the pair. `<Total />` is the same two questions in the other order: two
-    // files carry that name, one component and one type module, and a kind filter applied before
-    // the uniqueness test would resolve it. Asking uniqueness first refuses it, which is the only
-    // honest answer about a name this strategy cannot read. The same file's `<CardHeader/>` shows
-    // neither refusal is the rule failing to fire: written with no space before the slash, it
-    // resolves.
+    // graph says about the pair. One node, of a kind no tag may name, so the whole field is
+    // declined and the verdict is `wrong-kind`.
+    //
+    // `<Total />` is the same two questions in the other order, and it is where the kind filter
+    // running before the uniqueness test is visible. Two nodes carry that name, one component and
+    // one type module. The type module could never have been what a tag meant, so removing it is
+    // not picking between two readings, it is dropping one that was never a reading, and the
+    // component is left as the single candidate. It resolves, and the edge below is that.
+    //
+    // The same file's `<CardHeader/>` shows neither refusal is the rule failing to fire: written
+    // with no space before the slash, it resolves.
     expect(
       from("src/react/cards/OrderRowList.tsx").map((edge) => `${edge.to} ${edge.kind}`),
     ).toEqual([
       "src/react/cards/CardHeader.tsx#CardHeader import",
       "src/react/cards/CardHeader.tsx#CardHeader template",
+      "src/react/cards/Total.tsx#Total template",
     ]);
   });
 
@@ -626,9 +632,14 @@ describe("typescript pack", () => {
 
   test("counts every verdict a name-resolving rule can reach, refusals included", () => {
     // This corpus is the only place all six verdicts are exercised at once, which is why the tally
-    // is pinned here rather than left to the snapshot. `Badge` and `Total` are ambiguous by
-    // construction, each carried by two files; `OrderRow` is the `targetKinds` refusal, a name in
-    // exactly one node of a kind no tag may name; `Spinner` is the vendor component in no node at
+    // is pinned here rather than left to the snapshot. `Badge` and `PriceRow` are ambiguous by
+    // construction, each carried by two nodes the tag rule's own kinds both admit; `Total` is
+    // carried by two nodes of which only one is a component, so the kind filter removes the other
+    // before the uniqueness test and the name resolves, which is the one verdict that moved when
+    // that filter was put ahead of the count; `OrderRow` is the `targetKinds` refusal, a name in
+    // exactly one node of a kind no tag may name, and it is still `wrong-kind` rather than
+    // `unknown`, because the name is in the graph and what a reader needs to know is that the rule
+    // declined it; `Spinner` is the vendor component in no node at
     // all, so it lands in `unknown` and must never be counted with the ambiguous ones; and
     // CardStory.tsx renders a `<CardFooter />` it declares itself, which `local` counts and the
     // other four must not, because that refusal prevented a wrong edge instead of losing a right
@@ -672,16 +683,15 @@ describe("typescript pack", () => {
     expect(actual.names).toEqual([
       {
         family: "template",
-        resolved: 19,
+        resolved: 20,
         local: 1,
         vendor: 1,
         unknown: 1,
-        ambiguous: 3,
+        ambiguous: 2,
         wrongKind: 1,
         ambiguousNames: [
           { name: "Badge", nodes: 2, references: 1 },
           { name: "PriceRow", nodes: 2, references: 1 },
-          { name: "Total", nodes: 2, references: 1 },
         ],
       },
     ]);
