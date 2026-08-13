@@ -68,6 +68,7 @@ describe("computeCoverage", () => {
       pricing: {
         flow: "pricing",
         testNodes: [],
+        testFiles: [],
         reaches: false,
         assertsValue: false,
         blind: false,
@@ -83,6 +84,7 @@ describe("computeCoverage", () => {
       pricing: {
         flow: "pricing",
         testNodes: ["PriceTest"],
+        testFiles: ["apps/api/app/PriceTest.php"],
         reaches: true,
         assertsValue: true,
         blind: false,
@@ -100,6 +102,7 @@ describe("computeCoverage", () => {
       pricing: {
         flow: "pricing",
         testNodes: ["SmokeTest"],
+        testFiles: ["apps/api/app/SmokeTest.php"],
         reaches: true,
         assertsValue: false,
         blind: true,
@@ -119,6 +122,7 @@ describe("computeCoverage", () => {
       pricing: {
         flow: "pricing",
         testNodes: ["PriceTest", "SmokeTest"],
+        testFiles: ["apps/api/app/PriceTest.php", "apps/api/app/SmokeTest.php"],
         reaches: true,
         assertsValue: true,
         blind: false,
@@ -202,11 +206,33 @@ describe("computeCoverage", () => {
       pricing: {
         flow: "pricing",
         testNodes: ["PriceTest"],
+        testFiles: ["apps/api/app/PriceTest.php"],
         reaches: true,
         assertsValue: true,
         blind: false,
       },
     });
+  });
+
+  test("counts a test file once however many nodes it yields", () => {
+    // The shape a pack that identifies a node by an exported symbol produces: one test file
+    // exporting three cases is three nodes, all of them reaching the flow. `testNodes` says three
+    // because three ids really did reach it, and `testFiles` says one because one file did, which
+    // is the number every printer that says "N tests" is quoting.
+    const cases = ["describeOne", "describeTwo", "describeThree"].map((name) =>
+      node(`src/checkout.test.ts#${name}`, {
+        isTest: true,
+        assertsValue: true,
+        file: "src/checkout.test.ts",
+      }),
+    );
+    const nodes = [node("Checkout"), ...cases];
+    const edges = cases.map((test) => edge(test.id, "Checkout"));
+
+    const coverage = computeCoverage(nodes, edges, { checkout: ["Checkout"] });
+
+    expect(coverage.checkout?.testNodes.length).toBe(3);
+    expect(coverage.checkout?.testFiles).toEqual(["src/checkout.test.ts"]);
   });
 });
 
@@ -245,6 +271,7 @@ describe("assignFlows into computeCoverage", () => {
     expect(coverage.orders).toEqual({
       flow: "orders",
       testNodes: [],
+      testFiles: [],
       reaches: false,
       assertsValue: false,
       blind: false,
@@ -264,6 +291,7 @@ describe("assignFlows into computeCoverage", () => {
     expect(coverage.orders).toEqual({
       flow: "orders",
       testNodes: ["OrderScreenTest"],
+      testFiles: ["apps/mobile/src/screens/OrderScreen.test.tsx"],
       reaches: true,
       assertsValue: false,
       blind: true,

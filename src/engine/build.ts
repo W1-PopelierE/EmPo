@@ -142,7 +142,15 @@ function resolveHazards(files: ExtractedFile[], index: NodeIndex): Hazard[] {
   // one, this axis misses one: a hazard is a thing a reader goes and reads the source about.
   const deferring = new Set<string>();
   for (const file of files) {
-    if (file.defersCommit) deferring.add(file.id);
+    if (!file.defersCommit) continue;
+    // Every node the file yields, and not the file's own id, because a deferral is a property of the
+    // job's file and never of one export of it: the marker is a line of source somewhere in the file
+    // and a dispatch resolves to whichever node carries the job's name. Under a pack that yields one
+    // node per exported symbol those two are different ids, so keying this by `file.id` would have
+    // read the deferral out of the source, found no dispatch target matching it, and reported a
+    // hazard against code that already waits for the commit. A fabricated hazard is the worse error
+    // on this axis, because a hazard is a thing a reader goes and opens the source about.
+    for (const id of index.byFile.get(file.file) ?? []) deferring.add(id);
   }
 
   const hazards: Hazard[] = [];

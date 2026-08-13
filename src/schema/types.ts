@@ -68,6 +68,19 @@ export interface GraphEdge {
 export interface CoverageInfo {
   flow: string;
   testNodes: string[];
+  /**
+   * The files those nodes live in, deduplicated and sorted. It is the count a reader is owed, because
+   * "3 tests reach this flow" means three test files and never three exported symbols: a pack whose
+   * ids name an export turns one test file that exports three cases into three `testNodes`, and every
+   * printer that reported the length of that list would then claim a suite three times the size of
+   * the one on disk.
+   *
+   * Kept beside `testNodes` rather than replacing it, because the two answer different questions. The
+   * ids are what a reader follows to the code that does the reaching, and the paths are what they
+   * open. Under a pack that yields one node per file the two lists have the same length, which is why
+   * nothing needed this before.
+   */
+  testFiles: string[];
   reaches: boolean;
   assertsValue: boolean;
   blind: boolean; // reaches && !assertsValue

@@ -38,6 +38,9 @@ export function computeCoverage(
     coverage[flow] = {
       flow,
       testNodes: reaching.map((test) => test.node.id).sort(compareStrings),
+      // Read off the node rather than counted from the ids, because an id under a pack that names an
+      // export is not a path and cannot be turned back into one here.
+      testFiles: [...new Set(reaching.map((test) => test.node.file))].sort(compareStrings),
       reaches,
       assertsValue,
       blind: reaches && !assertsValue,

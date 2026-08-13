@@ -415,6 +415,7 @@ function coverageGraph(
         {
           flow: entry.flow,
           testNodes: entry.reaches ? ["apps/api/tests/OrderTest.php"] : [],
+          testFiles: entry.reaches ? ["apps/api/tests/OrderTest.php"] : [],
           reaches: entry.reaches,
           assertsValue: entry.assertsValue,
           blind: entry.reaches && !entry.assertsValue,
