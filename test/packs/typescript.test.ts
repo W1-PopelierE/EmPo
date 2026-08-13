@@ -85,7 +85,7 @@ describe("typescript pack", () => {
   });
 
   test("identifies a node by the symbol it exports, and names it that", () => {
-    // The whole point of the 2.0.0 bump. money.ts exports two names and carries two nodes, neither
+    // The whole point of the 2.0.1 bump. money.ts exports two names and carries two nodes, neither
     // of them the file, and each is named by its export rather than by the basename they share.
     expect(actual.nodes.filter((n) => n.file === "src/shared/money.ts").map((n) => n.id)).toEqual([
       "src/shared/money.ts#Money",
@@ -153,6 +153,17 @@ describe("typescript pack", () => {
         ].join("\n"),
       ),
     ).toEqual(["SELECTOR[1-2]", "CartComponent[3-7]"]);
+  });
+
+  test("names a `const enum` by the enum, not by the keyword that follows const", () => {
+    // `const` and `enum` are both declaration keywords the pattern lists, and `export const enum
+    // Color` is the one place they are written together. Matched by the bare `const` alternative
+    // the capture is the word after it, so the file carried a node called `enum`: an id no import
+    // can name, and an extent named after nothing the file declares.
+    expect(extents("export const enum Color {\n  Red,\n}\nexport const x = 1;\n")).toEqual([
+      "Color[1-3]",
+      "x[4-5]",
+    ]);
   });
 
   test("leaves a decorator over something unexported where it was", () => {
@@ -659,8 +670,11 @@ describe("typescript pack", () => {
     // `src/components/PriceRow.tsx` was `PriceRow` and `src/browser/widgets/priceRow.jsx` was
     // `priceRow`: the exact map held one node of that name and OrderScreenView.tsx's `<PriceRow />`
     // resolved to it. Both files export a symbol spelled `PriceRow`, so under per-export ids the
-    // exact map holds two and the reference is refused, which moves resolved from 19 to 18 and
-    // ambiguous from 2 to 3.
+    // exact map holds two and the reference is refused, which costs one resolution and adds the
+    // third ambiguity. The narrowing by `targetKinds` ahead of the uniqueness test pays both back
+    // on a different name: `Total` was ambiguous at 1.10.0 and resolves now, so the tally lands at
+    // resolved 20 with `Badge` and `PriceRow` the only ambiguities. Put that narrowing back after
+    // the count and this corpus answers 19 and 3, `Total` joining the two below.
     //
     // The refusal is the honest answer and it costs no coupling. Two nodes really do carry the name
     // now, and the distinction that used to separate them was the casing of a file name and not
@@ -671,15 +685,14 @@ describe("typescript pack", () => {
     // it is not. What would be a regression, and is not what happened, is a file-level coupling
     // present at 1.10.0 and absent now; the snapshot holds none such.
     //
-    // One of the 19 is there to hold the case fold under a gate, and only that. Adopting the
-    // `symbol` strategy left the fold exercised by nothing in this corpus: an export and the tag
-    // that renders it are spelled the same, so the exact map answered every reference before the
-    // fold was consulted, and gutting `foldedCandidates` to return an empty list left this snapshot
-    // byte-identical. The fold is still load-bearing in the product, because a single-file component
-    // exports nothing the symbolPattern matches and so is still named by its basename. CartTray.vue
-    // renders `<CartFlag />` against cartFlag.vue, whose node is named `cartFlag`, and the import in
-    // its script is the corroboration witness the fold demands. Gut the fold and this count drops to
-    // 18 and unknown rises to 2.
+    // One of the 20 is there to hold the case fold under a gate, and only that. Adopting the
+    // `symbol` strategy took most of the fold's work away: an export and the tag that renders it
+    // are spelled the same, so the exact map now answers references the fold used to. It is still
+    // load-bearing, because a single-file component exports nothing the symbolPattern matches and
+    // so is still named by its basename. CartTray.vue renders `<CartFlag />` against cartFlag.vue,
+    // whose node is named `cartFlag`, and the import in its script is the corroboration witness the
+    // fold demands. Gut `foldedCandidates` to return an empty list and this count drops to 19 while
+    // unknown rises to 2, which is that one reference and nothing else.
     expect(actual.names).toEqual([
       {
         family: "template",

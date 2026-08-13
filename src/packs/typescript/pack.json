@@ -8,7 +8,7 @@
   "node": {
     "id": {
       "strategy": "symbol",
-      "symbolPattern": "^(?:@[A-Za-z_$][^\\n]*\\r?\\n(?:[ \\t)}\\]][^\\n]*\\r?\\n)*)*export\\s+(?:default\\s+)?(?:async\\s+)?(?:function\\s*\\*?|class|abstract\\s+class|const|let|var|type|interface|enum)\\s+([A-Za-z_$][A-Za-z0-9_$]*)",
+      "symbolPattern": "^(?:@[A-Za-z_$][^\\n]*\\r?\\n(?:[ \\t)}\\]][^\\n]*\\r?\\n)*)*export\\s+(?:default\\s+)?(?:async\\s+)?(?:function\\s*\\*?|class|abstract\\s+class|const\\s+enum|const|let|var|type|interface|enum)\\s+([A-Za-z_$][A-Za-z0-9_$]*)",
       "indexNames": ["index"]
     },
     "kindRules": [
