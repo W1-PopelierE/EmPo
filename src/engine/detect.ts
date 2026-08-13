@@ -314,8 +314,9 @@ export interface DetectedForge {
   /** The short name of the host, absent for `github` where the kind already names it. */
   host?: string;
   /**
-   * The owner, workspace or group the repository sits in: the segment above it, whatever the host
-   * calls it. This is the slug every Bitbucket tool wants (`workspaceId` takes the slug and prefers
+   * The owner, workspace or group the repository sits in, whatever the host calls it: the segment
+   * above it, and on gitlab.com the whole group path, where a subgroup is part of the project's
+   * name rather than a directory over it. This is the slug every Bitbucket tool wants (`workspaceId` takes the slug and prefers
    * it to the uuid), so nothing has to be looked up before the agent can fetch.
    */
   workspace?: string;
@@ -403,7 +404,7 @@ export function forgeFromRemote(url: string): DetectedForge | null {
 interface ParsedRemote {
   /** Lowercased hostname, with no port and no credentials. */
   host: string;
-  /** The segment above the repository, or null when the path holds only the repository. */
+  /** What stands above the repository, or null when the path holds only the repository. */
   workspace: string | null;
   repo: string;
 }
@@ -442,9 +443,15 @@ function parseRemote(url: string): ParsedRemote | null {
 }
 
 /**
- * One path grammar for every host: the workspace and the repository are the last two segments.
- * Bitbucket, GitHub and GitLab all spell the common case that way, and a per-host grammar would be
- * three rules to keep right for one answer.
+ * The workspace and the repository are the last two segments, for every host but one. Bitbucket and
+ * GitHub spell it that way and never deeper, and a Bitbucket Server url carries a `/scm/` prefix
+ * that is transport and not identity, so leading segments are dropped rather than kept.
+ *
+ * GitLab is the exception, because it is the one host where a deeper path is the repository's real
+ * name: `acme/backend/api` lives in group `acme`, and `backend/api` resolves to nothing. Dropping
+ * the outer group wrote a workspace no GitLab call could use, which is worse than a second rule.
+ * Only gitlab.com and its subdomains take it: a self-hosted install is an unrecognized hostname
+ * here, so it keeps the two-segment reading, which is the one this module can defend.
  *
  * Two details that look like nits and are not. The trailing `.git` is stripped **once**, because
  * Atlassian's own documentation shows the remote `.../tutorials/tutorials.git.bitbucket.org.git`,
@@ -465,7 +472,9 @@ function split(host: string, path: string): ParsedRemote | null {
   const bare = host.toLowerCase().replace(/^www\./, "");
   if (bare === "") return null;
 
-  return { host: bare, workspace: segments.pop() ?? null, repo };
+  const workspace =
+    shortName(bare) === "gitlab" ? segments.join("/") || null : (segments.pop() ?? null);
+  return { host: bare, workspace, repo };
 }
 
 function add(index: Map<string, Set<string>>, key: string, value: string): void {

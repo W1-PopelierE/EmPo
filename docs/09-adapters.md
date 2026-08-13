@@ -338,11 +338,14 @@ doc names as the obvious next thing to add.
 - **Only the `origin` remote is read.** In a fork workflow `empo init` seeds the fork's workspace and
   repo, so reviews would ask the agent for the pull request as it exists on the fork rather than
   upstream. Configure `adapters.forge` by hand there.
-- **A project path of three or more segments loses information.** The workspace and the repository
-  are taken as the last two segments of the remote path, which is the common spelling on GitHub,
-  Bitbucket and GitLab alike. A GitLab project nested in subgroups, `acme/backend/api`, comes out as
-  workspace `backend` and repo `api`, and the `acme` group is gone. One grammar for three hosts is
-  the trade; a nested GitLab project needs the workspace written by hand.
+- **A project path of three or more segments loses information, except on gitlab.com.** The
+  workspace and the repository are taken as the last two segments of the remote path, which is the
+  common spelling on GitHub and Bitbucket, and a Bitbucket Server url's leading `/scm/` is transport
+  rather than identity. GitLab is the exception, because a subgroup is part of the project's name:
+  on gitlab.com and its subdomains the whole group path above the repository is the workspace, so
+  `acme/backend/api` comes out as workspace `acme/backend` and repo `api`. A self-hosted GitLab is
+  an unrecognized hostname here, so it keeps the two-segment reading and a nested project there
+  still needs the workspace written by hand.
 - **The default `keyPattern` does not fit Asana**, in a way that is worse than not matching at all.
   See the tracker section below.
 

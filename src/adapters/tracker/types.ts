@@ -8,12 +8,17 @@
  * which is what keeps Jira `PLAT-1234` and Linear `ENG-42` out of the engine.
  */
 
+import type { EmpoTracker } from "../../schema/config.schema";
+
 /**
  * One `mcp` kind covers Jira, Asana and Linear alike, for the reason `ForgeKind` states: the agent
  * host holds the connector, so the ticket arrives as a payload empo validates rather than as an API
  * call empo makes. `adapters.tracker.host` names which one, and nothing here branches on it.
+ *
+ * Derived from `trackerSchema` for the reason `ForgeKind` states: the factory proves exhaustiveness
+ * over the schema's enum, so a kind spelled only here reached no branch and no compiler complained.
  */
-export type TrackerKind = "mcp" | "github-issues" | "none";
+export type TrackerKind = EmpoTracker["kind"];
 
 /**
  * Each tracker's type vocabulary normalized to the only distinction the review acts on: a bug

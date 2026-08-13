@@ -196,8 +196,9 @@ so a review can say "CI result unavailable" instead of inventing a green pipelin
 files are pure degradation paths: they never throw, never fetch, and return a `note` that travels
 into the report rather than being logged. Each ends in an `unbuildable*(kind: never, ...)`
 exhaustiveness proof, and each takes `forge.kind` rather than the config object, because only the
-discriminant narrows. Adding a kind to the `ForgeKind` union alone will not break the factory;
-adding it to the config enum will.
+discriminant narrows. `ForgeKind` and `TrackerKind` are derived from the zod schemas, so there is no
+second place to add a kind: adding one to the config enum widens the union and breaks the factory,
+which is the point.
 
 The `mcp` forge and tracker kinds are **one kind per side covering every host EmPo cannot speak to**
 (Bitbucket, GitLab, Jira, Asana, Linear), not one adapter each. EmPo makes no model call and cannot

@@ -391,11 +391,23 @@ const REMOTES: [string, DetectedForge | null][] = [
     { kind: "mcp", host: "bitbucket", workspace: "acme", repo: "acme-platform" },
   ],
 
-  // A nested GitLab group. The workspace is the segment above the repository, one grammar for every
-  // host, so the outer group is dropped rather than a per-host path rule being written.
+  // A nested GitLab group. GitLab is the one host where the path above the repository can be deeper
+  // than one segment and every segment of it is part of the name, so the whole group path is the
+  // workspace: "backend/api" resolves to nothing on gitlab.com, "acme/backend" is where it lives.
   [
     "https://gitlab.com/acme/backend/api.git",
-    { kind: "mcp", host: "gitlab", workspace: "backend", repo: "api" },
+    { kind: "mcp", host: "gitlab", workspace: "acme/backend", repo: "api" },
+  ],
+
+  // The flat GitLab case still reads the same as every other host, so the exception above is a
+  // deeper path and not a different grammar.
+  ["git@gitlab.com:acme/api.git", { kind: "mcp", host: "gitlab", workspace: "acme", repo: "api" }],
+
+  // A self-hosted GitLab is an unrecognized hostname here, so it keeps the two-segment reading
+  // rather than a guess this module cannot back up.
+  [
+    "https://git.acme.com/acme/backend/api.git",
+    { kind: "mcp", host: "git.acme.com", workspace: "backend", repo: "api" },
   ],
 
   // A host this module has never heard of, which is still worth a forge: the bare hostname is what

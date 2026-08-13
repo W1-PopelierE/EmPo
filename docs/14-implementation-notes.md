@@ -1413,7 +1413,9 @@ the codebase's identity is not.
   union, so the object never narrows and the check would have proved nothing while looking exactly
   like a check. Verified afterwards by adding a fourth kind and watching the compiler reject it. Note
   which domain it is exhaustive over: adding a kind to the `ForgeKind` union did not break the
-  factory; adding it to the config enum did.
+  factory, only adding it to the config enum did. Which is why `ForgeKind` and `TrackerKind` are now
+  derived from the zod schemas (`EmpoForge["kind"]`, `EmpoTracker["kind"]`) rather than spelled a
+  second time: two declarations of one vocabulary can diverge, and one cannot.
 - The copy-line test was proved by mutation in three directions: stale printed text with the program
   unchanged, a renamed option with the text unchanged, and the ticket flag alone. Three reds, each
   naming the offending flag, and the "has teeth" control still passing.

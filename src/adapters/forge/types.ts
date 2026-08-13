@@ -12,13 +12,19 @@
  *   with nowhere to post throws rather than silently doing nothing.
  */
 
+import type { EmpoForge } from "../../schema/config.schema";
+
 /**
  * `mcp` is one kind for every host empo cannot reach itself (Bitbucket, GitLab, and whatever comes
  * next): empo makes no network call, so the agent running it fetches the pull request with its own
  * connector and empo validates the payload against this repository. Which host it was is
  * `adapters.forge.host`, a free string nothing here branches on.
+ *
+ * Derived from `forgeSchema` rather than spelled a second time. The factory in `create.ts` switches
+ * on the schema's enum and proves exhaustiveness against that, so a kind written only here used to
+ * compile everywhere and reach no branch. One declaration cannot diverge from itself.
  */
-export type ForgeKind = "github" | "mcp" | "local";
+export type ForgeKind = EmpoForge["kind"];
 
 /**
  * `OWNER/REPO`, the only form a github tool accepts, from the two fields config keeps apart.
