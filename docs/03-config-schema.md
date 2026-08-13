@@ -289,11 +289,12 @@ before believing it. [09-adapters](09-adapters.md) has the payload shape and the
 | `project` | `tracker` | The project or board the tickets live in, for the reader and for the request block. |
 
 **The split between `repo` and `workspace` is not a Bitbucket detail that `github` is exempt from.**
-Detection writes both fields the same way whatever the kind: the last path segment of the `origin`
-remote becomes `repo` and the segment above it becomes `workspace`, and the join back into
-`acme/platform` happens on the way out, in the one expression both the github adapter and the
-generated `AGENTS.md` block go through. Writing the joined slug into `repo` while a `workspace` is
-also present therefore produces `acme/acme/platform` in both places, which is a repository nobody
+Detection writes both fields for every kind: the last path segment of the `origin` remote becomes
+`repo` and what stands above it becomes `workspace` — the one segment above on every host, and the
+whole group path on gitlab.com, where a nested group is part of the project's name — and the join
+back into `acme/platform` happens on the way out, in the one expression both the github adapter and
+the generated `AGENTS.md` block go through. Writing the joined slug into `repo` while a `workspace`
+is also present therefore produces `acme/acme/platform` in both places, which is a repository nobody
 has, and the schema cannot tell that apart from a repository genuinely named that way. `empo doctor`
 can, up to a point: where the `origin` remote is readable it prints the configured slug beside the
 one origin names, so `acme/acme/platform` stands next to `acme/platform` in the forge line. It is
