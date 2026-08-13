@@ -451,6 +451,20 @@ function declaredNames(patterns: RegExp[], source: string): string[] {
  * rather than hidden here: text between two exports belongs to the earlier one, so a helper written
  * at column 0 between two exports is read as part of the export above it.
  *
+ * Every match opens an extent, including a repeat of a name already seen, so one id can own several
+ * disjoint runs of lines. That is what declaration merging is: TypeScript writes a type and a
+ * function under one name, an interface beside a function, a `declare module` beside the value it
+ * describes, and all of them are ordinary rather than exotic. Skipping the repeat opened no boundary
+ * at that line, so everything the second declaration wrote fell inside the extent of whatever
+ * happened to be declared above it, and every import that second body needed was credited to that
+ * neighbour while the name itself got none. That is under-attribution, which the flow list being a
+ * floor does not permit.
+ *
+ * The duplicate the partition now admits is handled where the nodes are made rather than here: a
+ * file must still yield one node per unique id (`symbolNodes` below, read by engine/build.ts and
+ * engine/resolver.ts). Partitioning text and naming nodes are two questions, and this one is only
+ * asking which lines belong to which name.
+ *
  * ponytail: line partition, no brace balancing. Upgrade to hazards.ts's enclosure walk if a pack
  * appears whose declarations are not written at column 0.
  */
@@ -463,14 +477,11 @@ function extractSymbolExtents(
   if (regex === undefined) return [];
 
   const found: { name: string; startLine: number }[] = [];
-  const seen = new Set<string>();
   for (const match of matchAll(regex, source)) {
     const name = match.groups[1];
     // A pattern that matches and captures nothing is the pack's own bug and not a declaration, the
-    // same bargain `declaredNames` makes above. A name seen twice keeps its first extent, so one
-    // file can never carry one id twice.
-    if (name === undefined || name === "" || seen.has(name)) continue;
-    seen.add(name);
+    // same bargain `declaredNames` makes above.
+    if (name === undefined || name === "") continue;
     found.push({ name, startLine: lineAt(starts, match.index) });
   }
 
@@ -481,6 +492,24 @@ function extractSymbolExtents(
     startLine: entry.startLine,
     endLine: (found[position + 1]?.startLine ?? lastLine + 1) - 1,
   }));
+}
+
+/**
+ * The nodes one file's extents yield: one per unique id, in the order the file first declares each
+ * name. A name declared twice owns two extents and is still one export, so it is one node.
+ *
+ * It lives here, beside the partition that can produce the repeat, and is read by both places that
+ * turn extents into nodes: `toNodes` in engine/build.ts and `buildNodeIndex` in engine/resolver.ts.
+ * Those two must agree, because one builds the graph and the other builds the index the edges are
+ * resolved against, and a file yielding two nodes of one id in one of them and one in the other is a
+ * disagreement nothing would report.
+ */
+export function symbolNodes(symbols: ExtractedSymbol[]): { id: string; name: string }[] {
+  const byId = new Map<string, { id: string; name: string }>();
+  for (const symbol of symbols) {
+    if (!byId.has(symbol.id)) byId.set(symbol.id, { id: symbol.id, name: symbol.name });
+  }
+  return [...byId.values()];
 }
 
 /**
@@ -563,14 +592,18 @@ function ownerAttributor(
 ): (line: number, statement: string) => string[] | undefined {
   if (symbols.length === 0) return () => undefined;
 
+  // Keyed by id and not by extent, because one name can own several of them (declaration merging,
+  // see `extractSymbolExtents`). Its text is all of them joined, so a reference in any extent of a
+  // name is a reference by that name: the alternative keeps only one extent per key and loses
+  // whichever half of a merged declaration wrote the reference.
   const lines = source.split("\n");
-  const extentText = new Map(
-    symbols.map((symbol) => [
-      symbol.id,
-      lines.slice(symbol.startLine - 1, symbol.endLine).join("\n"),
-    ]),
-  );
-  const everyId = symbols.map((symbol) => symbol.id);
+  const extentText = new Map<string, string>();
+  for (const symbol of symbols) {
+    const text = lines.slice(symbol.startLine - 1, symbol.endLine).join("\n");
+    const already = extentText.get(symbol.id);
+    extentText.set(symbol.id, already === undefined ? text : `${already}\n${text}`);
+  }
+  const everyId = [...extentText.keys()];
 
   return (line, statement) => {
     const enclosing = symbols.find((symbol) => line >= symbol.startLine && line <= symbol.endLine);
@@ -579,11 +612,12 @@ function ownerAttributor(
     const bound = boundNames(statement);
     if (bound.length === 0) return everyId;
 
-    const referencing = symbols
-      .filter((symbol) =>
-        bound.some((name) => referencedWithin(extentText.get(symbol.id) ?? "", name)),
-      )
-      .map((symbol) => symbol.id);
+    // Walked over the ids rather than over the extents, so a name whose two extents both reference
+    // the binding is named once and not twice: an owners list is a set of nodes, and a repeated id
+    // in it would be read downstream as two.
+    const referencing = everyId.filter((id) =>
+      bound.some((name) => referencedWithin(extentText.get(id) ?? "", name)),
+    );
     return referencing.length > 0 ? referencing : everyId;
   };
 }

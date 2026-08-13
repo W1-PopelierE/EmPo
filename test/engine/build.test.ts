@@ -195,6 +195,20 @@ describe("the symbol id strategy", () => {
     expect(ids).not.toContain("src/money.ts");
   });
 
+  test("yields one node for a name declared twice, and gives it every one of its extents", () => {
+    // src/merged.ts merges a type and a function under `Handler` with an unrelated export written
+    // between them. Both halves open a boundary, so the function body is its own extent and not the
+    // tail of HANDLER_NAME's, and the two extents fold back into the single node the id names.
+    const graph = symbolGraph();
+    const ids = graph.nodes.filter((node) => node.file === "src/merged.ts").map((node) => node.id);
+
+    expect(ids).toEqual(["src/merged.ts#HANDLER_NAME", "src/merged.ts#Handler"]);
+    // Two extents of one id are not two files claiming one id, so nothing here is a duplicate.
+    expect(graph.duplicates).toEqual([]);
+    expect(graph.edges.filter((edge) => edge.from === "src/merged.ts#Handler")).toHaveLength(1);
+    expect(graph.edges.filter((edge) => edge.from === "src/merged.ts#HANDLER_NAME")).toEqual([]);
+  });
+
   test("yields the file node for a file that exports nothing", () => {
     // The strategy narrows what a node is where it can and never invents one: a file whose pattern
     // matched nothing keeps exactly the node its path already named.

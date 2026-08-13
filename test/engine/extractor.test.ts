@@ -979,15 +979,48 @@ describe("symbol extents", () => {
     expect(extracted.captures[0]?.owners).toEqual(["src/render.ts#render"]);
   });
 
-  test("keeps two exports of one name as one symbol", () => {
-    // A file cannot export one name twice; if a pattern matches it twice the first wins, so an id is
-    // never duplicated inside one file.
+  test("opens an extent at every match, so one name can own two of them", () => {
+    // Declaration merging is ordinary TypeScript: a type and a value, an interface and a function.
+    // Skipping the second match opened no boundary there, so the second declaration's body fell
+    // inside the extent of whatever was declared before it.
     const extracted = extract(
       symbolPack,
-      file("x.ts", "export const a = 1;\nexport const a = 2;\n"),
+      file(
+        "x.ts",
+        [
+          "export type Handler = () => void;", // 1
+          "export const middle = 1;", // 2
+          "export function Handler() {", // 3
+          "  return 2;", // 4
+          "}", // 5
+        ].join("\n"),
+      ),
     );
 
-    expect(extracted.symbols.map((symbol) => symbol.id)).toEqual(["x.ts#a"]);
+    expect(extracted.symbols).toEqual([
+      { name: "Handler", id: "x.ts#Handler", startLine: 1, endLine: 1 },
+      { name: "middle", id: "x.ts#middle", startLine: 2, endLine: 2 },
+      { name: "Handler", id: "x.ts#Handler", startLine: 3, endLine: 5 },
+    ]);
+  });
+
+  test("attributes an import to a repeated name off any of its extents, once", () => {
+    const extracted = extract(
+      quotingPack,
+      file(
+        "x.ts",
+        [
+          'import { dep } from "./dep";', // 1
+          "export type Handler = () => void;", // 2
+          "export const middle = 1;", // 3
+          "export function Handler() { return dep(); }", // 4
+        ].join("\n"),
+      ),
+    );
+
+    // `middle` never touches dep and must not be handed it, and `Handler` is named once however
+    // many extents of it referenced the binding.
+    expect(extracted.captures[0]?.owners).toEqual(["x.ts#Handler"]);
   });
 });
 

@@ -96,7 +96,9 @@ them will read a number here as saying more than it does. The strategy itself is
 **An export's extent is a line partition, not a scope.** The pack's `symbolPattern` matches
 declarations written at column 0, and each match owns the lines up to the next one. So a `produces`
 or `consumes` entry sitting on a helper written between two exports is recorded on the export above
-it, and a declaration nested inside another is not a node at all. Every citation in this file is
+it, and a declaration nested inside another is not a node at all. A name declared twice, which is
+what TypeScript's declaration merging writes, owns one extent per declaration and is still the one
+node its id names. Every citation in this file is
 still a real `file:line`; what the partition decides is which node the line was filed under.
 
 **An import that binds nothing this engine can match reaches the whole module.** Where a statement

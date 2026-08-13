@@ -218,8 +218,8 @@ empty.
 opens an extent that runs to the line before the next match, and the last one runs to the end of the
 file. That is the whole bargain of this engine restated at node granularity: every rule in it is a
 regex over masked text, and a real scope tree would need a parser per language, which is the thing a
-language-agnostic pack contract exists to avoid. Three consequences follow and none of them is
-hidden here.
+language-agnostic pack contract exists to avoid. The consequences follow, and none of them is hidden
+here.
 
 A declaration not written at column 0 opens no extent. The shipped pattern anchors at `^`, and every
 language this strategy suits indents a nested declaration, so a function declared inside another
@@ -247,6 +247,14 @@ exported declarations is inside the earlier one's extent, so a capture on its li
 the earlier export. There is no third answer available to a partition: the alternatives are to invent
 an owner or to give the line to everything, and giving it to the neighbour it was written under is
 the one that matches how the file reads.
+
+A name declared twice owns two extents and is still one node. TypeScript merges declarations as a
+matter of course: a type beside a function, an interface beside a value, a `declare module` beside
+what it describes. Every match opens a boundary, including the repeat, because the alternative is
+that no boundary opens at the second declaration and its whole body is read as the tail of whatever
+was declared above it, which credits that neighbour with every import the second body needed and
+leaves the name itself with none. The extents fold back into one node where nodes are made, so
+`graph.json` still holds one node per id and a reader never sees the name twice.
 
 A file whose pattern matches nothing yields exactly the file-level node it always did, with no
 `symbol` field on it. Test files, Vue single-file components and barrel files are the ordinary cases

@@ -1,7 +1,13 @@
 import { posix } from "node:path";
 import { configError } from "../errors";
 import type { GraphEdge, NameOutcome, NameVerdict, PackViews } from "../schema/types";
-import { boundNames, type Capture, type ExtractedFile, isSideEffectImport } from "./extractor";
+import {
+  boundNames,
+  type Capture,
+  type ExtractedFile,
+  isSideEffectImport,
+  symbolNodes,
+} from "./extractor";
 import { compareStrings } from "./order";
 import { packageOf } from "./packages";
 
@@ -152,10 +158,9 @@ export function buildNodeIndex(files: ExtractedFile[], views?: PackViews): NodeI
     // the same reason: a file the pack found exports in is those exports, and a file it found none in
     // is itself. The two are written apart because one produces nodes and this one indexes them, and
     // an index built from the nodes instead would need the graph before the edges that need the index.
+    // `symbolNodes` is what keeps the two the same list where a name owns more than one extent.
     const entries =
-      file.symbols.length === 0
-        ? [{ id: file.id, name: file.name }]
-        : file.symbols.map((symbol) => ({ id: symbol.id, name: symbol.name }));
+      file.symbols.length === 0 ? [{ id: file.id, name: file.name }] : symbolNodes(file.symbols);
     byFile.set(file.file, entries.map((entry) => entry.id).sort(compareStrings));
 
     const viewName = views === undefined ? null : viewNameOf(file.file, views);

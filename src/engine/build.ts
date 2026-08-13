@@ -6,7 +6,7 @@ import type {
   NameResolution,
   Pack,
 } from "../schema/types";
-import { compilePack, type ExtractedFile, extractFile } from "./extractor";
+import { compilePack, type ExtractedFile, extractFile, symbolNodes } from "./extractor";
 import { tallyNames } from "./names";
 import { byEdgeOrder, byNodeId, compareStrings } from "./order";
 import { readPackages } from "./packages";
@@ -195,6 +195,10 @@ function resolveJob(index: NodeIndex, job: string): string | null {
  * found none yields exactly the node it always did, so nothing about a `fqcn` or a `module-path`
  * pack moves, and neither does a `symbol` pack's file that exports nothing.
  *
+ * One node per unique id, which is `symbolNodes`' job: a name declared twice owns two extents and is
+ * still one export, so the two fold back together here rather than being reported as two files
+ * claiming one id by `dedupeNodes`, which is a different defect about a different thing.
+ *
  * `kind`, `isTest` and `assertsValue` are file-level facts copied onto each node, and honestly so: a
  * kind rule reads a path glob and a content pattern over the whole file, and a test file asserts or
  * does not assert as a file. Naming them per symbol would invent a distinction the pack contract
@@ -203,7 +207,7 @@ function resolveJob(index: NodeIndex, job: string): string | null {
  */
 function toNodes(file: ExtractedFile): GraphNode[] {
   if (file.symbols.length === 0) return [fileNode(file, file.id, file.name)];
-  return file.symbols.map((symbol) => ({
+  return symbolNodes(file.symbols).map((symbol) => ({
     ...fileNode(file, symbol.id, symbol.name),
     symbol: symbol.name,
     produces: file.produces.filter((ref) => owns(ref.owners, symbol.id)),
