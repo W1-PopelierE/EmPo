@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
+import {
+  compileHazards,
+  type DispatchSite,
+  findEnclosedDispatches,
+} from "../../src/engine/hazards";
 import { maskComments } from "../../src/engine/mask";
 import { fixturesDir, loadPack } from "../../src/engine/pack-loader";
 import { normalizeFqcn } from "../../src/engine/resolver";
@@ -30,10 +35,25 @@ function block(): NonNullable<typeof loaded.hazards> {
   return loaded.hazards;
 }
 
-function transactionRule(extent: HazardExtent): HazardTransactionRule {
-  const rule = block().transactions.find((candidate) => candidate.extent === extent);
+/**
+ * One transaction rule, named by its extent and, where the pack declares more than one of an
+ * extent, by the delimiter it counts. The pack has two `balanced` rules — the closure form counts
+ * braces, the arrow form counts the transaction call's own parentheses — and asking for "balanced"
+ * alone would silently hand back whichever is written first in pack.json.
+ */
+function transactionRule(extent: HazardExtent, open?: string): HazardTransactionRule {
+  const rule = block().transactions.find(
+    (candidate) => candidate.extent === extent && (open === undefined || candidate.open === open),
+  );
   if (rule === undefined) throw new Error(`the php pack declares no "${extent}" transaction rule`);
   return rule;
+}
+
+/** Every dispatch the real php pack finds enclosed in the source below, comment-masked first. */
+function sitesIn(...lines: string[]): DispatchSite[] {
+  const compiled = compileHazards(loaded);
+  if (compiled === null) throw new Error('loadPack("php") returned no hazards block');
+  return findEnclosedDispatches(compiled, maskComments(lines.join("\n"), loaded.comments));
 }
 
 function matches(pattern: string | undefined, text: string): boolean {
@@ -70,8 +90,8 @@ describe("php pack hazards", () => {
     // `balanced` without its delimiter pair counts nothing and `span` without an endPattern runs to
     // the end of the file. Both invent hazards rather than miss them, so both fields are asserted
     // off the loaded pack and not off pack.json.
-    expect(transactionRule("balanced").open).toBe("{");
-    expect(transactionRule("balanced").close).toBe("}");
+    expect(transactionRule("balanced", "{").close).toBe("}");
+    expect(transactionRule("balanced", "(").close).toBe(")");
     expect(transactionRule("span").endPattern).toBeDefined();
   });
 
@@ -97,18 +117,112 @@ describe("php pack hazards", () => {
   });
 
   test("opens a transaction on both spellings Laravel offers for the closure form", () => {
-    const rule = transactionRule("balanced");
+    const rule = transactionRule("balanced", "{");
 
     expect(matches(rule.pattern, "DB::transaction(function () use ($order) {")).toBe(true);
     expect(matches(rule.pattern, "DB::connection('ledger')->transaction(function () {")).toBe(true);
     expect(matches(rule.pattern, "$this->db->transaction(static function () {")).toBe(true);
 
-    // A deliberate miss, pinned rather than left to be discovered. `DB::transaction($callback)` and
-    // `DB::transaction(fn () => ...)` are both real, and neither has a `{` of its own for the
-    // balanced extent to count, so matching them would run the extent to some later brace and
-    // report every dispatch under it. Reporting nothing is the conservative half of that trade.
+    // Neither of these has a `{` of its own for this rule's extent to count, so matching them here
+    // would run the extent to some later brace and report every dispatch under it. The arrow form
+    // is read by the rule below instead, which counts the parentheses it does have.
+    // `DB::transaction($callback)` stays a deliberate miss: the callback's body is not at the site.
     expect(matches(rule.pattern, "DB::transaction($callback);")).toBe(false);
     expect(matches(rule.pattern, "DB::transaction(fn () => $order->place());")).toBe(false);
+  });
+
+  test("opens a transaction on the arrow form the closure rule cannot read", () => {
+    const rule = transactionRule("balanced", "(");
+
+    expect(matches(rule.pattern, "DB::transaction(fn () => ChargeCard::dispatch($order));")).toBe(
+      true,
+    );
+    expect(
+      matches(rule.pattern, "$connection->transaction(static fn () => $order->place());"),
+    ).toBe(true);
+
+    // The match is zero-width and ends just before the call's `(`, so the delimiter the extent
+    // counts from is the transaction call's own parenthesis. A pattern that swallowed the `(`
+    // would count from the arrow function's parameter list instead and close the extent there.
+    expect("DB::transaction(fn () => $x);".search(new RegExp(rule.pattern))).toBe(0);
+    expect(new RegExp(rule.pattern).exec("DB::transaction(fn () => $x);")?.[0]).toBe(
+      "DB::transaction",
+    );
+
+    // The closure form is the other rule's, and exactly one rule may claim a site or the same
+    // transaction is opened twice. `fn` has to be the callback, not the start of a longer word.
+    expect(matches(rule.pattern, "DB::transaction(function () use ($order) {")).toBe(false);
+    expect(matches(rule.pattern, "DB::transaction(fnMatcher());")).toBe(false);
+    expect(matches(rule.pattern, "DB::transaction($callback);")).toBe(false);
+  });
+
+  test("closes the arrow form's extent at the parenthesis the transaction call opened", () => {
+    expect(sitesIn("<?php", "DB::transaction(fn () => ChargeCard::dispatch($order));")).toEqual([
+      { job: "ChargeCard", line: 2, transactionLine: 2, deferredAtSite: false },
+    ]);
+
+    expect(
+      sitesIn("<?php", "$this->db->transaction(static fn () => PostLedgerEntry::dispatch($o));"),
+    ).toEqual([{ job: "PostLedgerEntry", line: 2, transactionLine: 2, deferredAtSite: false }]);
+
+    // The dispatch below the call is outside the transaction, which is what the closing
+    // parenthesis has to be found for: an extent that never balanced would run to the end of the
+    // file and report it.
+    expect(
+      sitesIn(
+        "<?php",
+        "DB::transaction(fn () => $order->place());",
+        "",
+        "ChargeCard::dispatch($order);",
+      ),
+    ).toEqual([]);
+
+    // Nested parentheses inside the arrow body are counted, so the extent still ends at the call's
+    // own closer and not at the first `)` after it.
+    expect(
+      sitesIn(
+        "<?php",
+        "DB::transaction(fn () => ChargeCard::dispatch($order->fresh()));",
+        "ChargeCard::dispatch($other);",
+      ),
+    ).toEqual([{ job: "ChargeCard", line: 2, transactionLine: 2, deferredAtSite: false }]);
+
+    // The deferral is read on the arrow form exactly as on the closure one: it is the dispatch's
+    // own statement that carries it, and the enclosure is unchanged.
+    expect(
+      sitesIn("<?php", "DB::transaction(fn () => ChargeCard::dispatch($order)->afterCommit());"),
+    ).toEqual([{ job: "ChargeCard", line: 2, transactionLine: 2, deferredAtSite: true }]);
+  });
+
+  test("counts a parenthesis inside a string literal in the arrow body, a known blind spot", () => {
+    // KNOWN LIMITATION, pinned rather than fixed. `balancedEnd` counts delimiters in the raw text
+    // and engine/mask.ts deliberately never masks string contents (hazards.ts:14-26), so an
+    // unbalanced parenthesis inside a string in the arrow body moves the extent's end. The arrow
+    // rule reaches this in a way the closure rule mostly does not: an interpolated `"{$user->name}"`
+    // stays brace-balanced, while a lone `(` in a string is unbalanced by nature.
+    //
+    // Not fixed here because masking string contents is an engine change, not something a pack-data
+    // rule can express, and the engine masks comments only on purpose (the `string` edge family and
+    // every route path live inside literals).
+
+    // An unmatched `(` inflates the depth, so the extent swallows the statement below and invents a
+    // hazard. The over-reporting direction, and the worse of the two.
+    expect(
+      sitesIn(
+        "<?php",
+        'DB::transaction(fn () => Log::info("charge (partial"));',
+        "ChargeCard::dispatch($order);",
+      ),
+    ).toEqual([{ job: "ChargeCard", line: 3, transactionLine: 2, deferredAtSite: false }]);
+
+    // An unmatched `)` closes the extent early and hides a real dispatch inside the transaction.
+    // The under-reporting direction, which is the safe one.
+    expect(
+      sitesIn(
+        "<?php",
+        "DB::transaction(fn () => [Log::info('charge ) partial'), ChargeCard::dispatch($order)]);",
+      ),
+    ).toEqual([]);
   });
 
   test("opens and closes the manual span on the facade and on a connection object alike", () => {
@@ -354,11 +468,15 @@ describe("php pack hazards", () => {
   });
 
   test("finds every marker it claims in the fixture corpus, on the masked source", () => {
-    const balanced = transactionRule("balanced").pattern;
+    const balanced = transactionRule("balanced", "{").pattern;
+    const arrow = transactionRule("balanced", "(").pattern;
     const span = transactionRule("span");
 
     expect(matches(balanced, corpus("app/Http/Controllers/CheckoutController.php"))).toBe(true);
     expect(jobsIn(corpus("app/Http/Controllers/CheckoutController.php"))).toEqual(["ChargeCard"]);
+    expect(matches(arrow, corpus("app/Http/Controllers/SettlementController.php"))).toBe(true);
+    // The closure rule finds nothing there, which is what the arrow rule exists for.
+    expect(matches(balanced, corpus("app/Http/Controllers/SettlementController.php"))).toBe(false);
     expect(
       anyMatches(block().deferAtSite, corpus("app/Http/Controllers/RefundController.php")),
     ).toBe(true);
@@ -385,6 +503,7 @@ describe("php pack hazards", () => {
       "app/Http/Controllers/CatalogController.php",
       "app/Http/Controllers/QueueHandoffController.php",
       "app/Http/Controllers/SpoolController.php",
+      "app/Http/Controllers/SettlementController.php",
       "app/Libraries/Ledger/LedgerPoster.php",
       "app/Libraries/Ledger/LedgerCloser.php",
       "app/Libraries/Ledger/LedgerReverser.php",
@@ -423,7 +542,8 @@ describe("php pack hazards", () => {
 
     expect(matches(transactionRule("span").pattern, raw)).toBe(true);
     expect(matches(transactionRule("span").pattern, corpus(relPath))).toBe(false);
-    expect(matches(transactionRule("balanced").pattern, corpus(relPath))).toBe(false);
+    expect(matches(transactionRule("balanced", "{").pattern, corpus(relPath))).toBe(false);
+    expect(matches(transactionRule("balanced", "(").pattern, corpus(relPath))).toBe(false);
     expect(jobsIn(corpus(relPath))).toEqual(["RebuildSearchIndex"]);
   });
 

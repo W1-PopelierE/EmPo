@@ -1,6 +1,6 @@
 {
   "name": "php",
-  "version": "1.7.0",
+  "version": "1.8.0",
 
   "match": {
     "extensions": [".php"],
@@ -241,6 +241,12 @@
         "extent": "balanced",
         "open": "{",
         "close": "}"
+      },
+      {
+        "pattern": "(?:DB::|->)transaction(?=\\(\\s*(?:static\\s+)?fn\\b)",
+        "extent": "balanced",
+        "open": "(",
+        "close": ")"
       },
       {
         "pattern": "(?:DB::|->)beginTransaction\\(\\s*\\)",

@@ -135,9 +135,12 @@ exactly the honesty this tradeoff requires.
   // 7. optional: transaction hazards. A pack that omits this block makes no claim at all
   "hazards": {
     "transactions": [
-      // the closure form only: an arrow-function transaction opens no block to balance
+      // the closure form: braces to balance, so the pattern must require the `function` keyword
       { "pattern": "DB::transaction\\(\\s*function\\b",
         "extent": "balanced", "open": "{", "close": "}" },
+      // the arrow form opens no block, so it balances its parens instead
+      { "pattern": "DB::transaction(?=\\(\\s*fn\\b)",
+        "extent": "balanced", "open": "(", "close": ")" },
       { "pattern": "DB::beginTransaction\\(", "extent": "span", "endPattern": "DB::commit\\(" }
     ],
     "dispatches": [ { "pattern": "([A-Za-z0-9_\\\\]+)::dispatch\\(", "job": 1 } ],
@@ -1281,9 +1284,15 @@ engine knows:
   nothing closes is the worse hazard rather than a reason to report nothing. A `balanced` extent runs
   to the end of the file in two cases for that same reason: when the delimiters never balance, and
   when no `open` delimiter follows the opener at all. A `balanced` pattern must therefore match
-  only the spelling that really opens a block: the php pack's requires the `function` keyword, because
-  an arrow-function transaction opens none and the walker would balance the next unrelated block
-  instead.
+  only the spelling whose `open` delimiter really follows it, which is why the php pack spends two
+  `balanced` rules on one keyword: the closure rule requires the `function` keyword and balances
+  `{`/`}`, and the arrow-function rule matches `transaction` with a lookahead for `(\s*fn` and
+  balances `(`/`)` instead, because `fn () => …` opens no block and a brace-counting walker would
+  balance the next unrelated block instead. The delimiter pair is per-rule for exactly this reason.
+  A `balanced` extent counts delimiters in text whose string literals are not masked, so it inherits
+  the string-literal blind spot: an unmatched `(` inside a string extends a paren-balanced extent and
+  an unmatched `)` ends it early, though an arrow body is a single expression, which bounds the blast
+  radius to that statement and the few after it rather than to a whole block.
 - **`dispatches`** is a list of `{ pattern, job }`, where `job` is the 1-based capture group holding
   the dispatched job's name. It is a group number and not a convention, because a language spells the
   dispatch two or three ways and the name does not sit in the same place in all of them. Two rules
@@ -1454,8 +1463,9 @@ Two, deliberately different, to keep the interface honest:
   http-routes, `consumes` both http-routes and the Inertia page
   names the typescript pack produces). It is the one pack that declares a `views` block, which those
   four rules are the only reader of, the one pack that declares a `hazards` block, covering
-  both Laravel
-  transaction forms, seven spellings that hand work to a queue — the three `dispatch` forms, the
+  all three Laravel
+  transaction forms — the closure, the arrow function and the manual begin/commit pair — seven
+  spellings that hand work to a queue — the three `dispatch` forms, the
   `Mail` facade's `queue()`/`later()`, the `Queue` facade's `push()`/`pushOn()`/`later()`/
   `laterOn()`/`bulk()`, `->notify(new …)` and `Notification::send()`, which is a floor and not the
   whole of Laravel — `->afterCommit()` at the site and

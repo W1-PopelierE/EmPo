@@ -85,6 +85,18 @@
       "assertsValue": false
     },
     {
+      "id": "Acme\\Http\\Controllers\\SettlementController",
+      "file": "app/Http/Controllers/SettlementController.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "SettlementController",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
       "id": "Acme\\Http\\Controllers\\SpoolController",
       "file": "app/Http/Controllers/SpoolController.php",
       "root": ".",
@@ -645,6 +657,46 @@
       }
     },
     {
+      "from": "Acme\\Http\\Controllers\\SettlementController",
+      "to": "Acme\\Jobs\\ChargeCard",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/SettlementController.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\SettlementController",
+      "to": "Acme\\Jobs\\PostLedgerEntry",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/SettlementController.php",
+        "line": 6
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\SettlementController",
+      "to": "Acme\\Jobs\\RebuildSearchIndex",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/SettlementController.php",
+        "line": 7
+      }
+    },
+    {
+      "from": "Acme\\Http\\Controllers\\SettlementController",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Http/Controllers/SettlementController.php",
+        "line": 8
+      }
+    },
+    {
       "from": "Acme\\Http\\Controllers\\SpoolController",
       "to": "Acme\\Mailables\\WelcomeMail",
       "kind": "import",
@@ -1027,6 +1079,20 @@
       "job": "OrderShipped",
       "target": "Acme\\Notifications\\OrderShipped",
       "transactionLine": 20
+    },
+    {
+      "file": "app/Http/Controllers/SettlementController.php",
+      "line": 24,
+      "job": "ChargeCard",
+      "target": "Acme\\Jobs\\ChargeCard",
+      "transactionLine": 24
+    },
+    {
+      "file": "app/Http/Controllers/SettlementController.php",
+      "line": 31,
+      "job": "PostLedgerEntry",
+      "target": "Acme\\Jobs\\PostLedgerEntry",
+      "transactionLine": 31
     },
     {
       "file": "app/Http/Controllers/SpoolController.php",
