@@ -227,6 +227,21 @@ function is read as part of the enclosing export rather than as an export of its
 property that makes the partition safe enough to answer with, and it is a property of the pattern
 rather than of the engine.
 
+An extent begins where the declaration begins, which is not always the keyword, and saying where
+that is belongs to the pack. A decorator is written on the lines **above** the thing it decorates, so
+a pattern anchored at `export` leaves `@Injectable()` inside the extent of whatever was declared
+above it. That is not a cosmetic off-by-one: the reference scan then finds `Injectable` in the
+neighbour's extent, which is enough to suppress the "nothing references this binding" fallback, and
+the import is attributed to the class written above rather than to the class being decorated. The
+decorated class gets no edge at all, which is under-attribution, the one direction a blast radius may
+not be wrong in. The repair is the pack's, because a decorator is a language's spelling and the
+engine holds the verbs while the pack holds the sentence: the typescript `symbolPattern` takes a run
+of decorator lines immediately above the declaration as part of the match, so the extent opens on the
+first of them. Angular, NestJS, TypeORM and MobX all write this shape, and all of them write
+decorators that span lines, so the run admits a continuation line that is indented or opens with a
+closing bracket. It admits nothing written at column 0, which is what stops a run of decorator lines
+over an unexported declaration from swallowing the next export and costing it its node.
+
 Text between two exports belongs to the export above it. A helper written at column 0 between two
 exported declarations is inside the earlier one's extent, so a capture on its lines is attributed to
 the earlier export. There is no third answer available to a partition: the alternatives are to invent
@@ -1538,6 +1553,7 @@ Two, deliberately different, to keep the interface honest:
   syntax, `.blade.php` masking `{{-- --}}`.
 - **typescript** (`strategy: symbol`, with the `symbolPattern` that reads an exported `function`,
   `class`, `abstract class`, `const`, `let`, `var`, `type`, `interface` or `enum` written at column 0,
+  together with any run of decorator lines written directly above it,
   four `import` rules, two `template` rules for the JSX and
   Vue component tag, scoped with `pathGlob` to `**/*.{tsx,jsx,vue}` and confined by `targetKinds` to
   landing on a `component` or a `screen`, three `declares` patterns so those two rules refuse a tag

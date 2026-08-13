@@ -1,6 +1,6 @@
 {
   "name": "typescript",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "match": {
     "extensions": [".ts", ".tsx", ".vue", ".js", ".jsx", ".mjs", ".cjs"],
     "manifest": ["package.json", "tsconfig.json"]
@@ -8,7 +8,7 @@
   "node": {
     "id": {
       "strategy": "symbol",
-      "symbolPattern": "^export\\s+(?:default\\s+)?(?:async\\s+)?(?:function\\s*\\*?|class|abstract\\s+class|const|let|var|type|interface|enum)\\s+([A-Za-z_$][A-Za-z0-9_$]*)",
+      "symbolPattern": "^(?:@[A-Za-z_$][^\\n]*\\r?\\n(?:[ \\t)}\\]][^\\n]*\\r?\\n)*)*export\\s+(?:default\\s+)?(?:async\\s+)?(?:function\\s*\\*?|class|abstract\\s+class|const|let|var|type|interface|enum)\\s+([A-Za-z_$][A-Za-z0-9_$]*)",
       "indexNames": ["index"]
     },
     "kindRules": [

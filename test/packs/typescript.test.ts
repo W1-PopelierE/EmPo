@@ -73,7 +73,7 @@ describe("typescript pack", () => {
 
   test("loads with its declared identity", () => {
     expect(pack.name).toBe("typescript");
-    expect(pack.version).toBe("2.0.0");
+    expect(pack.version).toBe("2.0.1");
   });
 
   test("reproduces the expected nodes", () => {
@@ -93,6 +93,74 @@ describe("typescript pack", () => {
     ]);
     expect(node("src/shared/money.ts#formatMoney")?.name).toBe("formatMoney");
     expect(node("src/shared/money.ts#formatMoney")?.symbol).toBe("formatMoney");
+  });
+
+  /** The extents the shipped symbolPattern reads out of one probe file, as `name[start-end]`. */
+  const extents = (source: string): string[] => {
+    const extracted = extractFile(compilePack(pack), {
+      root: ".",
+      lang: "typescript",
+      file: "src/probe.ts",
+      relPath: "src/probe.ts",
+      source,
+    });
+    if (extracted === null) throw new Error("expected the probe to yield a node");
+    return extracted.symbols.map((s) => `${s.name}[${s.startLine}-${s.endLine}]`);
+  };
+
+  test("starts a decorated export's extent at its first decorator, not at the keyword", () => {
+    // A decorator is written above the declaration it decorates, so an extent opened at `export`
+    // leaves those lines inside the extent of whatever was declared above. The reference scan then
+    // finds the decorator's name there, which is enough to suppress the "nothing references it"
+    // fallback, and the import is handed to the class that happens to sit above rather than to the
+    // one being decorated. That is the standard shape in Angular, NestJS, TypeORM and MobX.
+    const source = [
+      'import { Injectable } from "./di";', // 1
+      "", // 2
+      "export class Alpha {}", // 3
+      "", // 4
+      "@Injectable()", // 5
+      "export class Beta {}", // 6
+    ].join("\n");
+
+    expect(extents(`${source}\n`)).toEqual(["Alpha[3-4]", "Beta[5-7]"]);
+
+    const extracted = extractFile(compilePack(pack), {
+      root: ".",
+      lang: "typescript",
+      file: "src/probe.ts",
+      relPath: "src/probe.ts",
+      source: `${source}\n`,
+    });
+    expect(extracted?.captures[0]?.owners).toEqual(["src/probe.ts#Beta"]);
+  });
+
+  test("takes a decorator that spans lines, which is how Angular and NestJS write one", () => {
+    // The single-line form is the smaller half of the problem: `@Component({ ... })` runs over
+    // three or more lines in every Angular file there is. A continuation line is recognized by
+    // being indented or by opening with a closer, and an `export` at column 0 can never be one, so
+    // no run of decorator lines can swallow the next declaration and cost it its node.
+    expect(
+      extents(
+        [
+          "export const SELECTOR = 'app-cart';", // 1
+          "", // 2
+          "@Component({", // 3
+          "  selector: SELECTOR,", // 4
+          "})", // 5
+          "export class CartComponent {}", // 6
+          "",
+        ].join("\n"),
+      ),
+    ).toEqual(["SELECTOR[1-2]", "CartComponent[3-7]"]);
+  });
+
+  test("leaves a decorator over something unexported where it was", () => {
+    // The run has to reach an `export` or it is not a prefix of one. A decorated local declaration
+    // opens no extent of its own and must not drag the next export's start line up to it.
+    expect(extents("@decorate()\nconst local = 1;\nexport const after = 2;\n")).toEqual([
+      "after[3-4]",
+    ]);
   });
 
   test("falls back to the file where the pattern matches nothing, and names it by its basename", () => {
