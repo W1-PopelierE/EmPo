@@ -399,6 +399,13 @@ const REMOTES: [string, DetectedForge | null][] = [
     { kind: "mcp", host: "gitlab", workspace: "acme/backend", repo: "api" },
   ],
 
+  // GitLab's port-443 ssh endpoint, the same subdomain case the `altssh.bitbucket.org` row pins on
+  // the other host: the group path rule is matched by domain, so a subdomain takes it too.
+  [
+    "ssh://git@altssh.gitlab.com:443/acme/backend/api.git",
+    { kind: "mcp", host: "gitlab", workspace: "acme/backend", repo: "api" },
+  ],
+
   // The flat GitLab case still reads the same as every other host, so the exception above is a
   // deeper path and not a different grammar.
   ["git@gitlab.com:acme/api.git", { kind: "mcp", host: "gitlab", workspace: "acme", repo: "api" }],

@@ -610,8 +610,8 @@ export function checkConfig(config: EmpoConfig, repoRoot: string): HealthFinding
   // nobody meant, and it is the framework feature-test case: a test that calls its own HTTP route
   // rather than importing the controller is coupled to it and to nothing else that an import graph
   // can see, which is the whole reason bridges exist. engine/bridger.ts drops the self-pair and
-  // keeps the rest, and test/engine/bridger.ts pins it. A finding here fires on a working config,
-  // in every session forever through the hook block, and gets the whole report turned off.
+  // keeps the rest, and test/engine/bridger.test.ts pins it. A finding here fires on a working
+  // config, in every session forever through the hook block, and gets the whole report turned off.
   for (const bridge of config.bridges) {
     for (const side of ["produces", "consumes"] as const) {
       for (const path of [bridge[side]].flat()) {
