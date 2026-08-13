@@ -237,21 +237,21 @@
   "hazards": {
     "transactions": [
       {
-        "pattern": "(?:DB::|->)transaction\\(\\s*(?:static\\s+)?function\\b",
+        "pattern": "(?:(?<![\\w\\\\])\\\\?DB::|->)transaction\\(\\s*(?:static\\s+)?function\\b",
         "extent": "balanced",
         "open": "{",
         "close": "}"
       },
       {
-        "pattern": "(?:DB::|->)transaction(?=\\(\\s*(?:static\\s+)?fn\\b)",
+        "pattern": "(?:(?<![\\w\\\\])\\\\?DB::|->)transaction(?=\\(\\s*(?:static\\s+)?fn\\b)",
         "extent": "balanced",
         "open": "(",
         "close": ")"
       },
       {
-        "pattern": "(?:DB::|->)beginTransaction\\(\\s*\\)",
+        "pattern": "(?:(?<![\\w\\\\])\\\\?DB::|->)beginTransaction\\(\\s*\\)",
         "extent": "span",
-        "endPattern": "(?:DB::|->)(?:commit|roll[Bb]ack)\\(\\s*\\)"
+        "endPattern": "(?:(?<![\\w\\\\])\\\\?DB::|->)(?:commit|roll[Bb]ack)\\(\\s*\\)"
       }
     ],
     "dispatches": [

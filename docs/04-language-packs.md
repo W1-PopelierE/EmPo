@@ -1286,13 +1286,16 @@ engine knows:
   when no `open` delimiter follows the opener at all. A `balanced` pattern must therefore match
   only the spelling whose `open` delimiter really follows it, which is why the php pack spends two
   `balanced` rules on one keyword: the closure rule requires the `function` keyword and balances
-  `{`/`}`, and the arrow-function rule matches `transaction` with a lookahead for `(\s*fn` and
+  `{`/`}`, and the arrow-function rule matches `transaction` with a lookahead for `(\s*fn`, with the
+  `static` of `static fn` optional in the lookahead exactly as it is in the closure rule, and
   balances `(`/`)` instead, because `fn () => …` opens no block and a brace-counting walker would
   balance the next unrelated block instead. The delimiter pair is per-rule for exactly this reason.
   A `balanced` extent counts delimiters in text whose string literals are not masked, so it inherits
-  the string-literal blind spot: an unmatched `(` inside a string extends a paren-balanced extent and
-  an unmatched `)` ends it early, though an arrow body is a single expression, which bounds the blast
-  radius to that statement and the few after it rather than to a whole block.
+  the string-literal blind spot: an unmatched `)` inside a string ends a paren-balanced extent early,
+  and an unmatched `(` extends it to the first `)` that balances the surplus, which is the end of the
+  file when no later `)` restores the depth. An arrow body is a single expression, so the common
+  miscount ends the extent early rather than late; the late case is unbounded all the same, and one
+  stray `(` in a string can enclose every dispatch below it.
 - **`dispatches`** is a list of `{ pattern, job }`, where `job` is the 1-based capture group holding
   the dispatched job's name. It is a group number and not a convention, because a language spells the
   dispatch two or three ways and the name does not sit in the same place in all of them. Two rules

@@ -156,6 +156,31 @@ describe("php pack hazards", () => {
     expect(matches(rule.pattern, "DB::transaction($callback);")).toBe(false);
   });
 
+  test("opens a transaction on the DB facade only where DB is the whole identifier", () => {
+    // `DB::` as a bare suffix would match inside any longer name, and a dispatch under someone
+    // else's `AcmeDB::transaction` is a hazard the pack fabricated rather than one it found. Only
+    // the unqualified facade and its root-qualified spelling are the facade; every rule that names
+    // the facade carries the same boundary, so a lookalike opens no transaction at all.
+    for (const rule of block().transactions) {
+      const patterns = [rule.pattern, rule.endPattern ?? ""].filter((p) => p !== "");
+
+      for (const pattern of patterns) {
+        expect(matches(pattern, "AcmeDB::transaction(fn () => $x());")).toBe(false);
+        expect(matches(pattern, "Acme\\DB::transaction(fn () => $x());")).toBe(false);
+        expect(matches(pattern, "AcmeDB::beginTransaction();")).toBe(false);
+        expect(matches(pattern, "Acme\\DB::commit();")).toBe(false);
+      }
+    }
+
+    const arrow = transactionRule("balanced", "(");
+    const closure = transactionRule("balanced", "{");
+
+    expect(matches(arrow.pattern, "\\DB::transaction(fn () => $x());")).toBe(true);
+    expect(matches(closure.pattern, "\\DB::transaction(function () {")).toBe(true);
+    expect(matches(transactionRule("span").pattern, "\\DB::beginTransaction();")).toBe(true);
+    expect(matches(transactionRule("span").endPattern ?? "", "\\DB::commit();")).toBe(true);
+  });
+
   test("closes the arrow form's extent at the parenthesis the transaction call opened", () => {
     expect(sitesIn("<?php", "DB::transaction(fn () => ChargeCard::dispatch($order));")).toEqual([
       { job: "ChargeCard", line: 2, transactionLine: 2, deferredAtSite: false },
