@@ -1445,6 +1445,39 @@ describe("queryCommand --orphans", () => {
     expect(kinds.get("app/Legacy/UnusedReport.php")).toBe(null);
   });
 
+  test("names the unit only where every row really is an export", () => {
+    // The acme fixture is a monorepo: a php root whose nodes are classes and a typescript root
+    // whose nodes are exports. One node carrying a symbol used to flip the heading, so two php
+    // classes were listed under "nothing in the graph references these exports", which is a unit
+    // the answer cannot know for those rows and the wrong one for most of them.
+    const printed = capture(() => queryCommand(repo, undefined, { orphans: true }));
+    const answer = JSON.parse(
+      capture(() => queryCommand(repo, undefined, { orphans: true, json: true })),
+    );
+
+    // The mixture the heading has to survive: rows of both units in one answer.
+    expect(answer.rows.some((row: { id: string }) => row.id.includes("#"))).toBe(true);
+    expect(answer.rows.some((row: { kind: string }) => row.kind === "class")).toBe(true);
+
+    expect(answer.bySymbol).toBe(false);
+    expect(printed).toContain("orphans: nothing in the graph references these");
+    expect(printed).not.toContain("references these exports");
+  });
+
+  test("still names the unit where the whole graph is exports, which is what it is for", () => {
+    // The other half, and the reason the heading exists: under a uniform `symbol` graph a row is
+    // one unused export of a file the rest of which may be heavily used, and a reader who takes it
+    // for a dead file deletes working code (docs/06-cli.md).
+    const printed = capture(() =>
+      queryCommand(repoWithGraph(symbolGraph()), undefined, {
+        orphans: true,
+      }),
+    );
+
+    expect(printed).toContain("orphans: nothing in the graph references these exports");
+    expect(printed).toContain("src/total.ts#total");
+  });
+
   test("refuses --all outside --orphans with exit code 2, rather than ignoring it", () => {
     const error = expectEmpoError(2, () =>
       capture(() => queryCommand(repo, undefined, { gods: true, all: true })),

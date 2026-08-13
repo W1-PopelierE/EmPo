@@ -492,10 +492,15 @@ export interface OrphansAnswer {
   mode: "orphans";
   rows: OrphanRow[];
   /**
-   * Whether a row is an export or a file, read off whether any node in the graph carries a symbol.
+   * Whether a row is an export or a file, read off whether every node in the graph carries a symbol.
    * Under a `symbol` pack an unreferenced row is one unused export of a file the rest of which may be
    * heavily used, and a reader who takes it for a whole unused file deletes working code. The header
    * has to say which, and only the graph knows.
+   *
+   * Every node and not any node, because one heading is printed over rows a monorepo draws from
+   * several roots. A php root and a typescript root in one graph make the unit non-uniform, and
+   * naming either one is the answer claiming a fact about rows it has no evidence for; the
+   * unit-neutral heading is true of all of them.
    */
   bySymbol: boolean;
   /**
@@ -550,7 +555,15 @@ function orphans(graph: Graph, all: boolean): OrphansAnswer {
   return {
     mode: "orphans",
     rows: all ? candidates : candidates.filter((row) => row.resolvedBy === null),
-    bySymbol: graph.nodes.some((node) => node.symbol !== undefined),
+    // Every node and not some node, because the heading states one unit over the whole list. A
+    // monorepo with a php root and a typescript root holds nodes of both sorts, and under `some` a
+    // single export anywhere in the graph put php classes under "nothing in the graph references
+    // these exports": a unit the answer has no evidence for on those rows, stated as though it did.
+    // A mixed graph therefore falls back to the unit-neutral heading, which is true of every row
+    // whatever ided it, and the naming stays where it earns its keep: a graph that is all exports.
+    // A graph holding no node at all is no evidence either, so it does not name a unit over its
+    // empty list on the vacuous truth that every one of no nodes carries a symbol.
+    bySymbol: graph.nodes.length > 0 && graph.nodes.every((node) => node.symbol !== undefined),
     frameworkResolved: {
       listed: all,
       total: excluded.length,
