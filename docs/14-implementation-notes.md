@@ -822,8 +822,25 @@ was pointed at. Step 8 is the same shape one level further out: the merge is a p
 text of a `settings.json` to the text of the next one, and a hook's whole answer is a pure function
 from a payload object to a string or to null, so the host contract is tested with no host running.
 
-One thing the design docs describe that these steps deliberately did not build, recorded here as
+Two things the design docs describe that these steps deliberately did not build, recorded here as
 the rule at the top of this doc requires:
+
+- **A changed line is not narrowed to the symbols it touches.** Step 9 gave the graph per-export
+  nodes, and each one carries the lines it spans, so "this diff touched lines 40 to 52" and "these
+  are the exports that own those lines" is now a question the data can answer. Nothing asks it. Both
+  halves are already on disk and neither is wired to the other: `touchesLine` in `engine/diff.ts`
+  reads a hunk, and `ExtractedSymbol` in `engine/extractor.ts` holds `startLine` and `endLine`.
+  `empo review` still resolves a changed **file** to every node that file yields, so editing one
+  export of a twenty-export module reports the blast radius of all twenty.
+
+  This is the payoff the strategy was built for rather than a nicety, and it is left out on purpose:
+  the ids had to exist and be trusted first, and the extents are a line partition rather than a parse
+  (section 2 of [04-language-packs](04-language-packs.md) says what that cannot see). Narrowing on
+  top of a partition that hands a helper written between two exports to the export above it would
+  turn a documented over-attribution into a **missed** one, and a review that quietly drops the
+  symbol a change really touched is worse than one that reports too many. Whoever builds it should
+  decide what happens to a hunk no extent encloses, which is every edit to an import block, before
+  writing anything else.
 
 - **`empo index --root <path>` is not implemented.** A partial rebuild is only safe while no edge
   crosses a root, and step 5 made that permanently untrue: a bridge edge has one end in each root, so
