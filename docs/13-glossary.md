@@ -72,7 +72,7 @@ claim about the language, which is a different answer from a pack that looked an
 sum to the header). Best cited to an executable check in the codebase rather than stated in prose.
 See [08-spines](08-spines.md).
 
-**Language pack.** The declarative rules (plus optional JS escape hatch) that tell the one
+**Language pack.** The declarative rules, and only those, that tell the one
 language-agnostic engine how to extract nodes, edges, and symbol tables for a given language. Adding
 a language is a pack, not a new parser. See [04-language-packs](04-language-packs.md).
 

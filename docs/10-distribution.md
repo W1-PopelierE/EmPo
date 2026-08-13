@@ -32,7 +32,7 @@ empo/
     commands/        init, index, query, verify, check, review, update, doctor, upgrade, pack
     engine/          the language-agnostic graph builder (loads packs, emits graph.json)
     packs/
-      php/           pack rules + fixtures + hard-cases.js
+      php/           pack rules + fixtures
       typescript/    pack rules + fixtures
     adapters/
       forge/         github, mcp, local

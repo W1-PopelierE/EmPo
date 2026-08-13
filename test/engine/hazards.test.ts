@@ -53,7 +53,7 @@ function packWith(block?: PackHazards): Pack {
     edges: {},
     produces: [],
     consumes: [],
-    tests: { paths: [], importsRule: "", assertionTerms: [], assertionExcludes: [] },
+    tests: { paths: [], assertionTerms: [], assertionExcludes: [] },
     hazards: block,
   };
 }

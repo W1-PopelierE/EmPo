@@ -45,7 +45,7 @@ describe("packSchema", () => {
 
     expect(result.success).toBe(true);
     expect(result.data?.produces).toEqual([]);
-    expect(result.data?.tests.importsRule).toBe("import");
+    expect(result.data?.tests).toEqual({ paths: [], assertionTerms: [], assertionExcludes: [] });
   });
 
   test("rejects a symbol rule that maps a part to a capture group the pattern does not have", () => {

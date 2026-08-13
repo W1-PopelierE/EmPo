@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createForge, type HostPullRequestInput } from "../adapters/forge/create";
-import type { ForgeAdapter, PullRequest } from "../adapters/forge/types";
+import { type ForgeAdapter, hasCapability, type PullRequest } from "../adapters/forge/types";
 import { readHostPullRequest, readHostTicket, verifyPullRequest } from "../adapters/host-input";
 import { createTracker } from "../adapters/tracker/create";
 import { DEFAULT_KEY_PATTERN } from "../adapters/tracker/key";
@@ -30,7 +30,7 @@ import {
   type SpineReport,
   verifySpine,
 } from "../engine/spines";
-import { configError } from "../errors";
+import { configError, type EmpoError, environmentError } from "../errors";
 import type { EmpoConfig, EmpoForge } from "../schema/config.schema";
 import { parseFindingsFile } from "../schema/findings.schema";
 import type { HostTicket } from "../schema/host-payload.schema";
@@ -175,6 +175,12 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
     payloadPath: paths.pr,
   });
   if (forge.note !== null) notes.push(forge.note);
+
+  // Before the worktree, before the ticket ask, before anything the reviewer would have to redo.
+  // This is the earliest the question is answerable: it is a question about an adapter, and the
+  // line above is where the first one exists. The gate builds its own from the same config later,
+  // so the two are not always the same object, but neither gains a capability the other lacks.
+  if (options.post === true) requirePostCapability(config, forge.adapter, forge.note);
 
   const tracker = createTracker(config, repoRoot, { payload: host.ticket });
   if (tracker.note !== null) notes.push(tracker.note);
@@ -1548,6 +1554,16 @@ function postFindings(repoRoot: string, pr: string | undefined, result: GateResu
   // forge, whose refusal names the real reason rather than a gh error about a pull request
   // called "local".
   const forge = createForge(config, repoRoot, { base: "HEAD", pr });
+  // Asked again here, and not because phase 1 might have missed it. This loop posts one comment per
+  // finding and nothing undoes a posted one, so a refusal raised from inside it is a review
+  // half-posted: some findings up, the rest not, and no record of which. Asking before the first
+  // `comment` is what keeps this refusal out of that state, and it is also the only guard on the
+  // path of a gate run on its own. It does not make posting itself atomic: a `post`-capable adapter
+  // that fails on the fourth `comment` leaves the first three up, and that is not handled anywhere.
+  //
+  // No note. This forge was built with no payload, for the capability question alone, so its note
+  // would describe a review reading the local diff, which is not the review being refused.
+  requirePostCapability(config, forge.adapter, null);
   const id = pr ?? "local";
   for (const row of result.kept) {
     const lines = [row.finding.title, "", row.finding.claim];
@@ -1559,6 +1575,64 @@ function postFindings(repoRoot: string, pr: string | undefined, result: GateResu
   }
   console.log("");
   console.log(`posted ${result.kept.length} finding(s) to ${id}`);
+}
+
+/**
+ * The capability check `--post` never had (docs/09-adapters.md). A forge declares what it can
+ * answer, and `post` is absent wherever the review cannot write back, so whether `--post` can be
+ * honoured is knowable the moment the adapter is built and long before the review is spent.
+ *
+ * What was wrong was the order, not the outcome. `--post` on a forge that cannot post used to run
+ * the whole discipline, print every verified finding, and only then die inside the posting loop,
+ * one call into an adapter whose three mutating methods throw. The findings were never lost, but
+ * the refusal arrived after the reviewer had paid for it, and it named a capability the adapter had
+ * been declaring absent since it was constructed.
+ *
+ * The adapters' own throws stay exactly as they are. They are now what their comment in
+ * `adapters/forge/mcp.ts` already calls them, the backstop for a caller that forgot this check,
+ * rather than the refusal a user meets.
+ *
+ * It refuses whether or not any finding survived verification. A run with nothing to post used to
+ * reach the end of the loop without calling the adapter once and print "posted 0 finding(s)", which
+ * was a sentence about a write that never happened and could not have happened. The capability is a
+ * fact about the forge and not about the findings, so it is answered the same way either way.
+ *
+ * The exit code is taken from the adapter that refuses, which is what keeps it the same code the
+ * adapter's own throw would have produced: `local` has nowhere to post and says so as a config
+ * error (2), `mcp` reached a host it cannot write back to and says so as an environment error (3).
+ * Reading it off `adapters.forge` instead would have moved every degraded run to 3, including a
+ * forge configured `local`, whose author fixes it in `.empo/config.json` and not in their machine.
+ */
+function requirePostCapability(
+  config: EmpoConfig,
+  adapter: ForgeAdapter,
+  note: string | null,
+): void {
+  if (hasCapability(adapter, "post")) return;
+  throw cannotPost(config, adapter, note);
+}
+
+function cannotPost(config: EmpoConfig, adapter: ForgeAdapter, note: string | null): EmpoError {
+  // The note first where there is one, because it is the only line that can say the adapter under
+  // discussion is not the forge that was configured, and a reader told "the local forge cannot post"
+  // by a repository configured for github is owed the sentence explaining how it got there. Only the
+  // brief passes one. The gate builds its forge with no payload to answer a question about posting
+  // alone, so its note describes a degradation that did not happen to the review it is refusing.
+  const details = note === null ? [] : [note];
+  details.push(
+    `It declares: ${[...adapter.capabilities].sort(compareStrings).join(", ")}.`,
+    "Drop --post. The verified findings are printed either way, so nothing is lost by posting them by hand.",
+  );
+  if (adapter.kind === "local" && config.adapters?.forge === undefined) {
+    details.push(
+      "Or configure adapters.forge in .empo/config.json, so there is a host to post to.",
+    );
+  }
+
+  const message = `The ${adapter.kind} forge cannot post, so --post cannot be honoured`;
+  return adapter.kind === "local"
+    ? configError(message, details)
+    : environmentError(message, details);
 }
 
 /** The one shipped stylistic tell. Teams configure more; EmPo ships no opinion beyond this. */

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { compilePack, type ExtractedFile, extractFile } from "../../src/engine/extractor";
 import type { ScannedFile } from "../../src/engine/scanner";
+import { EmpoError } from "../../src/errors";
 import type { Pack, SymbolRule } from "../../src/schema/types";
 
 /**
@@ -24,7 +25,7 @@ const basePack: Pack = {
   edges: {},
   produces: [],
   consumes: [],
-  tests: { paths: [], importsRule: "import", assertionTerms: [], assertionExcludes: [] },
+  tests: { paths: [], assertionTerms: [], assertionExcludes: [] },
 };
 
 /** The same pack, but keeping files that declare no class, the way php keeps a route file. */
@@ -606,7 +607,6 @@ describe("value assertions", () => {
     ...basePack,
     tests: {
       paths: ["tests/"],
-      importsRule: "import",
       assertionTerms: ["assertTrue(", "assertSame(", "class_exists("],
       assertionExcludes: ["assertTrue(method_exists(", "assertTrue(class_exists("],
     },
@@ -846,5 +846,32 @@ describe("declared names", () => {
     });
 
     expect(extracted.declares).toEqual(["Total"]);
+  });
+});
+
+/**
+ * The one node id strategy the schema accepts and the engine does not build. It is left declared
+ * rather than dropped (docs/04-language-packs.md, section 2), so what needs pinning is that the
+ * refusal is loud, arrives at the pack rather than at a file, and says whose pack it is.
+ */
+describe("an unbuilt node id strategy", () => {
+  const symbolPack: Pack = {
+    ...basePack,
+    name: "wants-per-export",
+    node: { ...basePack.node, id: { strategy: "symbol" } },
+  };
+
+  test("refuses the pack at compile time, naming the pack that asked, with exit code 2", () => {
+    try {
+      compilePack(symbolPack);
+      expect.unreachable("compiling a pack that declares symbol should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(EmpoError);
+      expect((error as EmpoError).exitCode).toBe(2);
+      expect((error as EmpoError).message).toContain("not implemented yet");
+      // Which pack asked, which a per-file throw could not say: a monorepo compiles one pack per
+      // root, and "some pack wants symbol" sends the author to read all of them.
+      expect((error as EmpoError).details.join("\n")).toContain("wants-per-export");
+    }
   });
 });

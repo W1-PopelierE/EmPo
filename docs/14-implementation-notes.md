@@ -36,8 +36,9 @@ Three deviations from what this table first pinned, recorded here as the rule ab
 best-effort: a repository that is not a git checkout still indexes, it just cannot report staleness.
 
 No AST parser is a dependency. Extraction is regex-over-source per pack ([04-language-packs](04-language-packs.md)),
-which is the deliberate portability/blind-spot tradeoff. A pack that genuinely needs AST ships its
-own parser inside its optional `module`, it does not pull one into the engine.
+which is the deliberate portability/blind-spot tradeoff. A pack cannot buy its way out of that
+tradeoff on its own, either: a pack is rules and holds no code, so a rule family that genuinely
+needs AST is a change to the engine, argued on the engine's terms below.
 
 ### tree-sitter, evaluated and declined
 
@@ -67,8 +68,9 @@ What tree-sitter was genuinely right about was comments, and that defect was rea
 commented-out routes and class names inside block comments. That is fixed in `engine/mask.ts` at no
 runtime or distribution cost. The one open argument in tree-sitter's favour is the unimplemented
 `symbol` node-id strategy (per-export granularity for TypeScript), where it extracts 7 of 7 export
-forms against a regex's 4 of 7. If that strategy is ever built, revisit this decision then, and
-revisit it inside a pack's `module` escape hatch rather than in the engine.
+forms against a regex's 4 of 7. If that strategy is ever built, revisit this decision then. There is
+nowhere else to revisit it: a pack is rules and holds no code, so a parser would go in the engine,
+behind that one strategy, and every other pack would go on paying nothing for it.
 
 ## Repository layout (target state)
 
@@ -96,7 +98,7 @@ empo  (this repo)
       pack.ts                # `empo pack test <name>`
     engine/
       config.ts              # load + zod-validate config.json
-      pack-loader.ts         # load a pack (json rules + optional module), validate
+      pack-loader.ts         # load a pack's json rules, validate
       scanner.ts             # walk roots, apply ignore, yield {root, file, source}
       mask.ts                # blank comments before any rule runs, keeping offsets and lines
       order.ts               # the one string comparator every sort in the engine uses
@@ -120,8 +122,7 @@ empo  (this repo)
       hazards.ts             # transaction extents and the dispatches inside them, from pack markers
     packs/
       php/
-        pack.json            # the declarative rules
-        hard-cases.ts        # UNBUILT: the optional refine() escape hatch, if a pack needs one
+        pack.json            # the declarative rules; a pack ships no code, here or anywhere
         fixtures/            # synthetic source tree + expected graph snapshot
       typescript/
         pack.json
@@ -162,9 +163,9 @@ empo  (this repo)
     engine/  packs/  adapters/  discipline/  schema/  commands/  host/   # vitest specs mirror src/
 ```
 
-The heading says target state and means it, so two entries above are marked `UNBUILT` rather than
-quietly left in: `discipline/prompts/`, and the `hard-cases.ts` no pack has needed yet. Everything
-else in the tree is on disk. A layout that mixes what exists with what is planned and marks neither
+The heading says target state and means it, so the one entry above that is not on disk is marked
+`UNBUILT` rather than quietly left in: `discipline/prompts/`. Everything else in the tree is on
+disk. A layout that mixes what exists with what is planned and marks neither
 is how a reader ends up looking for a file that was never written, so the marker is the point rather
 than a footnote. `engine/hazards.ts` carried the same marker until the hazard axis landed
 ([04-language-packs](04-language-packs.md) section 7, [06-cli](06-cli.md)); it is on disk now, and
@@ -259,8 +260,9 @@ is always the authority: open it there before acting on anything a block here sa
 in prose drifts and the argument around it is what this page is for.
 
 `files` ships the pack JSON and the discipline markdown alongside the bundled `dist`, because the
-engine reads them at runtime. A pack's optional `hard-cases.ts` would be bundled into `dist` by
-tsup, so it will need no entry here when the first pack grows one.
+engine reads them at runtime. The pack JSON is the whole of what a pack ships: a pack holds no
+code, so no pack will ever need a second entry here. The discipline markdown beside it is the review
+workflow and has nothing to do with packs.
 
 `version` is written by a machine and never by hand. `.github/workflows/ci.yml` bumps it on every
 merge to main, and [10-distribution](10-distribution.md) has the rules, the labels that override the
@@ -510,7 +512,6 @@ export interface Pack {
   consumes: SymbolRule[];
   tests: {
     paths: string[];
-    importsRule: string;
     assertionTerms: string[];
     assertionExcludes: string[];   // removed from the source before any assertionTerm is matched
   };
@@ -528,12 +529,6 @@ export interface Pack {
   aliasSources?: PackAliasSource[];  // optional: where this toolchain writes import aliases.
                                      // Read by empo init to seed config roots[].aliases, and by
                                      // nothing else: empo index opens no toolchain config.
-  module?: string;       // path to optional refine() escape hatch
-}
-
-export interface PackModule {
-  refine(node: GraphNode, edges: GraphEdge[], source: string):
-    { node: GraphNode; edges: GraphEdge[] };
 }
 ```
 

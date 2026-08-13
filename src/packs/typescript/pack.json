@@ -1,6 +1,6 @@
 {
   "name": "typescript",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "match": {
     "extensions": [".ts", ".tsx", ".vue", ".js", ".jsx", ".mjs", ".cjs"],
     "manifest": ["package.json", "tsconfig.json"]
@@ -167,7 +167,6 @@
       "**/*.spec.mjs",
       "**/*.spec.cjs"
     ],
-    "importsRule": "import",
     "assertionTerms": [
       "toBe(",
       "toEqual(",

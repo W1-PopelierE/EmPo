@@ -41,7 +41,7 @@ describe("typescript pack", () => {
 
   test("loads with its declared identity", () => {
     expect(pack.name).toBe("typescript");
-    expect(pack.version).toBe("1.9.0");
+    expect(pack.version).toBe("1.10.0");
   });
 
   test("reproduces the expected nodes", () => {

@@ -403,7 +403,6 @@ export interface Pack {
   consumes: SymbolRule[];
   tests: {
     paths: string[];
-    importsRule: string;
     assertionTerms: string[];
     /** Removed from the source before assertionTerms are matched. See pack.schema.ts. */
     assertionExcludes: string[];
@@ -429,7 +428,6 @@ export interface Pack {
   hazards?: PackHazards;
   /** Optional: where this toolchain writes import aliases, read by `empo init` only. */
   aliasSources?: PackAliasSource[];
-  module?: string; // path to optional refine() escape hatch
 }
 
 /**
@@ -476,12 +474,4 @@ export interface PackAliasSource {
   base?: string;
   /** Dotted path to a file this one inherits from ("extends"). Relative spellings only. */
   extends?: string;
-}
-
-export interface PackModule {
-  refine(
-    node: GraphNode,
-    edges: GraphEdge[],
-    source: string,
-  ): { node: GraphNode; edges: GraphEdge[] };
 }
