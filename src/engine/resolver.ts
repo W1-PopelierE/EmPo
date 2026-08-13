@@ -610,28 +610,6 @@ function* candidatePaths(base: string, context: ResolveContext): Generator<strin
   }
 }
 
-/**
- * One node id for a short name, or null where the name is in no node, in several, or in one of the
- * wrong kind.
- *
- * **The uniqueness question is asked first and `targetKinds` filters the survivor**, which is the
- * order that only ever refuses. Filtering first reads like the more useful one, since two files
- * named `Badge` of which one is a component and one is a type module would leave a single candidate
- * and resolve. It also turns a refusal into a confident wrong answer, and that direction was
- * measured rather than reasoned: a `<Link />` from react-router, in a repository holding both
- * `components/Link.tsx` and `util/Link.ts`, resolved to the component under the filter-first order
- * and to nothing under this one, while the tag names neither. A name shared by two files is a name
- * this strategy cannot read, whatever the kinds are, and narrowing the field of candidates does not
- * change that: it only hides it behind a plausible pick.
- *
- * **The verdict comes back with the id**, so the five ways to answer null stay five answers. They
- * are not one fact: a name in no node is a vendor component and costs this repository nothing, a
- * name of the wrong kind is a rule's own `targetKinds` doing what it was declared for, a name in
- * several nodes is a coupling that exists and is not in the graph, and `local` and `vendor` are the
- * two where a node was found, was of the right kind, and is still not what the line renders.
- * Returned as a bare null they were indistinguishable downstream, which is how a family whose yield
- * had gone to zero went on reporting the same silence as a family with nothing to find.
- */
 /** What one file says about a name, which is everything the root's index cannot say. */
 interface ReadingFile {
   /** Names this file declares itself, from the pack's `declares` patterns. */
@@ -644,6 +622,23 @@ interface ReadingFile {
   internalDirs: (name: string) => string[];
 }
 
+/**
+ * One node id for a short name, or null where the name is in no node, in several the rule's kinds
+ * all admit, or in none of a kind it admits at all.
+ *
+ * **The verdict comes back with the id**, so the five ways to answer null stay five answers. They
+ * are not one fact: a name in no node is a vendor component and costs this repository nothing, a
+ * name of the wrong kind is a rule's own `targetKinds` doing what it was declared for, a name in
+ * several nodes is a coupling that exists and is not in the graph, and `local` and `vendor` are the
+ * two where a node was found, was of the right kind, and is still not what the line renders.
+ * Returned as a bare null they were indistinguishable downstream, which is how a family whose yield
+ * had gone to zero went on reporting the same silence as a family with nothing to find.
+ *
+ * The order the questions are asked in is load-bearing and is argued at the `targetKinds` narrowing
+ * below, which is where it was last changed. This block used to argue the opposite order at length
+ * while sitting above `interface ReadingFile` rather than above this function, so it described
+ * neither the code beneath it nor the code it named. Both halves of that are worth avoiding.
+ */
 function resolveName(
   index: NodeIndex,
   shortName: string | undefined,
