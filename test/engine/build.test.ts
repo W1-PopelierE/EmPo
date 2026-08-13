@@ -4,9 +4,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import { buildRoot, dedupeEdges, dedupeNodes } from "../../src/engine/build";
 import { loadPack } from "../../src/engine/pack-loader";
-import type { GraphEdge, GraphNode } from "../../src/schema/types";
+import type { GraphEdge, GraphNode, Pack } from "../../src/schema/types";
 
 const fixture = fileURLToPath(new URL("../../fixtures/acme-platform", import.meta.url));
+const symbolFixture = fileURLToPath(new URL("../../fixtures/symbol-fixture", import.meta.url));
 
 /**
  * The two rules `build.ts` applies on behalf of every caller (docs/14-implementation-notes.md):
@@ -139,7 +140,7 @@ describe("buildRoot", () => {
    * a test that does not, and would pass whether or not the defect was ever fixed. The scan is what
    * has to run for the claim to mean anything, which makes this a `buildRoot` test.
    */
-  test("refuses a pack declaring an unbuilt id strategy even when the root matches no file", () => {
+  test("refuses a pack declaring an incomplete id strategy even when the root matches no file", () => {
     const pack = loadPack("php");
 
     expect(() =>
@@ -152,7 +153,114 @@ describe("buildRoot", () => {
           match: { extensions: [".nothing-here"] },
         },
       }),
-    ).toThrow(/not implemented yet/);
+    ).toThrow(/symbolPattern/);
+  });
+});
+
+/**
+ * What a root looks like when its pack identifies a node by an export rather than by a file.
+ *
+ * Built from the shipped TypeScript pack with its `node.id` block replaced by a pattern of this
+ * file's own, so the engine stays under test here rather than the shipped pack's pattern, which
+ * `test/packs/typescript.test.ts` gates. The fixture is
+ * `fixtures/symbol-fixture`, four files written so each case is visible at once: a file exporting
+ * two names, a file importing one of them by name, a file importing the same module for its side
+ * effects, and a file exporting nothing.
+ */
+describe("the symbol id strategy", () => {
+  const SYMBOL_PATTERN =
+    "^export\\s+(?:default\\s+)?(?:async\\s+)?(?:function\\s*\\*?|class|const|let|var|type|interface|enum)\\s+([A-Za-z_$][A-Za-z0-9_$]*)";
+
+  const symbolGraph = () => {
+    const pack = loadPack("typescript");
+    const symbolPack: Pack = {
+      ...pack,
+      node: {
+        ...pack.node,
+        id: { strategy: "symbol", symbolPattern: SYMBOL_PATTERN, indexNames: ["index"] },
+      },
+    };
+    return buildRoot({
+      repoRoot: symbolFixture,
+      root: { path: ".", lang: "typescript" },
+      pack: symbolPack,
+    });
+  };
+
+  test("yields one node per exported symbol and no node for the file itself", () => {
+    const ids = symbolGraph().nodes.map((node) => node.id);
+
+    expect(ids).toContain("src/money.ts#formatMoney");
+    expect(ids).toContain("src/money.ts#parseMoney");
+    expect(ids).not.toContain("src/money.ts");
+  });
+
+  test("yields one node for a name declared twice, and gives it every one of its extents", () => {
+    // src/merged.ts merges a type and a function under `Handler` with an unrelated export written
+    // between them. Both halves open a boundary, so the function body is its own extent and not the
+    // tail of HANDLER_NAME's, and the two extents fold back into the single node the id names.
+    const graph = symbolGraph();
+    const ids = graph.nodes.filter((node) => node.file === "src/merged.ts").map((node) => node.id);
+
+    expect(ids).toEqual(["src/merged.ts#HANDLER_NAME", "src/merged.ts#Handler"]);
+    // Two extents of one id are not two files claiming one id, so nothing here is a duplicate.
+    expect(graph.duplicates).toEqual([]);
+    expect(graph.edges.filter((edge) => edge.from === "src/merged.ts#Handler")).toHaveLength(1);
+    expect(graph.edges.filter((edge) => edge.from === "src/merged.ts#HANDLER_NAME")).toEqual([]);
+  });
+
+  test("yields the file node for a file that exports nothing", () => {
+    // The strategy narrows what a node is where it can and never invents one: a file whose pattern
+    // matched nothing keeps exactly the node its path already named.
+    expect(symbolGraph().nodes.map((node) => node.id)).toContain("src/setup.test.ts");
+  });
+
+  test("points an import at the symbol it names and at nothing else", () => {
+    const targets = symbolGraph()
+      .edges.filter((edge) => edge.from === "src/total.ts#total")
+      .map((edge) => edge.to);
+
+    expect(targets).toEqual(["src/money.ts#formatMoney"]);
+  });
+
+  test("points a side-effect import at every symbol of the module it runs", () => {
+    // It binds no name, so nothing in the importing file can say which export it needed, and the
+    // whole module is the honest answer.
+    const targets = symbolGraph()
+      .edges.filter((edge) => edge.from === "src/boot.ts#start")
+      .map((edge) => edge.to);
+
+    expect(targets).toEqual(["src/money.ts#formatMoney", "src/money.ts#parseMoney"]);
+  });
+
+  test("names the export on the node and the file it came out of", () => {
+    const node = symbolGraph().nodes.find(
+      (candidate) => candidate.id === "src/money.ts#parseMoney",
+    );
+
+    expect(node?.symbol).toBe("parseMoney");
+    expect(node?.name).toBe("parseMoney");
+    expect(node?.file).toBe("src/money.ts");
+  });
+
+  test("leaves the symbol field off a file-level node", () => {
+    // A pack that never asked for per-export ids must not carry the key in its graph.json. The
+    // shipped TypeScript pack declares `symbol` now, so the control is that same pack with its
+    // `node.id` block put back the way it read before: this asserts the absence of the key is a
+    // property of the strategy and not of the language, which is what a reader of a `fqcn` or
+    // `module-path` graph is owed.
+    const pack = loadPack("typescript");
+    const graph = buildRoot({
+      repoRoot: symbolFixture,
+      root: { path: ".", lang: "typescript" },
+      pack: {
+        ...pack,
+        node: { ...pack.node, id: { strategy: "module-path", indexNames: ["index"] } },
+      },
+    });
+
+    expect(graph.nodes.map((node) => node.id)).toContain("src/money.ts");
+    expect(graph.nodes.every((node) => !("symbol" in node))).toBe(true);
   });
 });
 

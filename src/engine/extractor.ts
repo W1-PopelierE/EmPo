@@ -39,6 +39,25 @@ export interface Capture {
   line: number;
   /** The rule's `targetKinds`, carried to the resolver, which is where a node's kind is known. */
   targetKinds?: string[];
+  /**
+   * The nodes this belongs to, for a pack whose file yields more than one. Absent where the file
+   * yields a single node, which is every file of a `fqcn` or `module-path` pack: "all of them" and
+   * "the only one" are the same answer there, and writing it out would put a node id in `graph.json`
+   * for every capture of every pack that never asked for one.
+   */
+  owners?: string[];
+}
+
+/** One exported symbol of one file, and the lines a `symbol`-strategy pack reads as belonging to it. */
+export interface ExtractedSymbol {
+  /** The exported name, group 1 of the pack's symbolPattern. */
+  name: string;
+  /** `<repo-relative file>#<name>`. */
+  id: string;
+  /** 1-based, inclusive. */
+  startLine: number;
+  /** 1-based, inclusive. Runs to the last line of the file for the final symbol. */
+  endLine: number;
 }
 
 export interface ExtractedFile {
@@ -53,6 +72,13 @@ export interface ExtractedFile {
   produces: SymbolRef[];
   consumes: SymbolRef[];
   captures: Capture[];
+  /**
+   * The exports this file was partitioned into. Empty for every pack that declares no
+   * `symbolPattern`, which is every pack whose strategy is not `symbol`, and empty too for a file
+   * of such a pack in which the pattern found nothing: that file keeps the single node its path
+   * already named.
+   */
+  symbols: ExtractedSymbol[];
   /**
    * Names this file declares itself, from the pack's `declares` patterns. Empty for a pack that
    * declares none, which is every pack before the field existed.
@@ -109,6 +135,8 @@ export interface CompiledPack {
   pack: Pack;
   namespaceRegex?: RegExp;
   nameRegex?: RegExp;
+  /** Undefined for every pack declaring no `symbolPattern`, which is every non-`symbol` strategy. */
+  symbolRegex?: RegExp;
   kindRules: CompiledKindRule[];
   edgeRules: CompiledEdgeRule[];
   produces: CompiledSymbolRule[];
@@ -121,7 +149,7 @@ export interface CompiledPack {
 }
 
 export function compilePack(pack: Pack): CompiledPack {
-  refuseUnbuiltIdStrategy(pack);
+  refuseIncompleteIdStrategy(pack);
 
   const edgeRules: CompiledEdgeRule[] = [];
   for (const family of EDGE_FAMILIES) {
@@ -142,6 +170,9 @@ export function compilePack(pack: Pack): CompiledPack {
     pack,
     namespaceRegex: optionalRegex(pack.node.id.namespacePattern),
     nameRegex: optionalRegex(pack.node.id.namePattern),
+    // Global, unlike the two above: those find the one class a file declares, this one finds every
+    // export in it, and a pattern without `g` would find the first and stop.
+    symbolRegex: optionalRegex(pack.node.id.symbolPattern, "gm"),
     kindRules: pack.node.kindRules.map((rule) => ({
       kind: rule.kind,
       matchesPath: rule.pathGlob ? picomatch(rule.pathGlob) : undefined,
@@ -158,29 +189,27 @@ export function compilePack(pack: Pack): CompiledPack {
 }
 
 /**
- * `symbol` is declared in the pack schema and built by nothing (docs/04-language-packs.md, section
- * 2). It stays declared: it is what per-export granularity would be spelled as, `path#exportName`
- * against today's file-level nodes, and it lands with the first pack that wants it. Neither shipped
- * pack does, and inventing the strategy before a pack needs it would fix the shape of per-export
- * ids against no real language.
+ * A pack naming `symbol` must also say how a symbol is found, because that strategy is the only one
+ * whose ids are not derivable from what the engine already reads: `fqcn` reads one class declaration
+ * and `module-path` reads the path. Without a pattern the pack has named a granularity and handed
+ * the engine no way to reach it, and the honest answer is to refuse the pack rather than to fall back
+ * to the file-level node the other two strategies produce, which would answer every later question
+ * about that root with ids the pack did not ask for.
  *
- * What the refusal owes a pack author is the truth on time. It used to be raised from `identify`,
- * once per scanned file, which made it a fact about a file rather than about the pack that asked:
+ * What the refusal owes a pack author is the truth on time. It is raised at compile time, once,
+ * before a single file is read, and it names the pack that asked. Raising it per scanned file
+ * instead, as an earlier refusal here did, made it a fact about a file rather than about the pack:
  * the message named no pack, so a monorepo with four roots reported a strategy nobody could tell
  * which pack had declared, and a pack whose extensions matched no file at all was compiled, indexed
- * and reported as a success while its id strategy was never reached. Compiling is where the pack
- * itself is the subject, it happens once, and it happens before a single file is read.
- *
- * It throws rather than degrading to `module-path`, which is the bargain every unbuilt strategy in
- * this contract has made: silently handing back the file-level node the other two strategies produce
- * would answer every later question about that root with ids the pack did not ask for.
+ * and reported as a success while its id strategy was never reached.
  */
-function refuseUnbuiltIdStrategy(pack: Pack): void {
+function refuseIncompleteIdStrategy(pack: Pack): void {
   if (pack.node.id.strategy !== "symbol") return;
-  throw configError(`node id strategy "symbol" is not implemented yet`, [
-    `The "${pack.name}" pack declares it, and no version of EmPo builds it yet.`,
-    "Built strategies are fqcn (one file, one fully-qualified class) and module-path (the id is the repo-relative path).",
-    "See docs/04-language-packs.md, section 2, for which of the two fits the language.",
+  if (pack.node.id.symbolPattern !== undefined) return;
+  throw configError(`node id strategy "symbol" needs a symbolPattern`, [
+    `The "${pack.name}" pack declares the strategy and no pattern to find a symbol by.`,
+    "symbolPattern is a regex over the file's source whose group 1 is the exported name.",
+    "See docs/04-language-packs.md, section 2.",
   ]);
 }
 
@@ -221,7 +250,17 @@ export function extractFile(compiled: CompiledPack, scanned: ScannedFile): Extra
   const codeOnly = wantsCodeOnly(compiled) ? maskComments(scanned.source, syntax, true) : source;
 
   const starts = lineStarts(source);
+  // The string-blanked view, never the one that still holds string contents. A template literal in
+  // a code generator or a test fixture writes whole declarations inside quotes, and read from the
+  // other view each of those opens an extent and takes a node id in `graph.json` off text that
+  // declares nothing. The export whose body wrote the string then ends at the quote, so every import
+  // its real body needs is attributed to the string instead of to it, which is the under-attribution
+  // this partition exists to avoid.
+  const symbols = extractSymbolExtents(compiled.symbolRegex, codeOnly, scanned.file, starts);
   const isTest = compiled.testPaths.some((matches) => matches(scanned.relPath));
+  // Built once, over the same masked view every rule below reads, so a name written inside a
+  // commented-out line is not evidence that an export needs an import.
+  const ownersAt = ownerAttributor(symbols, source);
 
   return {
     file: scanned.file,
@@ -232,9 +271,17 @@ export function extractFile(compiled: CompiledPack, scanned: ScannedFile): Extra
     kind: kindOf(compiled, source, codeOnly, scanned.relPath),
     isTest,
     assertsValue: isTest && assertsValue(compiled.pack, source),
-    produces: extractSymbols(compiled.produces, source, scanned.relPath, starts),
-    consumes: extractSymbols(compiled.consumes, source, scanned.relPath, starts),
-    captures: extractCaptures(compiled.edgeRules, source, codeOnly, scanned.relPath, starts),
+    produces: extractSymbols(compiled.produces, source, scanned.relPath, starts, ownersAt),
+    consumes: extractSymbols(compiled.consumes, source, scanned.relPath, starts, ownersAt),
+    captures: extractCaptures(
+      compiled.edgeRules,
+      source,
+      codeOnly,
+      scanned.relPath,
+      starts,
+      ownersAt,
+    ),
+    symbols,
     // Read from the string-blanked view where the pack asked any rule for one, on the same argument
     // the tag rules make: a name inside a quoted example is prose about a declaration, not one.
     declares: declaredNames(compiled.declares, codeOnly),
@@ -286,12 +333,15 @@ function identify(
   // Repo-relative, not root-relative. Root-relative ids collide the moment a monorepo holds two
   // roots of one language (both have a src/index.ts), and an import that crosses a root
   // ("../../packages/ui/src/Button") only resolves against repo-relative ids. See docs/05.
-  if (strategy === "module-path") {
+  // `symbol` answers the same way, and it is not a placeholder: this is the file's own identity,
+  // which is what a file the pack's pattern found no export in keeps, and it is the path every
+  // symbol id of the file is built on. The per-symbol ids live in `symbols` rather than here,
+  // because a file yields a list of them and this function answers with one node.
+  if (strategy === "module-path" || strategy === "symbol") {
     return { id: scanned.file, name: baseName(scanned.relPath) };
   }
 
-  // No `symbol` arm: `compilePack` refused the pack before any file reached here, so the only
-  // strategy left is `fqcn`. A second guard would be a second answer to a question already settled.
+  // Only `fqcn` is left, the two arms above having taken the path-shaped strategies.
   const name = firstCapture(compiled.nameRegex, source);
   if (name !== null) {
     const namespace = firstCapture(compiled.namespaceRegex, source);
@@ -334,7 +384,12 @@ function wantsCodeOnly(compiled: CompiledPack): boolean {
     // `declares` reads this view unconditionally, so a pack declaring it and no `maskStrings` rule
     // would otherwise read the raw source: `"const Badge = ..."` inside a string would declare
     // `Badge` locally and suppress a real edge the tag rules resolve.
-    compiled.declares.length > 0
+    compiled.declares.length > 0 ||
+    // The symbol partition reads it unconditionally too, and it makes the same mistake one level
+    // worse: `declares` reading a string invents a local name that suppresses an edge, while the
+    // partition reading one invents a node id and writes it into `graph.json`, then hands that
+    // invented node the imports the export whose body held the string actually needed.
+    compiled.symbolRegex !== undefined
   );
 }
 
@@ -383,12 +438,210 @@ function declaredNames(patterns: RegExp[], source: string): string[] {
   return [...names].sort(compareStrings);
 }
 
+/**
+ * The symbols one file exports, each holding the lines from its own declaration to the line before
+ * the next one. A file is partitioned rather than parsed, which is the whole bargain of this engine:
+ * every rule in it is a regex over masked text, and a real scope tree would need a parser per
+ * language, which is the thing a language-agnostic pack contract exists to avoid.
+ *
+ * What makes the partition safe enough to answer with is the pack's pattern, not this function. A
+ * pattern anchored at `^` matches only a declaration written at column 0, and every language this
+ * strategy suits indents a nested declaration, so a function declared inside another function does
+ * not open an extent of its own. That is a real ceiling and it is stated in docs/04-language-packs.md
+ * rather than hidden here: text between two exports belongs to the earlier one, so a helper written
+ * at column 0 between two exports is read as part of the export above it.
+ *
+ * Every match opens an extent, including a repeat of a name already seen, so one id can own several
+ * disjoint runs of lines. That is what declaration merging is: TypeScript writes a type and a
+ * function under one name, an interface beside a function, a `declare module` beside the value it
+ * describes, and all of them are ordinary rather than exotic. Skipping the repeat opened no boundary
+ * at that line, so everything the second declaration wrote fell inside the extent of whatever
+ * happened to be declared above it, and every import that second body needed was credited to that
+ * neighbour while the name itself got none. That is under-attribution, which the flow list being a
+ * floor does not permit.
+ *
+ * The duplicate the partition now admits is handled where the nodes are made rather than here: a
+ * file must still yield one node per unique id (`symbolNodes` below, read by engine/build.ts and
+ * engine/resolver.ts). Partitioning text and naming nodes are two questions, and this one is only
+ * asking which lines belong to which name.
+ *
+ * ponytail: line partition, no brace balancing. Upgrade to hazards.ts's enclosure walk if a pack
+ * appears whose declarations are not written at column 0.
+ */
+function extractSymbolExtents(
+  regex: RegExp | undefined,
+  source: string,
+  file: string,
+  starts: number[],
+): ExtractedSymbol[] {
+  if (regex === undefined) return [];
+
+  const found: { name: string; startLine: number }[] = [];
+  for (const match of matchAll(regex, source)) {
+    const name = match.groups[1];
+    // A pattern that matches and captures nothing is the pack's own bug and not a declaration, the
+    // same bargain `declaredNames` makes above.
+    if (name === undefined || name === "") continue;
+    found.push({ name, startLine: lineAt(starts, match.index) });
+  }
+
+  const lastLine = starts.length;
+  return found.map((entry, position) => ({
+    name: entry.name,
+    id: `${file}#${entry.name}`,
+    startLine: entry.startLine,
+    endLine: (found[position + 1]?.startLine ?? lastLine + 1) - 1,
+  }));
+}
+
+/**
+ * The nodes one file's extents yield: one per unique id, in the order the file first declares each
+ * name. A name declared twice owns two extents and is still one export, so it is one node.
+ *
+ * It lives here, beside the partition that can produce the repeat, and is read by both places that
+ * turn extents into nodes: `toNodes` in engine/build.ts and `buildNodeIndex` in engine/resolver.ts.
+ * Those two must agree, because one builds the graph and the other builds the index the edges are
+ * resolved against, and a file yielding two nodes of one id in one of them and one in the other is a
+ * disagreement nothing would report.
+ */
+export function symbolNodes(symbols: ExtractedSymbol[]): { id: string; name: string }[] {
+  const byId = new Map<string, { id: string; name: string }>();
+  for (const symbol of symbols) {
+    if (!byId.has(symbol.id)) byId.set(symbol.id, { id: symbol.id, name: symbol.name });
+  }
+  return [...byId.values()];
+}
+
+/**
+ * Whether a statement is a side-effect import, which binds no name at all.
+ *
+ * Its specifier is the whole statement, so anything read out of it is whatever the path happens to
+ * spell: `import "@mui/material/Button/Button.css"` writes `Button` twice and means neither of them
+ * as a binding. Both callers need exactly this and would otherwise each carry the regex and the
+ * argument for it: extraction asks which exports a statement can be attributed to, and the
+ * resolver's fold asks whether a statement corroborates one name (engine/resolver.ts). A dynamic
+ * `import("@calcom/…/AlbyPriceComponent")` is deliberately not this shape, because it holds the
+ * parens and the name in its specifier is the file the line means.
+ */
+export function isSideEffectImport(statement: string): boolean {
+  return /^[ \t]*import\s*(['"`])[^'"`]*\1[ \t]*;?[ \t]*$/.test(statement);
+}
+
+/**
+ * The names an import statement binds, read out of the clause and never out of the specifier. A
+ * renamed binding binds the new name and not the old one, because the new name is what the rest of
+ * the file writes.
+ *
+ * It is looser than it looks and can afford to be. Both readers intersect what it returns against
+ * something the repository already knows to be real, the exports the target file declares or the
+ * names the symbols of this file reference, so a word the clause happens to hold that binds nothing
+ * matches nothing and drops out. What it must never do is miss a real binding, which is why the
+ * keyword list subtracts rather than the pattern trying to describe every import shape a language
+ * writes.
+ */
+export function boundNames(statement: string): string[] {
+  if (isSideEffectImport(statement)) return [];
+  const clause = statement.slice(0, statement.search(/\bfrom\b|$/));
+  const names = new Set<string>();
+  for (const match of clause.matchAll(
+    /([A-Za-z_$][A-Za-z0-9_$]*)(?:\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*))?/g,
+  )) {
+    const bound = match[2] ?? match[1];
+    if (bound !== undefined && !RESERVED_CLAUSE_WORDS.has(bound)) names.add(bound);
+  }
+  return [...names].sort(compareStrings);
+}
+
+const RESERVED_CLAUSE_WORDS = new Set([
+  "import",
+  "export",
+  "type",
+  "as",
+  "from",
+  "require",
+  "const",
+]);
+
+/**
+ * Which symbols own a line, for one file, or undefined throughout where the file yields a single
+ * node and the question does not arise.
+ *
+ * The enclosing extent answers it wherever there is one. An import has none: imports are written
+ * above every declaration in the file, so no extent encloses them, and attributing them to the first
+ * symbol or to all of them are both wrong in the direction that matters. The first invents a
+ * dependency, and all of them is the file-level answer this strategy exists to stop giving. A
+ * reference to a name the statement binds, inside an extent, is the evidence that that symbol needs
+ * what the line brought in.
+ *
+ * Falling back to every symbol when nothing references the binding is deliberate. A side-effect
+ * import binds no name at all, and a binding used by nothing is either dead or reached in a way this
+ * engine cannot see, a re-export or a type position stripped before it is read. Both are cases where
+ * the honest answer is that any export of the file may depend on it, and the closing line of every
+ * report already says the flow list is a floor.
+ *
+ * Owners come back in the order the file declares its exports, not sorted. That is deterministic,
+ * which is what `graph.json` needs, and it is the order a reader of the file already has.
+ *
+ * The extent texts are cut once per file rather than once per question, because the alternative is a
+ * split of the whole source per capture per symbol per bound name, which is quadratic in the size of
+ * the file for no answer that changes.
+ */
+function ownerAttributor(
+  symbols: ExtractedSymbol[],
+  source: string,
+): (line: number, statement: string) => string[] | undefined {
+  if (symbols.length === 0) return () => undefined;
+
+  // Keyed by id and not by extent, because one name can own several of them (declaration merging,
+  // see `extractSymbolExtents`). Its text is all of them joined, so a reference in any extent of a
+  // name is a reference by that name: the alternative keeps only one extent per key and loses
+  // whichever half of a merged declaration wrote the reference.
+  const lines = source.split("\n");
+  const extentText = new Map<string, string>();
+  for (const symbol of symbols) {
+    const text = lines.slice(symbol.startLine - 1, symbol.endLine).join("\n");
+    const already = extentText.get(symbol.id);
+    extentText.set(symbol.id, already === undefined ? text : `${already}\n${text}`);
+  }
+  const everyId = [...extentText.keys()];
+
+  return (line, statement) => {
+    const enclosing = symbols.find((symbol) => line >= symbol.startLine && line <= symbol.endLine);
+    if (enclosing !== undefined) return [enclosing.id];
+
+    const bound = boundNames(statement);
+    if (bound.length === 0) return everyId;
+
+    // Walked over the ids rather than over the extents, so a name whose two extents both reference
+    // the binding is named once and not twice: an owners list is a set of nodes, and a repeated id
+    // in it would be read downstream as two.
+    const referencing = everyId.filter((id) =>
+      bound.some((name) => referencedWithin(extentText.get(id) ?? "", name)),
+    );
+    return referencing.length > 0 ? referencing : everyId;
+  };
+}
+
+/**
+ * Does this text write `name` as an identifier of its own? The leading class excludes a dot as well,
+ * so `order.total` does not count as a reference to an imported `total`: a property of something
+ * else is not the binding, and reading it as one would hand an import to an export that never
+ * touched it. The name is escaped before it is spliced in, because a strategy that one day reads a
+ * name holding a regex metacharacter would otherwise turn a pack's capture into a pattern this
+ * engine compiles.
+ */
+function referencedWithin(text: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|[^A-Za-z0-9_$.])${escaped}(?:[^A-Za-z0-9_$]|$)`).test(text);
+}
+
 function extractCaptures(
   rules: CompiledEdgeRule[],
   source: string,
   codeOnly: string,
   relPath: string,
   starts: number[],
+  ownersAt: (line: number, statement: string) => string[] | undefined,
 ): Capture[] {
   const captures: Capture[] = [];
   for (const rule of rules) {
@@ -399,6 +652,10 @@ function extractCaptures(
     // holds both answers: a JSX tag is code and can only be code, while php's `@livewire('cart')`
     // names its component inside the quotes the other view blanks.
     for (const match of matchAll(rule.regex, rule.maskStrings ? codeOnly : source)) {
+      const line = lineAt(starts, match.index);
+      // The statement as written, which is what attribution reads: the clause that binds the names
+      // and the specifier are both in it, unnormalized.
+      const owners = ownersAt(line, match.groups[0] ?? "");
       captures.push({
         family: rule.family,
         resolve: rule.resolve,
@@ -408,7 +665,10 @@ function extractCaptures(
         groups: match.groups.map((group, position) =>
           position === 0 || group === undefined ? group : applyNormalizers(group, rule.normalize),
         ),
-        line: lineAt(starts, match.index),
+        line,
+        // Spread rather than assigned, so a pack that yields one node per file writes no key at all
+        // instead of a key holding undefined.
+        ...(owners === undefined ? {} : { owners }),
       });
     }
   }
@@ -420,6 +680,7 @@ function extractSymbols(
   source: string,
   relPath: string,
   starts: number[],
+  ownersAt: (line: number, statement: string) => string[] | undefined,
 ): SymbolRef[] {
   const refs: SymbolRef[] = [];
   for (const compiled of rules) {
@@ -427,12 +688,20 @@ function extractSymbols(
       // The identity is the whole file, so the anchor is line 1. A produced symbol's line is never
       // surfaced (a bridge edge's evidence is the consumer's call site, engine/bridger.ts), so this
       // only has to be a stable, in-range number.
+      //
+      // Attributed from no line and no statement, which is how it reaches every symbol of the file:
+      // a rule matching the path says the whole file is the thing, an Inertia page's identity being
+      // the file it lives in, and there is no clause here to argue one export over another. Asking
+      // from the anchor line instead would hand the page to whichever export happens to be declared
+      // there, and handing over the matched path text would hand it to whichever export a directory
+      // name happens to spell.
       const match = compiled.regex.exec(relPath);
-      if (match !== null) refs.push(refFrom(compiled, [...match], 1));
+      if (match !== null) refs.push(refFrom(compiled, [...match], 1, ownersAt(0, "")));
       continue;
     }
     for (const match of matchAll(compiled.regex, source)) {
-      refs.push(refFrom(compiled, match.groups, lineAt(starts, match.index)));
+      const line = lineAt(starts, match.index);
+      refs.push(refFrom(compiled, match.groups, line, ownersAt(line, match.groups[0] ?? "")));
     }
   }
   return refs.sort(
@@ -444,6 +713,7 @@ function refFrom(
   compiled: CompiledSymbolRule,
   groups: (string | undefined)[],
   line: number,
+  owners: string[] | undefined,
 ): SymbolRef {
   const parts: Record<string, string> = {};
   for (const part of compiled.parts) {
@@ -454,6 +724,9 @@ function refFrom(
     symbol: compiled.rule.symbol,
     key: symbolKey(compiled.rule, compiled.parts, parts),
     line,
+    // Spread rather than assigned, for the same reason a capture's is: a pack yielding one node per
+    // file writes no key at all rather than a key holding undefined.
+    ...(owners === undefined ? {} : { owners }),
   };
 }
 
@@ -519,8 +792,8 @@ function compileSymbolRule(rule: SymbolRule): CompiledSymbolRule {
   };
 }
 
-function optionalRegex(pattern: string | undefined): RegExp | undefined {
-  return pattern === undefined ? undefined : new RegExp(pattern, "m");
+function optionalRegex(pattern: string | undefined, flags = "m"): RegExp | undefined {
+  return pattern === undefined ? undefined : new RegExp(pattern, flags);
 }
 
 function firstCapture(regex: RegExp | undefined, source: string): string | null {

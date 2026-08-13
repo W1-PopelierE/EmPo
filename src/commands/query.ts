@@ -84,7 +84,11 @@ export interface QueryOptions {
 }
 
 export interface BlastRadius {
-  node: GraphNode;
+  /**
+   * Every node the answer is about. One under a pack that ids by file or by class, and one per
+   * export under a pack that ids by symbol, where the reader typed a path and the file holds several.
+   */
+  nodes: GraphNode[];
   faninDirect: number;
   faninTransitive: number;
   flows: {
@@ -187,24 +191,37 @@ export function queryCommand(
     ]);
   }
 
-  report(repoRoot, graph, blastRadius(graph, resolveNode(graph, symbol)), options);
+  report(repoRoot, graph, blastRadius(graph, resolveNodes(graph, symbol)), options);
 }
 
-/** A node id, a repo-relative file path, a path suffix, or a short name, in that order. */
-export function resolveNode(graph: Graph, symbol: string): GraphNode {
+/**
+ * A node id, a repo-relative file path, a path suffix, or a short name, in that order, and every
+ * node the winning form names rather than the one node it used to have to name.
+ *
+ * A path names one node under `fqcn` and `module-path` and several under `symbol`, where a file
+ * holding four exports holds four nodes. Refusing that path as ambiguous, which is what the
+ * single-node form did, would refuse nearly every path a reader can type at a TypeScript repository
+ * while telling them the answer is unknowable, when the answer is simply the union over the file's
+ * exports and each candidate is a node in the file they already named.
+ *
+ * What is genuinely ambiguous is unchanged and still refused: candidates spanning more than one
+ * file. There the reader asked about one thing and the graph holds two, and picking either would be
+ * this command guessing which file they meant.
+ */
+export function resolveNodes(graph: Graph, symbol: string): GraphNode[] {
   const byId = graph.nodes.find((node) => node.id === symbol);
-  if (byId !== undefined) return byId;
+  if (byId !== undefined) return [byId];
 
   const byFile = graph.nodes.filter(
     (node) => node.file === symbol || node.file.endsWith(`/${symbol}`),
   );
-  if (byFile.length === 1 && byFile[0] !== undefined) return byFile[0];
+  if (withinOneFile(byFile)) return sortedById(byFile);
 
   const byName = graph.nodes.filter((node) => node.name === symbol);
-  if (byName.length === 1 && byName[0] !== undefined) return byName[0];
+  if (withinOneFile(byName)) return sortedById(byName);
 
   const candidates = [...byFile, ...byName];
-  if (candidates.length > 1) {
+  if (candidates.length > 0) {
     throw configError(`"${symbol}" is ambiguous`, [
       ...candidates.map((node) => `${node.id}  ${node.file}`),
       "Pass the full id or the full path.",
@@ -216,7 +233,28 @@ export function resolveNode(graph: Graph, symbol: string): GraphNode {
   ]);
 }
 
-export function blastRadius(graph: Graph, node: GraphNode): BlastRadius {
+function withinOneFile(nodes: GraphNode[]): boolean {
+  return nodes.length > 0 && new Set(nodes.map((node) => node.file)).size === 1;
+}
+
+function sortedById(nodes: GraphNode[]): GraphNode[] {
+  return [...nodes].sort((a, b) => compareStrings(a.id, b.id));
+}
+
+/**
+ * The blast radius of a set of nodes, which is the union of theirs.
+ *
+ * A set and not a node because a path is what a reader types and a path can name several nodes. The
+ * union is the honest answer to "what can changing this file reach": every consumer of every export
+ * it holds. The set is subtracted from its own radius throughout, so a file whose one export imports
+ * its sibling is not reported as its own consumer, which is a number no reader could act on.
+ */
+export function blastRadius(graph: Graph, set: GraphNode[]): BlastRadius {
+  if (set[0] === undefined) {
+    throw configError("empo query was asked for the radius of no node", []);
+  }
+  const ids = new Set(set.map((node) => node.id));
+
   const incoming = new Map<string, string[]>();
   for (const edge of graph.edges) {
     const bucket = incoming.get(edge.to);
@@ -224,12 +262,20 @@ export function blastRadius(graph: Graph, node: GraphNode): BlastRadius {
     else incoming.set(edge.to, [edge.from]);
   }
 
-  const radius = reachableFrom(node.id, incoming);
+  const radius = new Set<string>();
+  for (const id of ids) for (const reached of reachableFrom(id, incoming)) radius.add(reached);
   // One row per referencing node, not one per edge. A React or Vue file that imports a component
   // and then renders it produces an `import` edge and a `template` edge between the same pair, and
   // listing it twice printed one consumer as two and made `faninDirect` exceed `faninTransitive`,
-  // which counts nodes.
-  const direct = earliestPerSource(graph.edges.filter((edge) => edge.to === node.id));
+  // which counts nodes. Under a `symbol` pack the same file also produces one edge per bound name,
+  // so a consumer importing two exports of one module is the ordinary case rather than the odd one,
+  // and it is the same rule that collapses it: a consumer is a node, not an edge.
+  //
+  // An edge out of the set itself is dropped for the same reason the set is subtracted below. A
+  // sibling export is not a consumer of the file a reader asked about; it is part of it.
+  const direct = earliestPerSource(
+    graph.edges.filter((edge) => ids.has(edge.to) && !ids.has(edge.from)),
+  );
 
   const flows = Object.entries(graph.flows)
     .map(([flow, members]) => {
@@ -244,7 +290,13 @@ export function blastRadius(graph: Graph, node: GraphNode): BlastRadius {
         flow,
         blind: coverage?.blind ?? false,
         reaches: coverage?.reaches ?? false,
-        tests: coverage?.testNodes.length ?? 0,
+        // Files and not nodes, which is what "N tests" means everywhere EmPo says it
+        // (docs/05-graph-model.md). Under a `symbol` pack one test file exporting three cases is
+        // three test nodes, so counting nodes reports one reaching test file as three and inflates
+        // the apparent coverage of exactly the flows this tool exists to be honest about. The two
+        // lists are the same reach in two units and are equal under `fqcn` and `module-path`, which
+        // is why the wrong one read as correct for as long as no pack ided by symbol.
+        tests: coverage?.testFiles.length ?? 0,
         // How much of the flow this change can reach. One node of twelve and twelve of twelve are
         // both "reached", and a reader judging a blast radius needs to be able to tell them apart.
         reachedNodes: reached.length,
@@ -255,10 +307,10 @@ export function blastRadius(graph: Graph, node: GraphNode): BlastRadius {
     .sort((a, b) => compareStrings(a.flow, b.flow));
 
   return {
-    node,
+    nodes: set,
     faninDirect: direct.length,
-    // The node itself is in the reachable set and is not its own consumer.
-    faninTransitive: radius.size - 1,
+    // The queried nodes are in the reachable set and are not their own consumers.
+    faninTransitive: radius.size - ids.size,
     flows,
     consumers: direct
       .map((edge) => ({
@@ -370,6 +422,12 @@ function gods(graph: Graph): GodsAnswer {
 
 export interface BlindAnswer {
   mode: "blind";
+  /**
+   * `tests` is the reaching test **files**, one entry per file, because a "reached by" line per
+   * test node prints the same file once per exported case and a reader counts the lines. It is the
+   * same unit the blast radius counts and the same one `empo review` prints, and the unit rule is
+   * `docs/05-graph-model.md`'s: every surface that says "N tests" means files.
+   */
   rows: { flow: string; tests: string[]; nodes: number }[];
   /**
    * The denominator `rows` is a numerator of. Always present, all three counts, even when every
@@ -403,7 +461,7 @@ function blindFlows(graph: Graph): BlindAnswer {
     .filter((entry) => entry.blind)
     .map((entry) => ({
       flow: entry.flow,
-      tests: entry.testNodes,
+      tests: entry.testFiles,
       nodes: graph.flows[entry.flow]?.length ?? 0,
     }));
 
@@ -433,6 +491,18 @@ export interface OrphanRow {
 export interface OrphansAnswer {
   mode: "orphans";
   rows: OrphanRow[];
+  /**
+   * Whether a row is an export or a file, read off whether every node in the graph carries a symbol.
+   * Under a `symbol` pack an unreferenced row is one unused export of a file the rest of which may be
+   * heavily used, and a reader who takes it for a whole unused file deletes working code. The header
+   * has to say which, and only the graph knows.
+   *
+   * Every node and not any node, because one heading is printed over rows a monorepo draws from
+   * several roots. A php root and a typescript root in one graph make the unit non-uniform, and
+   * naming either one is the answer claiming a fact about rows it has no evidence for; the
+   * unit-neutral heading is true of all of them.
+   */
+  bySymbol: boolean;
   /**
    * What `--orphans` leaves out, and why. Always present, even when it excluded nothing, so a
    * reader of the JSON never has to decide whether a missing key means "none" or "old version".
@@ -485,6 +555,15 @@ function orphans(graph: Graph, all: boolean): OrphansAnswer {
   return {
     mode: "orphans",
     rows: all ? candidates : candidates.filter((row) => row.resolvedBy === null),
+    // Every node and not some node, because the heading states one unit over the whole list. A
+    // monorepo with a php root and a typescript root holds nodes of both sorts, and under `some` a
+    // single export anywhere in the graph put php classes under "nothing in the graph references
+    // these exports": a unit the answer has no evidence for on those rows, stated as though it did.
+    // A mixed graph therefore falls back to the unit-neutral heading, which is true of every row
+    // whatever ided it, and the naming stays where it earns its keep: a graph that is all exports.
+    // A graph holding no node at all is no evidence either, so it does not name a unit over its
+    // empty list on the vacuous truth that every one of no nodes carries a symbol.
+    bySymbol: graph.nodes.length > 0 && graph.nodes.every((node) => node.symbol !== undefined),
     frameworkResolved: {
       listed: all,
       total: excluded.length,
@@ -653,10 +732,29 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-function printBlastRadius(answer: BlastRadius): void {
-  const { node } = answer;
+/**
+ * Any node of a radius, for the callers that want a file-level fact off it: the file, the kind, the
+ * language and the root are properties of the file every node in the set lives in, and `resolveNodes`
+ * is what guarantees they all live in one. Asking for the first by id rather than for a particular
+ * one is therefore not a choice between different answers, it is picking any of several copies.
+ *
+ * The refusal is unreachable, `blastRadius` having already refused an empty set, and it is written
+ * out anyway so this returns a node rather than a maybe-node and no caller has to handle a case
+ * that cannot happen.
+ */
+export function radiusNode(answer: BlastRadius): GraphNode {
+  const node = answer.nodes[0];
+  if (node === undefined) throw configError("a blast radius was built over no node", []);
+  return node;
+}
 
-  console.log(`symbol     ${node.id}`);
+function printBlastRadius(answer: BlastRadius): void {
+  const node = radiusNode(answer);
+
+  // Every id the answer is about, and not the first of them. A path naming four exports gives four
+  // ids, and printing one of them under a fan-in computed over all four would put a number beside a
+  // name it is not the number for.
+  console.log(`symbol     ${answer.nodes.map((each) => each.id).join(", ")}`);
   console.log(`file       ${node.file}`);
   console.log(`kind       ${node.kind} (${node.lang}, root ${node.root})`);
   console.log(
@@ -840,7 +938,9 @@ function printMode(answer: Exclude<Answer, BlastRadius>): void {
       // harmless, and it stopped being either once `view` put templates at the top of this list,
       // where the repeat is now the widest thing on the line. The JSON keeps both fields, because
       // an agent reading it should not have to know which strategy ided the node.
-      const path = row.file === row.id ? "" : `  ${row.file}`;
+      // A symbol id spells its file too, as `path#export`, so the path is a repeat there just as it
+      // is where the id is the path. The id keeps the export name the reader came for either way.
+      const path = row.id === row.file || row.id.startsWith(`${row.file}#`) ? "" : `  ${row.file}`;
       console.log(
         `  ${String(row.fanin).padStart(4)}  ${row.id.padEnd(godWidth)}  ` +
           `${row.kind.padEnd(kindWidth)}${path}`,
@@ -875,7 +975,11 @@ function printMode(answer: Exclude<Answer, BlastRadius>): void {
   }
 
   if (answer.mode === "orphans") {
-    console.log("orphans: nothing in the graph references these");
+    console.log(
+      answer.bySymbol
+        ? "orphans: nothing in the graph references these exports"
+        : "orphans: nothing in the graph references these",
+    );
     if (answer.rows.length === 0) console.log("  none");
     for (const row of answer.rows) {
       // Under --all the two sorts of row are mixed, so each framework-resolved one says so on its

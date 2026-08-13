@@ -1,0 +1,6 @@
+{
+  "name": "symbol-fixture",
+  "version": "0.1.0",
+  "private": true,
+  "description": "One root, four files, written so every case the symbol strategy answers is visible"
+}

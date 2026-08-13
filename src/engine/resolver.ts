@@ -1,7 +1,13 @@
 import { posix } from "node:path";
 import { configError } from "../errors";
 import type { GraphEdge, NameOutcome, NameVerdict, PackViews } from "../schema/types";
-import type { Capture, ExtractedFile } from "./extractor";
+import {
+  boundNames,
+  type Capture,
+  type ExtractedFile,
+  isSideEffectImport,
+  symbolNodes,
+} from "./extractor";
 import { compareStrings } from "./order";
 import { packageOf } from "./packages";
 
@@ -19,6 +25,20 @@ import { packageOf } from "./packages";
 
 export interface NodeIndex {
   ids: Set<string>;
+  /**
+   * Repo-relative path to the node ids that file yields, sorted. One entry for a pack whose files
+   * each yield a single node, one per export for a `symbol` pack.
+   *
+   * It is what module resolution walks, and that is not a convenience. Resolution turns a specifier
+   * into a **file**: it tries the pack's extensions and index names against a path, and a path is
+   * only a node id by the accident that two of the three strategies name a node after one. Under
+   * `symbol` no path is an id at all, so a walk ending in `ids.has(candidate)` would answer null for
+   * every import in every repository the moment a pack adopted the strategy, and it would do it
+   * silently: an import that resolves to nothing is the same shape as a vendor import, which this
+   * file drops by design. Keyed by file it asks the question it means, and the two path-shaped
+   * strategies answer exactly as they did, `byFile` holding every path they ever put in `ids`.
+   */
+  byFile: Map<string, string[]>;
   /** Short name to node ids. More than one id means the name is ambiguous and is not resolved. */
   byShortName: Map<string, string[]>;
   /**
@@ -127,30 +147,42 @@ export function compileAliases(aliases: Record<string, string[]> | undefined): A
 
 export function buildNodeIndex(files: ExtractedFile[], views?: PackViews): NodeIndex {
   const ids = new Set<string>();
+  const byFile = new Map<string, string[]>();
   const byShortName = new Map<string, string[]>();
   const byFoldedName = new Map<string, string[]>();
   const kindById = new Map<string, string>();
   const byViewName = new Map<string, string[]>();
 
   for (const file of files) {
-    ids.add(file.id);
-    kindById.set(file.id, file.kind);
-    const bucket = byShortName.get(file.name);
-    if (bucket) bucket.push(file.id);
-    else byShortName.set(file.name, [file.id]);
-    const folded = file.name.toLowerCase();
-    const foldedBucket = byFoldedName.get(folded);
-    if (foldedBucket) foldedBucket.push(file.id);
-    else byFoldedName.set(folded, [file.id]);
+    // The nodes this file yields, which is the same list `toNodes` in engine/build.ts builds and for
+    // the same reason: a file the pack found exports in is those exports, and a file it found none in
+    // is itself. The two are written apart because one produces nodes and this one indexes them, and
+    // an index built from the nodes instead would need the graph before the edges that need the index.
+    // `symbolNodes` is what keeps the two the same list where a name owns more than one extent.
+    const entries =
+      file.symbols.length === 0 ? [{ id: file.id, name: file.name }] : symbolNodes(file.symbols);
+    byFile.set(file.file, entries.map((entry) => entry.id).sort(compareStrings));
+
     const viewName = views === undefined ? null : viewNameOf(file.file, views);
-    if (viewName !== null) {
-      const viewBucket = byViewName.get(viewName);
-      if (viewBucket) viewBucket.push(file.id);
-      else byViewName.set(viewName, [file.id]);
+    for (const entry of entries) {
+      ids.add(entry.id);
+      kindById.set(entry.id, file.kind);
+      const bucket = byShortName.get(entry.name);
+      if (bucket) bucket.push(entry.id);
+      else byShortName.set(entry.name, [entry.id]);
+      const folded = entry.name.toLowerCase();
+      const foldedBucket = byFoldedName.get(folded);
+      if (foldedBucket) foldedBucket.push(entry.id);
+      else byFoldedName.set(folded, [entry.id]);
+      if (viewName !== null) {
+        const viewBucket = byViewName.get(viewName);
+        if (viewBucket) viewBucket.push(entry.id);
+        else byViewName.set(viewName, [entry.id]);
+      }
     }
   }
 
-  return { ids, byShortName, byFoldedName, kindById, byViewName };
+  return { ids, byFile, byShortName, byFoldedName, kindById, byViewName };
 }
 
 /**
@@ -159,7 +191,7 @@ export function buildNodeIndex(files: ExtractedFile[], views?: PackViews): NodeI
  *
  * The root is matched **anywhere in the path** rather than only at its start, because a node id is
  * repo-relative and a Laravel application is as often `apps/api/resources/views/` as it is
- * `resources/views/`. That is the same reason `resolveModulePath` resolves against repo-relative
+ * `resources/views/`. That is the same reason `resolveModuleFile` resolves against repo-relative
  * ids: a monorepo is the normal case, not the odd one.
  *
  * ponytail: two applications in one repository each holding `orders/show` make that name ambiguous
@@ -245,10 +277,9 @@ export function resolveEdges(
     // shape read here carries a clause or call parens beside the path, so the name is matched in
     // text a file wrote about a symbol; `import "@mui/material/Button/Button.css"` writes `Button`
     // twice and means neither of them as a binding. Read whole it refuses the local `Button.tsx`
-    // the file renders, which is the one thing this check must never do. A dynamic
-    // `import("@calcom/…/AlbyPriceComponent")` is deliberately not this shape: it holds the parens,
-    // and the name in its specifier is the file the line means.
-    if (/^[ \t]*import\s*(['"`])[^'"`]*\1[ \t]*;?[ \t]*$/.test(statement)) return false;
+    // the file renders, which is the one thing this check must never do. The predicate lives in
+    // engine/extractor.ts because attribution asks the same question of the same text.
+    if (isSideEffectImport(statement)) return false;
 
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     if (!new RegExp(`(?:^|[^A-Za-z0-9_$])${escaped}(?:[^A-Za-z0-9_$]|$)`).test(statement)) {
@@ -259,13 +290,28 @@ export function resolveEdges(
     return !new RegExp(`(?:^|[^A-Za-z0-9_$])${escaped}\\s+as\\s`).test(statement);
   };
 
+  /**
+   * Does this file import `name` from the file that holds the candidate node?
+   *
+   * The question is asked of the **file**, not of the id, and under a strategy that gives one file
+   * many nodes those are two different questions. A specifier names a module and never one export of
+   * it, so `import { Button } from "./Button"` corroborates the candidate `.../Button.tsx#Button`
+   * exactly as it corroborates the file-level `.../Button.tsx`: the import is evidence that this file
+   * reached into that module, and which node of the module carries the name is settled by the
+   * candidate list this is filtering, not by the specifier.
+   *
+   * Comparing against a resolved id instead would answer false for every multi-export file, because
+   * no specifier resolves to one. That is not a stricter rule, it is a broken one: it would refuse
+   * every folded short name whose target happens to export more than one symbol, and refuse it
+   * silently, as a name that corroborated nothing.
+   */
   const importsNameFrom = (name: string, id: string): boolean =>
-    file.captures.some(
-      (capture) =>
-        capture.resolve === "module-path" &&
-        statementBinds(capture.groups[0] ?? "", name) &&
-        resolveModulePath(file.file, capture.groups[1] ?? "", index, context) === id,
-    );
+    file.captures.some((capture) => {
+      if (capture.resolve !== "module-path") return false;
+      if (!statementBinds(capture.groups[0] ?? "", name)) return false;
+      const target = resolveModuleFile(file.file, capture.groups[1] ?? "", index, context);
+      return target !== null && (index.byFile.get(target) ?? []).includes(id);
+    });
 
   /**
    * Does this file import `name` from a package the repository installs? Asked last, of a name the
@@ -366,27 +412,49 @@ export function resolveEdges(
 
   for (const capture of file.captures) {
     const evidence = { file: file.file, line: capture.line };
+    // Which of this file's nodes wrote the reference. One for every pack that yields a node per
+    // file, and for a `symbol` pack the exports extraction attributed the line to: an edge out of
+    // the whole file is the answer that strategy exists to stop giving.
+    const sources = capture.owners ?? [file.id];
 
     switch (capture.resolve) {
       case "fqcn":
       case "fqcn-string": {
         const target = normalizeFqcn(capture.groups[1] ?? "");
-        if (target !== "" && target !== file.id && index.ids.has(target)) {
-          edges.push({ from: file.id, to: target, kind: capture.family, symbol: null, evidence });
+        if (target !== "" && index.ids.has(target)) {
+          for (const from of sources) {
+            if (target !== from) {
+              edges.push({ from, to: target, kind: capture.family, symbol: null, evidence });
+            }
+          }
         }
         break;
       }
 
       case "module-path": {
-        const target = resolveModulePath(file.file, capture.groups[1] ?? "", index, context);
-        if (target !== null && target !== file.id) {
-          edges.push({ from: file.id, to: target, kind: capture.family, symbol: null, evidence });
+        const targetFile = resolveModuleFile(file.file, capture.groups[1] ?? "", index, context);
+        if (targetFile === null || targetFile === file.file) break;
+        const available = index.byFile.get(targetFile) ?? [];
+        // The names the statement binds that the target file actually exports. Where it binds none
+        // this engine can match to an export, the import reaches the whole module: a side-effect
+        // import runs the file, a default or a namespace import can reach any of it, and a file
+        // yielding one node has that node named by every import of it either way.
+        const bound = boundNames(capture.groups[0] ?? "");
+        const named = available.filter((id) => bound.includes(id.slice(id.indexOf("#") + 1)));
+        const targets = named.length > 0 ? named : available;
+        for (const from of sources) {
+          for (const to of targets) {
+            if (to === from) continue;
+            edges.push({ from, to, kind: capture.family, symbol: null, evidence });
+          }
         }
         break;
       }
 
       // The registration site coupled two other files: the edge runs from the observed node to
       // its listener, and the evidence stays on the file that registered it.
+      // Neither end of this one is the file that wrote it, so `sources` says nothing about it: the
+      // edge runs between the two classes the registration coupled, and this file is the witness.
       case "observer": {
         // Both names are read, and both unconditionally: `&&` would stop at the first refusal and
         // the second name would go uncounted, so a registration whose observed class is ambiguous
@@ -408,8 +476,12 @@ export function resolveEdges(
       // could see from either pack.
       case "short-name": {
         const target = read(capture.groups[1], capture);
-        if (target !== null && target !== file.id) {
-          edges.push({ from: file.id, to: target, kind: capture.family, symbol: null, evidence });
+        if (target !== null) {
+          for (const from of sources) {
+            if (target !== from) {
+              edges.push({ from, to: target, kind: capture.family, symbol: null, evidence });
+            }
+          }
         }
         break;
       }
@@ -421,8 +493,12 @@ export function resolveEdges(
       // never named the view it renders — the direction a reviewer actually asks about.
       case "view": {
         const target = readView(capture.groups[1], capture);
-        if (target !== null && target !== file.id) {
-          edges.push({ from: file.id, to: target, kind: capture.family, symbol: null, evidence });
+        if (target !== null) {
+          for (const from of sources) {
+            if (target !== from) {
+              edges.push({ from, to: target, kind: capture.family, symbol: null, evidence });
+            }
+          }
         }
         break;
       }
@@ -454,7 +530,7 @@ export function resolveEdges(
  * ("../../packages/ui/src/Button") resolves, which is the whole point of a monorepo-native graph.
  * An alias target is repo-relative for the same reason and can point out of its own root too.
  */
-export function resolveModulePath(
+export function resolveModuleFile(
   fromFile: string,
   specifier: string,
   index: NodeIndex,
@@ -471,7 +547,7 @@ export function resolveModulePath(
   if (base === "" || base === ".." || base.startsWith("../")) return null;
 
   for (const candidate of candidatePaths(base, context)) {
-    if (index.ids.has(candidate)) return candidate;
+    if (index.byFile.has(candidate)) return candidate;
   }
   return null;
 }
@@ -489,6 +565,9 @@ export function resolveModulePath(
  *
  * A target that resolves above the repository root, or to the root itself, names nothing this graph
  * holds, on the same rule the relative path above follows.
+ *
+ * It answers with a file and not a node id, because it is half of `resolveModuleFile` and an alias
+ * is a spelling of a path rather than a second kind of target.
  */
 function resolveAlias(specifier: string, index: NodeIndex, context: ResolveContext): string | null {
   const rule = (context.aliases ?? []).find((candidate) => matches(candidate, specifier));
@@ -503,7 +582,7 @@ function resolveAlias(specifier: string, index: NodeIndex, context: ResolveConte
     if (base === "" || base === "." || base === ".." || base.startsWith("../")) continue;
 
     for (const candidate of candidatePaths(base, context)) {
-      if (index.ids.has(candidate)) return candidate;
+      if (index.byFile.has(candidate)) return candidate;
     }
   }
   return null;
@@ -531,28 +610,6 @@ function* candidatePaths(base: string, context: ResolveContext): Generator<strin
   }
 }
 
-/**
- * One node id for a short name, or null where the name is in no node, in several, or in one of the
- * wrong kind.
- *
- * **The uniqueness question is asked first and `targetKinds` filters the survivor**, which is the
- * order that only ever refuses. Filtering first reads like the more useful one, since two files
- * named `Badge` of which one is a component and one is a type module would leave a single candidate
- * and resolve. It also turns a refusal into a confident wrong answer, and that direction was
- * measured rather than reasoned: a `<Link />` from react-router, in a repository holding both
- * `components/Link.tsx` and `util/Link.ts`, resolved to the component under the filter-first order
- * and to nothing under this one, while the tag names neither. A name shared by two files is a name
- * this strategy cannot read, whatever the kinds are, and narrowing the field of candidates does not
- * change that: it only hides it behind a plausible pick.
- *
- * **The verdict comes back with the id**, so the five ways to answer null stay five answers. They
- * are not one fact: a name in no node is a vendor component and costs this repository nothing, a
- * name of the wrong kind is a rule's own `targetKinds` doing what it was declared for, a name in
- * several nodes is a coupling that exists and is not in the graph, and `local` and `vendor` are the
- * two where a node was found, was of the right kind, and is still not what the line renders.
- * Returned as a bare null they were indistinguishable downstream, which is how a family whose yield
- * had gone to zero went on reporting the same silence as a family with nothing to find.
- */
 /** What one file says about a name, which is everything the root's index cannot say. */
 interface ReadingFile {
   /** Names this file declares itself, from the pack's `declares` patterns. */
@@ -565,6 +622,23 @@ interface ReadingFile {
   internalDirs: (name: string) => string[];
 }
 
+/**
+ * One node id for a short name, or null where the name is in no node, in several the rule's kinds
+ * all admit, or in none of a kind it admits at all.
+ *
+ * **The verdict comes back with the id**, so the five ways to answer null stay five answers. They
+ * are not one fact: a name in no node is a vendor component and costs this repository nothing, a
+ * name of the wrong kind is a rule's own `targetKinds` doing what it was declared for, a name in
+ * several nodes is a coupling that exists and is not in the graph, and `local` and `vendor` are the
+ * two where a node was found, was of the right kind, and is still not what the line renders.
+ * Returned as a bare null they were indistinguishable downstream, which is how a family whose yield
+ * had gone to zero went on reporting the same silence as a family with nothing to find.
+ *
+ * The order the questions are asked in is load-bearing and is argued at the `targetKinds` narrowing
+ * below, which is where it was last changed. This block used to argue the opposite order at length
+ * while sitting above `interface ReadingFile` rather than above this function, so it described
+ * neither the code beneath it nor the code it named. Both halves of that are worth avoiding.
+ */
 function resolveName(
   index: NodeIndex,
   shortName: string | undefined,
@@ -588,19 +662,38 @@ function resolveName(
     }
   }
 
-  const candidates =
+  const found =
     index.byShortName.get(shortName) ??
     foldedCandidates(index, shortName).filter((id) => file.importsNameFrom(shortName, id));
-  if (candidates.length === 0) return { id: null, outcome: "unknown", candidates: 0 };
+  if (found.length === 0) return { id: null, outcome: "unknown", candidates: 0 };
+
+  // Narrowed by the rule's own `targetKinds` **before** the uniqueness test, because a rival of the
+  // wrong kind was never a rival. A `<PriceRow />` names a component, and a rule that says so has
+  // already declared which kinds can answer it, so a node of some other kind carrying the same name
+  // is not a second reading of the reference. It is a different thing that happens to be spelled the
+  // same, and counting it makes the name ambiguous against a candidate that could never have won.
+  //
+  // Asking the kind afterwards was harmless while a node was a file, because a file's name was its
+  // basename and two files of different kinds rarely share one. Under per-export ids the namespace
+  // is every exported name in the repository, so one `export const Modal = ...` in a constants file
+  // is enough to refuse every `<Modal />` in the codebase. That is the whole loss: the refusal takes
+  // every edge to that name with it, including the ones nothing else covers. A rendered component
+  // that no import binds, which is what a globally registered component is, then has no edge at all
+  // and no count says one went missing.
+  //
+  // Where every candidate fails the kind test the verdict stays `wrong-kind` rather than becoming
+  // `unknown`, and it reports how many were found: the name is in the graph, and what a reader needs
+  // to know is that the rule declined them, not that nothing carried the name.
+  const candidates = found.filter((id) => kindAllowed(index, id, targetKinds));
+  if (candidates.length === 0) {
+    return { id: null, outcome: "wrong-kind", candidates: found.length };
+  }
   if (candidates.length > 1) {
     return { id: null, outcome: "ambiguous", candidates: candidates.length };
   }
 
   const id = candidates[0];
   if (id === undefined) return { id: null, outcome: "unknown", candidates: 0 };
-  if (!kindAllowed(index, id, targetKinds)) {
-    return { id: null, outcome: "wrong-kind", candidates: 1 };
-  }
 
   // Asked last, of the one name that was about to become an edge, because that is the only case
   // either question can change. A name in no node was never at risk of a wrong edge and its honest

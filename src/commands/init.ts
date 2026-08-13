@@ -634,7 +634,13 @@ function entrypointRows(graph: Graph): { rows: string[]; note: SectionNote } {
     .sort((a, b) => Number(claims(userArrived, b)) - Number(claims(userArrived, a)))
     .map((node) => {
       const arrival = claims(userArrived, node) ? `  ${ARRIVED_BY_USER}` : "";
-      return `${node.file.padEnd(56)} ${node.kind.padEnd(12)}${arrival}`.trimEnd();
+      // The file, except where the node is one export of it. An export nothing references is an
+      // entrypoint while the file holding it may be imported by half the repository, so printing
+      // the path there tells a reader the file is unreferenced when it is the export that is.
+      // Keyed off `symbol` and not off the id, because a `fqcn` pack's id is a class name and the
+      // path is the more useful of the two coordinates for every row that pack produces.
+      const where = node.symbol === undefined ? node.file : node.id;
+      return `${where.padEnd(56)} ${node.kind.padEnd(12)}${arrival}`.trimEnd();
     });
 
   // `--orphans --all` and not `--orphans`: the plain form drops every framework-resolved kind, so

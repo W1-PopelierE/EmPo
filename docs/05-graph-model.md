@@ -7,11 +7,11 @@ specifies its schema. It is written only by `empo index`, never by hand, never b
 
 ```jsonc
 {
-  "schema": 6,                          // the format this file was written in, not the one empo writes
+  "schema": 7,                          // the format this file was written in, not the one empo writes
   "builtAgainst": "9cd9b6278…",         // git sha graph was built from
   "builtAtCommitSubject": "…",          // for human sanity when reading the file
   "roots": [ { "path": "apps/api", "lang": "php" }, … ],
-  "packs": { "php": "1.0.0", "typescript": "1.0.0" },
+  "packs": { "php": "1.9.0", "typescript": "2.0.1" },
   "stats": { "files": 3699, "nodes": 3241, "edges": 18734, "bridgedEdges": 212 },
 
   "nodes":  [ Node, … ],
@@ -28,11 +28,16 @@ specifies its schema. It is written only by `empo index`, never by hand, never b
 `builtAgainst` plus a `git rev-list --count <builtAgainst>..HEAD` is how every command reports
 staleness. The graph never hides its age.
 
-`stats.nodes` can never exceed `stats.files`. A scanned file contributes at most one node, and the
-count is taken from the deduplicated node list rather than from the per-root sum, so a file whose
-pack rules produced nothing and an id two files both claimed each leave the node count below the
-file count instead of above it. A graph.json whose nodes outnumber its files is not a large
-repository, it is a file `empo index` did not write.
+`stats.nodes` against `stats.files` reads differently per strategy, and the difference is worth
+knowing before a count surprises somebody. Under `fqcn` and `module-path` a scanned file contributes
+at most one node, so the node count sits at or below the file count: a file whose pack rules produced
+nothing and an id two files both claimed each subtract from it, since the count is taken from the
+deduplicated node list rather than from the per-root sum. Under `symbol` a file contributes one node
+per export it declares, so nodes can and normally do outnumber files, and a graph whose nodes exceed
+its files is the ordinary shape of such a root rather than a sign of anything wrong. What holds under
+every
+strategy is the deduplication: the count is of distinct ids, never of per-root sums, so two roots
+claiming one id are one node here and not two.
 
 Every key in this file is camelCase. The TypeScript contracts in `src/schema/types.ts` and the pack
 fixture snapshots already emit camelCase, so the file uses one representation and there is no rename
@@ -50,22 +55,76 @@ layer between the types and the disk format. A rename layer is where drift start
   "name": "PriceCalculator",
   "produces": [ { "symbol": "http-route", "key": "POST v1/orders", "line": 143 } ],
   "consumes": [ { "symbol": "http-route", "key": "POST v1/orders", "line": 88 } ],
+  // a symbol pack's refs also carry  "owners": [ "<node-id>", … ]:  which of the file's nodes the
+  // line was filed under. Absent where the pack's pattern found no export in the file at all, which
+  // is every file of an `fqcn` or `module-path` pack and every file a `symbol` pack's pattern did
+  // not match, since there is no extent to file a line under and writing the file's own id out
+  // again would put an id beside every ref of every pack that never asked for one. A file a symbol
+  // pack matched **once** does carry it, naming that single export on every ref: the key is
+  // present as soon as there is an export to attribute to, not once there are two to choose
+  // between.
   "isTest": false,
   "assertsValue": false
+  // a node a `symbol` pack ided by an export carries one key more:
+  //   "id": "src/money.ts#formatMoney", "name": "formatMoney", "symbol": "formatMoney"
 }
 ```
 
 `id` is the identity used everywhere else. For `fqcn` packs it is the class name; for
 `module-path` packs, and for any file a `fqcn` pack names by its `fallback: "path"`, it is the
-**repo-relative** file path, the same string as `file`. `produces`/`consumes` carry the symbol keys
-after normalization, so the bridge matcher can join them without re-parsing.
+**repo-relative** file path, the same string as `file`; for `symbol` packs it is that same
+repo-relative path, a `#`, and the exported name, as in `src/money.ts#formatMoney`.
+`produces`/`consumes` carry the symbol keys after normalization, so the bridge matcher can join them
+without re-parsing.
+
+`symbol` is present only on a node a `symbol` pack ided by an export, and holds that export's name.
+It is absent, not empty, on every node ided by a file or a class, including the nodes a `symbol` pack
+itself yields for a file whose pattern matched nothing. Its absence is therefore the reliable test
+for "this node is the whole file", which is what a printer needs before it decides whether to name an
+export beside a path.
 
 Repo-relative and not root-relative, which is what this said until the typescript pack was built
 against it. Root-relative ids collide the moment a monorepo holds two roots of one language, because
 both have a `src/index.ts`, and dedupe would then drop a real file. They also cannot resolve an
 import that crosses a root: `../../packages/ui/src/Button` only names a node when ids and roots are
 measured from the same origin, and a monorepo-native graph exists to see exactly that edge. One rule
-for every path-shaped id, so two roots can never claim one.
+for every path-shaped id, so two roots can never claim one. A `symbol` id inherits that rule whole,
+since the half of it before the `#` is exactly the path a `module-path` pack would have written.
+
+### What a symbol id can and cannot see
+
+Four properties of the `symbol` strategy reach this file's contents, and a reader who does not know
+them will read a number here as saying more than it does. The strategy itself is specified in
+[04-language-packs](04-language-packs.md); what follows is only what it does to `graph.json`.
+
+**An export's extent is a line partition, not a scope.** The pack's `symbolPattern` matches
+declarations written at column 0, and each match owns the lines up to the next one. So a `produces`
+or `consumes` entry sitting on a helper written between two exports is recorded on the export above
+it, and a declaration nested inside another is not a node at all. A name declared twice, which is
+what TypeScript's declaration merging writes, owns one extent per declaration and is still the one
+node its id names. Every citation in this file is
+still a real `file:line`; what the partition decides is which node the line was filed under.
+
+**An import that binds nothing this engine can match reaches the whole module.** Where a statement
+binds no name a target module exports under that spelling, which is every side-effect import, every
+dynamic `import()` and every default or namespace import whose local name is not an export name of
+the target, the edge is written to **every** node that file yields rather than to none. So a fan-in
+under `symbol` can be wide for a reason that is a floor rather than a measurement: the graph is
+saying any export of that file may be the one reached. It never narrows a radius by guessing, which
+is the direction the contract at the foot of this doc commits to.
+
+**A file whose pattern matched nothing yields the one file-level node it always did.** In a
+TypeScript repository test files, Vue single-file components and barrels are the ordinary cases, and
+they are cases rather than a rule: a test file that exports its cases yields a node per export like
+any other file, and a `.vue` writing `export const` at column 0 does too. What decides it is the
+pattern and never the extension. Those nodes are ided by path, carry no `symbol` key, and sit in
+`flows`, `fanin` and `coverage` exactly as they did before the strategy existed.
+
+**`kind`, `isTest` and `assertsValue` are file-level facts copied onto every node of the file.** A
+kind rule reads a path glob and a content pattern over the whole file and an assertion term is looked
+for in the whole of a test's source, so all three were measured once per file and are written
+unchanged onto each node it yields. Two exports of one file can never disagree about any of them, and
+a reader must not read agreement between them as two pieces of evidence.
 
 `assertsValue` is true only for a test node whose source contains one of the pack's
 `tests.assertionTerms`. It is what the blind computation aggregates, so it lives on the node rather
@@ -110,10 +169,14 @@ is not one of them). The typescript rules are scoped twice over, and both halves
 `pathGlob` confines them to the `.tsx`, `.jsx` and `.vue` files that can hold a tag, so no `.ts`
 module produces one, and `targetKinds` lets them land only on a node kinded `component` or `screen`,
 so a tag whose name belongs to a package cannot fall onto the lone local file that happens to share
-the basename. That filter is applied to the survivor of the uniqueness test and not before it, so
-where two local files carry the name the tag resolves to nothing, which is what `short-name` already
-did. Section 4 carries what each was measured to cost, what it did not, and why the other order
-invents an edge. Two further refusals are asked of the survivor of both tests, out of the pack's
+the basename. That filter is applied **before** the uniqueness test and not to its survivor, because
+a node of a kind the rule does not list was never a second reading of the tag: the pack has already
+said what a reference of this family can denote, so a `Total.ts` type module is not competing with
+`Total.tsx` over `<Total />`, it is a different thing that happens to be spelled the same. Where two
+nodes the rule's own kinds both admit carry the name, the tag still resolves to nothing, which is
+what `short-name` always did and the half of the refusal that was never in question. Section 4
+carries what each was measured to cost, what it did not, and why the other order loses edges nothing
+else covers. Two further refusals are asked of the survivor of both tests, out of the pack's
 `declares` patterns and its `packages` block: a tag naming something the rendering file declares
 itself, and a tag naming something that file imports from a package the repository depends on,
 produce no edge either.
@@ -129,13 +192,14 @@ through the exact map and can never be answered by a fold.
 file is the language's own convention answering; a fold is the engine guessing that a naming style is
 in play, and a guess needs a witness. The witness is the rendering file's own imports: a folded
 candidate stands only where that file carries an `import` capture whose statement text binds the name
-and whose specifier resolves — through `resolveModulePath`, so relative paths and the root's
+and whose specifier resolves — through `resolveModuleFile`, so relative paths and the root's
 configured aliases — to exactly that candidate. Because the witness is asked per candidate and
 **before** the uniqueness test, a name two files carry once case is set aside still resolves where
 the reading file imports exactly one of them. That is not the ambiguity the exact map refuses: there
 nothing in the file says which is meant, and here the file has said. A fold no import corroborates is
 `unknown` and not `ambiguous` — nothing was weighed, because nothing was admitted as a candidate.
-`targetKinds` still filters the survivor.
+`targetKinds` then narrows whatever the fold did admit, before the uniqueness question, as it does
+for the exact map.
 
 What the fold is worth is the whole yield of the family on such a repository rather than a margin: on
 a real 186-file React Native application whose components live in `src/components/badge.tsx`,
@@ -334,11 +398,23 @@ framework feature test that only hits its own HTTP route counting as a test of t
 {
   "flow": "checkout",
   "testNodes": [ "Acme\\Tests\\Feature\\CheckoutTest" ],
+  "testFiles": [ "apps/api/tests/Feature/CheckoutTest.php" ],  // the same reach counted in files
   "reaches": true,             // some test node has an edge path into this flow
   "assertsValue": false,       // but none of them uses an assertion term on a produced value
   "blind": true                // reaches but does not assert value -> flying blind
 }
 ```
+
+**`testNodes` and `testFiles` are the same reach counted in two units, and every surface that says
+"N tests" means the second one.** A reader who is told three tests reach a flow means three test
+files, because a test file is the thing they will open. Under `fqcn` and `module-path` the two lists
+have the same length and the distinction is invisible; under `symbol` one `checkout.test.ts`
+exporting three cases is three entries in `testNodes` and one in `testFiles`, and a printer counting
+the first would report one test file as three and inflate the apparent coverage of exactly the flows
+this tool exists to be honest about. So both are on the record rather than one being derived at read
+time: deriving it needs a node-to-file map the reader may not have, and a count printed from the
+wrong list is indistinguishable from a correct one. `testNodes` keeps its meaning for anything that
+walks edges, since edges join nodes and not files.
 
 `blind: true` is the single most important field for the money/critical case: the flow is
 exercised but nothing checks the number, so a wrong value ships silently. `empo query` surfaces
@@ -436,10 +512,10 @@ repair, the same as above.
 ```jsonc
 {
   "family": "template",        // the edge family whose rules read the name; never "bridge"
-  "resolved": 41,              // the name is in exactly one node, of a kind the rule accepts
+  "resolved": 41,              // exactly one node of a kind the rule accepts carries the name
   "unknown": 12,               // the name is in no node, in any case: a vendor component, `<x-slot>`
-  "ambiguous": 7,              // the name is in several nodes, so no edge is emitted to any of them
-  "wrongKind": 3,              // one node carries it, of a kind the rule's `targetKinds` excludes
+  "ambiguous": 7,              // several nodes the rule accepts carry it, so no edge is emitted
+  "wrongKind": 3,              // every node carrying it is of a kind the rule's `targetKinds` bars
   "local": 2,                  // the file that wrote the reference declares that name itself
   "vendor": 1,                 // that file imports the name from a package this repository installs
   "ambiguousNames": [ { "name": "OrderTable", "nodes": 2, "references": 5 }, … ]
@@ -484,18 +560,21 @@ numerator and denominator together, and `empo index` already names root overlap 
 ordinary cost of reading a language whose vendor components are spelled exactly like local ones: a
 JSX tag naming a package's component, a Blade built-in like `<x-slot>`. Nobody can act on it, and a
 healthy typescript repository carries a lot of it. `wrongKind` is a rule's own `targetKinds` doing
-precisely what it was declared for, refusing to land a tag on the one local `.ts` module that
-happens to share a basename with a package (the Edge section above, and
-[04-language-packs](04-language-packs.md) section 4, carry why that filter runs on the survivor of
-the uniqueness test rather than before it). `local` and `vendor` are the two where the index did
-answer and its answer is still not what the line names. `local` is the reference answering itself:
+precisely what it was declared for, refusing to land a tag on the local `.ts` module that happens to
+share a basename with a package. It is counted where **every** node carrying the name failed the
+kind test, and its `candidates` reports how many were found, so what a reader takes from it is that
+the name is in the graph and the rule declined all of it rather than that nothing carried it (the
+Edge section above, and [04-language-packs](04-language-packs.md) section 4, carry why that filter
+runs before the uniqueness test rather than on its survivor). `local` and `vendor` are the two where
+the index did answer and its answer is still not what the line names. `local` is the reference
+answering itself:
 the file that wrote it declares that name, through the pack's `declares` patterns, so whatever a node
 of the same basename elsewhere in the tree holds, it is not what this line means. `vendor` is the
 reference answered by somebody else's code: that file imports the name from a package this repository
 declares a dependency on ([04-language-packs](04-language-packs.md) section 4's `packages` block), so
 the node carrying the name is a basename collision — `import Button from '@mui/material/Button'`
-beside a local `Button.tsx`. **Both are asked last**, of the one name that had survived uniqueness
-and `targetKinds` and was about to become an edge, and both carry `candidates: 1` because exactly
+beside a local `Button.tsx`. **Both are asked last**, of the one name that had survived `targetKinds`
+and then uniqueness and was about to become an edge, and both carry `candidates: 1` because exactly
 one node was weighed and then declined. That ordering is the honest one: a name in no node was never
 at risk of a wrong edge, so it stays `unknown` whatever the reading file declares or imports, and
 asking these two first billed every vendor tag in a repository as a refusal that reads like a
@@ -631,6 +710,19 @@ to 0 turns "nobody looked" into "this repository shadows nothing" and "nothing h
 else's component", clean bills of health invented out of fields no run wrote. `isNameResolution` in
 `engine/health.ts` requires both keys for the same reason, so a record missing one is a malformed
 graph rather than one with a zero. `empo doctor` reports the drift and `empo index` is the repair.
+
+**`schema` goes from 6 to 7 when a pack may id a node by an exported symbol**, and it is the case
+this list exists for at its purest: not one key was added, renamed or removed in the parts a reader
+looks at first, and every one of them answers a different question. `nodes[].id` can now name one
+export of a file rather than a file. `flows` and `fanin` are keyed by those ids, so a fan-in of 3
+under 7 counts three exports where the same number under 6 counted three files. `coverage.testNodes`
+counts nodes where a reader counting tests means files, which is what `testFiles` beside it now
+answers. Nothing on the disk format announces any of that. A field arriving would have announced
+itself, as `local` and `vendor` did at 6, but `nodes[].symbol` arrives only on the packs that use the
+strategy and a repository holding one pack has no second pack whose version would signal the drift.
+So a schema 6 graph and a schema 7 graph are the same shape holding two different meanings, and the
+number is the only thing that separates them. `empo doctor` reports the drift and `empo index` is
+the repair, the same as above.
 
 `names` is not a health finding and never becomes one. An ambiguous component name is the normal
 shape of a React tree with feature directories, and a `TextInput` under two namespaces is the normal

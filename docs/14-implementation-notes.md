@@ -66,11 +66,35 @@ exactly, so on clean code the two approaches are equivalent. What decided it:
 
 What tree-sitter was genuinely right about was comments, and that defect was real: rules were reading
 commented-out routes and class names inside block comments. That is fixed in `engine/mask.ts` at no
-runtime or distribution cost. The one open argument in tree-sitter's favour is the unimplemented
-`symbol` node-id strategy (per-export granularity for TypeScript), where it extracts 7 of 7 export
-forms against a regex's 4 of 7. If that strategy is ever built, revisit this decision then. There is
-nowhere else to revisit it: a pack is rules and holds no code, so a parser would go in the engine,
-behind that one strategy, and every other pack would go on paying nothing for it.
+runtime or distribution cost. The one open argument in tree-sitter's favour was the `symbol` node-id
+strategy, per-export granularity for TypeScript, on the grounds that a grammar reads every export
+form and a regex reads the ones somebody wrote a branch for. That strategy is built and the typescript
+pack ships on it at 2.0.1, so the argument has been taken rather than deferred, and it was taken
+without a parser: a `symbolPattern` reading declarations at column 0, a line partition into extents,
+and imports attributed to the exports that reference what they bind. This is the place the decision
+was to be revisited, so here is the revision.
+
+What the regex bought is what a partition can buy. It reads the declaration forms the pattern
+enumerates, in the typescript pack `function`, `class`, `abstract class`, `const`, `let`, `var`,
+`type`, `interface` and `enum`, each written at column 0 and optionally `default` or `async`. What it
+does not read is what a grammar would have: a re-export naming what it re-exports, a declaration not
+at column 0, an `export { a, b }` clause listing names declared elsewhere in the file, an
+**anonymous** default export, a binding destructured out of an expression (`export const {a, b} =
+…`), a CommonJS `module.exports`, and the scope that would say where one export's body actually ends.
+The anonymous default is the largest of those in practice and the easiest to leave off a list like
+this, because the pattern demands a name after the keyword and every one of `export default () =>
+{}`, `export default {…}`, `export default class {}` and `export default function () {}` declines to
+give it one: that is the ordinary React and Vue component export, a far wider gap than the
+`export { a, b }` clause it is easy to cite instead. Those are the ceilings, they are stated in
+[04-language-packs](04-language-packs.md) beside the strategy rather than buried here, and every one
+of them fails in the same safe direction: the export is not a node of its own and its file's other
+exports absorb what it declared, so a reference to it is attributed too widely rather than lost.
+
+That is why the parser argument stays closed. The cost of a grammar was never the export forms it
+reads, it was a native dependency per language against a pack format that holds no code, and the
+gap it would close here is a wider attribution rather than a missing edge. Nowhere else does the
+question arise: a pack is rules and holds no code, so a parser would go in the engine, behind this
+one strategy, and every other pack would go on paying nothing for it.
 
 ## Repository layout (target state)
 
@@ -341,6 +365,8 @@ export interface SymbolRef {
   symbol: string;        // "http-route", "event", ...
   key: string;           // normalized key, e.g. "POST v1/orders"
   line: number;
+  owners?: string[];     // which of the file's nodes this ref belongs to. Absent = all of them,
+                         // which is every file of a pack that yields one node per file.
 }
 
 export interface GraphNode {
@@ -354,6 +380,7 @@ export interface GraphNode {
   consumes: SymbolRef[];
   isTest: boolean;
   assertsValue: boolean;   // a test using one of the pack's assertionTerms. False on a non-test.
+  symbol?: string;         // the export this node is, for a `symbol` pack. Absent on a file-level node.
 }
 
 /** One end-user journey from flows.json. `paths` are repo-relative path prefixes. */
@@ -375,6 +402,7 @@ export interface GraphEdge {
 export interface CoverageInfo {
   flow: string;
   testNodes: string[];
+  testFiles: string[];   // the same reach in files. What every "N tests" line counts.
   reaches: boolean;
   assertsValue: boolean;
   blind: boolean;        // reaches && !assertsValue
@@ -402,7 +430,7 @@ export interface NameResolution {
   resolved: number;
   unknown: number;       // the name is in no node: a vendor component, a Blade built-in
   ambiguous: number;     // the name is in several nodes, so no edge is emitted to any of them
-  wrongKind: number;     // one node carries it, of a kind the rule's `targetKinds` does not list
+  wrongKind: number;     // every node carrying it is of a kind the rule's `targetKinds` bars
   local: number;         // the file that wrote the reference declares the name itself
   vendor: number;        // that file imports the name from a package this repository depends on
   ambiguousNames: AmbiguousName[];       // so the count names something a reader can go and fix
@@ -452,7 +480,8 @@ export interface PackNodeId {
   namespacePattern?: string;
   namePattern?: string;
   fallback?: "path";     // what to do when the strategy cannot produce an id
-  indexNames?: string[]; // module-path: basenames that stand for their own directory ("index")
+  indexNames?: string[]; // module resolution: basenames that stand for their own directory ("index")
+  symbolPattern?: string; // `symbol` only, and required by it: group 1 is one exported name
 }
 
 /** How this language writes comments and string literals, so `engine/mask.ts` can blank comments. */
@@ -756,6 +785,33 @@ proven before anything depends on it. Order within phase 1:
    every hook fails open where `empo` is not installed, deliberately, which is why `empo check` in CI
    is still the gate that has to hold.
 
+9. **Done: the `symbol` node-id strategy**, and with it the typescript pack's bump to 2.0.0, since
+   shipped as 2.0.1. This is the
+   first change that moved what an id *means* rather than what the graph holds, so it is the first
+   one whose whole risk was in the surfaces that had quietly assumed one node per file. What landed:
+   `node.id.symbolPattern` in the pack contract, refused at compile time when a pack names `symbol`
+   without it; `extractSymbolExtents` in `engine/extractor.ts`, partitioning a file into one line
+   extent per exported name; `owners` on every capture and every `SymbolRef`, attributing a line to
+   the extent that encloses it and an import to the exports that reference what it binds;
+   `NodeIndex.byFile` in `engine/resolver.ts`, because module resolution turns a specifier into a
+   file and under this strategy no file is an id; one edge per bound name rather than one per
+   statement; `CoverageInfo.testFiles` beside `testNodes`; `resolveNodes` and a set-taking
+   `blastRadius` in `commands/query.ts`; one blast-radius block per changed file in
+   `commands/review.ts`; and graph schema 7.
+
+   What it proved: the assumption to hunt for was never spelled `file`, it was spelled `the node`.
+   Five call sites read a path as an id, a node as a file, or a node count as a file count, and every
+   one of them compiled and passed its tests under the old strategy because the two were the same
+   string. The pack fixture snapshot is what caught them, which is the case
+   for a corpus that is regenerated and read rather than asserted against by hand.
+
+   What it cost: one template edge on the pack's own corpus, argued at the end of
+   [04-language-packs](04-language-packs.md). Under a path-shaped id a node's short name was its file
+   basename, under `symbol` it is the export name, and two files exporting one name now collide where
+   two basenames differing only in case did not. That is a stricter namespace rather than a worse
+   rule, and it is the concrete reason the pack version is major and the two sets of `names` counts
+   are not comparable.
+
 Steps 1 through 5 need no network and no real repository. Everything is provable against synthetic
 fixtures, which is exactly the [11-security-boundaries](11-security-boundaries.md) requirement.
 Step 6 speaks to a host at runtime and is still proven the same way: every mapping from what `gh`
@@ -766,8 +822,25 @@ was pointed at. Step 8 is the same shape one level further out: the merge is a p
 text of a `settings.json` to the text of the next one, and a hook's whole answer is a pure function
 from a payload object to a string or to null, so the host contract is tested with no host running.
 
-One thing the design docs describe that these steps deliberately did not build, recorded here as
+Two things the design docs describe that these steps deliberately did not build, recorded here as
 the rule at the top of this doc requires:
+
+- **A changed line is not narrowed to the symbols it touches.** Step 9 gave the graph per-export
+  nodes, and each one carries the lines it spans, so "this diff touched lines 40 to 52" and "these
+  are the exports that own those lines" is now a question the data can answer. Nothing asks it. Both
+  halves are already on disk and neither is wired to the other: `touchesLine` in `engine/diff.ts`
+  reads a hunk, and `ExtractedSymbol` in `engine/extractor.ts` holds `startLine` and `endLine`.
+  `empo review` still resolves a changed **file** to every node that file yields, so editing one
+  export of a twenty-export module reports the blast radius of all twenty.
+
+  This is the payoff the strategy was built for rather than a nicety, and it is left out on purpose:
+  the ids had to exist and be trusted first, and the extents are a line partition rather than a parse
+  (section 2 of [04-language-packs](04-language-packs.md) says what that cannot see). Narrowing on
+  top of a partition that hands a helper written between two exports to the export above it would
+  turn a documented over-attribution into a **missed** one, and a review that quietly drops the
+  symbol a change really touched is worse than one that reports too many. Whoever builds it should
+  decide what happens to a hunk no extent encloses, which is every edit to an import block, before
+  writing anything else.
 
 - **`empo index --root <path>` is not implemented.** A partial rebuild is only safe while no edge
   crosses a root, and step 5 made that permanently untrue: a bridge edge has one end in each root, so
@@ -1019,9 +1092,18 @@ is safe there for that reason rather than by its own logic. A JSX tag's namespac
 people's packages, so `<View>`, `<Link>` and `<Text>` name nothing here, their vendor imports resolve
 to no node and leave no competing edge, and a local file that happens to share the basename collects
 the coupling instead. `targetKinds` narrows what a name may land on, and the order it is applied in
-was itself the second defect: filtering the candidates before asking whether the name is unique turns
-a refusal into a confident wrong answer, so uniqueness is asked first and the kind filters the
-survivor. Before reusing a strategy in a second language, ask what its namespace is there.
+was itself the second defect, twice over and in both directions. It was first written filter-first,
+measured, and reversed: a `<Link />` naming react-router resolved onto a local `components/Link.tsx`
+because filtering had left it alone against a `util/Link.ts`, which is a confident wrong answer where
+the refusal was merely a missing edge. It is filter-first again now, and what makes that safe is that
+the case which condemned it is answered by the guard built for it since: the reading file imports
+`Link` from a package the repository depends on, so the verdict is `vendor` and no edge is written.
+What forced the reversal back was the `symbol` strategy, which turned the namespace from file
+basenames into every exported name in the repository, where one `export const Modal = ...` in a
+constants file refuses every `<Modal />` in the codebase. Both orders can lose an edge; only
+filter-last loses the ones nothing else records. Before reusing a strategy in a second language, ask
+what its namespace is there, and note that an ordering standing in for a check that does not exist
+yet will be reargued the moment the check does.
 
 ## The name tally, and the silence it ends
 
@@ -1038,9 +1120,10 @@ a file whose own import is unambiguous and whose author could not have known any
 Measured on a synthetic 16-file React tree: a second `OrderTable.tsx` under another feature directory
 took it from 12 template edges to 7, in silence, no hazard, `empo doctor` OK. On a 640-file copy
 where every component name was 40-way ambiguous, zero template edges resolved at all. `targetKinds`
-does not change that arithmetic, and it is worth stating because the paragraph above can be misread
-as saying it does: the ambiguity test runs first, and the kind filter applies to whatever survives
-it.
+does not change that arithmetic under either order, and it is worth stating because the paragraph
+above can be misread as saying it does. The filter runs first and removes only a candidate the rule
+could never have named; a second `OrderTable.tsx` is a second component, so both copies survive it
+and the count is what refuses.
 
 **Two directions were on the table and only one shipped, so say plainly which.** The first was to
 narrow the refusal, by letting an ambiguous name resolve against the imports the same file already
@@ -1137,8 +1220,9 @@ application the same rules then resolved **735 of 1531**, with 795 in no node an
 It is consulted **only** when the exact spelling is in no node, and that ordering is half the safety
 argument rather than an optimization. A repository that spells its files as it spells its tags is
 answered by the exact map on every reference and can never be handed a fold, so it cannot pay for a
-convention it does not use. `targetKinds` still filters the survivor after the uniqueness question, in
-that order, for the reason the paragraph on `<Link />` above gives.
+convention it does not use. `targetKinds` narrows what the fold admitted before the uniqueness
+question is put to it, the same order the exact map is read under, for the reason the paragraph on
+`<Link />` above gives.
 
 **The other half is the `filter`, and it is what a first version of this went without.** A tag spelled
 exactly as a file is the language's own convention answering; a fold is the engine guessing that a
@@ -1146,7 +1230,7 @@ naming style is in play, and a guess needs a witness. So an exact match resolves
 folded candidate has to be corroborated by the rendering file's own imports: `importsNameFrom` in
 `resolveEdges` walks that file's `module-path` captures and keeps the candidate only where a capture's
 statement text binds the name (group 0, the `import` as written) **and** its specifier resolves through
-`resolveModulePath` — relative paths and the root's configured aliases — to exactly that candidate id.
+`resolveModuleFile` — relative paths and the root's configured aliases — to the file that holds it.
 No new pack rule is needed for any of it: the `import` captures are already there.
 
 The number is again the argument. cal.com names its shadcn-style files `toaster.tsx`,

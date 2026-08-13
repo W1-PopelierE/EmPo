@@ -37,7 +37,7 @@ import type { HostTicket } from "../schema/host-payload.schema";
 import type { Graph, GraphNode } from "../schema/types";
 import { columnWidth } from "../term";
 import { describeTouch, wantedPaths, wantedTerms } from "./check";
-import { type BlastRadius, blastRadius, FLOOR_NOT_CEILING } from "./query";
+import { type BlastRadius, blastRadius, FLOOR_NOT_CEILING, radiusNode } from "./query";
 
 /**
  * `empo review` (docs/06-cli.md, docs/07-review-discipline.md). The one command where the
@@ -97,7 +97,15 @@ interface ReviewSession {
 
 interface FileFacts {
   file: ChangedFile;
-  radii: BlastRadius[];
+  /**
+   * One radius for the whole file, or null where no node of the graph lives in it.
+   *
+   * One and not one per node, which is what this held while a node was always a file. Under a pack
+   * that ids by symbol a changed twenty-export module is twenty nodes, and a brief printing a block
+   * each would spend twenty screens saying what the reviewer asked about one file. The union over
+   * the file's nodes is the answer they wanted from the start: what can changing this file reach.
+   */
+  radius: BlastRadius | null;
 }
 
 /**
@@ -224,10 +232,10 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
   }
 
   const facts = changed.files
-    .map((file) => ({
-      file,
-      radii: nodesFor(graph, file.path).map((node) => blastRadius(graph, node)),
-    }))
+    .map((file) => {
+      const nodes = nodesFor(graph, file.path);
+      return { file, radius: nodes.length === 0 ? null : blastRadius(graph, nodes) };
+    })
     .sort((a, b) => compareStrings(a.file.path, b.file.path));
 
   const ticket = lookupTicket(tracker.adapter, prMeta, session.sourceBranch);
@@ -271,7 +279,10 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
             status: entry.file.status,
             added: entry.file.addedCount,
             removed: entry.file.removedCount,
-            nodes: entry.radii,
+            // Still a list, and now of at most one entry: one radius per changed file, whose own
+            // `nodes` holds every node the file yielded. A consumer reading the ids reads them
+            // from there rather than from one radius per node.
+            nodes: entry.radius === null ? [] : [entry.radius],
           })),
           // The denominator rides alongside the list, so a reader can tell "no spine claims this
           // change" from "this repository curates no spine". Both answer `spines: []`, and only one
@@ -1129,8 +1140,8 @@ function printChangedFiles(facts: FileFacts[]): void {
   for (const entry of facts) {
     const counts = `+${entry.file.addedCount} -${entry.file.removedCount}`;
     const mapped =
-      entry.radii.length > 0
-        ? entry.radii.map((radius) => radius.node.id).join(", ")
+      entry.radius !== null
+        ? namesOf(entry.radius)
         : entry.file.isBinary
           ? "binary"
           : "not in the graph (under no root, unindexed language, or a stale graph)";
@@ -1140,17 +1151,42 @@ function printChangedFiles(facts: FileFacts[]): void {
   }
 }
 
+/**
+ * What the graph calls the changed file, in one column.
+ *
+ * The export names where the nodes carry them and the node ids where they do not, because those are
+ * the two things a reader can look up. Under a pack that ids by class the id is the class name and
+ * naming it is the whole answer; under one that ids by symbol the ids all begin with the path that
+ * is already printed two columns to the left, so repeating it twenty times would push the only new
+ * information off the line.
+ *
+ * Capped at five for the reason every other list in this brief is capped: a row that runs to the
+ * width of the terminal reads as noise, and the count says what was held back rather than letting
+ * the truncation pass for the whole of it.
+ */
+function namesOf(radius: BlastRadius): string {
+  const symbols = radius.nodes.flatMap((node) => (node.symbol === undefined ? [] : [node.symbol]));
+  const names = symbols.length > 0 ? symbols : radius.nodes.map((node) => node.id);
+  if (names.length <= 5) return names.join(", ");
+  return `${names.slice(0, 5).join(", ")}, +${names.length - 5} more`;
+}
+
+/** Every changed file that is in the graph, one radius each. */
+function radiiOf(facts: FileFacts[]): BlastRadius[] {
+  return facts.flatMap((entry) => (entry.radius === null ? [] : [entry.radius]));
+}
+
 function printBlastRadius(facts: FileFacts[]): void {
   console.log("");
   console.log("blast radius  (step 2: every flow the change can reach, not only the ticket's)");
-  const radii = facts.flatMap((entry) => entry.radii);
+  const radii = radiiOf(facts);
   if (radii.length === 0) {
     console.log("  none of the changed files is a node in the graph");
     return;
   }
   for (const radius of radii) {
     console.log("");
-    console.log(`  ${radius.node.id}  ${radius.node.file}`);
+    console.log(`  ${namesOf(radius)}  ${radiusNode(radius).file}`);
     console.log(`    fan-in ${radius.faninDirect} direct, ${radius.faninTransitive} transitive`);
     for (const flow of radius.flows) {
       const state = flow.blind
@@ -1207,7 +1243,7 @@ function printBlastRadius(facts: FileFacts[]): void {
  */
 function printFlows(facts: FileFacts[]): void {
   const touched = new Map<string, { blind: boolean; reaches: boolean }>();
-  for (const radius of facts.flatMap((entry) => entry.radii)) {
+  for (const radius of radiiOf(facts)) {
     for (const flow of radius.flows) {
       touched.set(flow.flow, { blind: flow.blind, reaches: flow.reaches });
     }
@@ -1256,9 +1292,7 @@ function spinesTouched(
 ): SpineFacts[] {
   const paths = [...new Set(files.map((file) => file.path))].sort(compareStrings);
   const reached = new Set(
-    facts
-      .flatMap((entry) => entry.radii)
-      .flatMap((radius) => radius.flows.map((flow) => flow.flow)),
+    radiiOf(facts).flatMap((radius) => radius.flows.map((flow) => flow.flow)),
   );
 
   return spines
@@ -1374,28 +1408,32 @@ function coordinate(
 }
 
 function printTests(graph: Graph, facts: FileFacts[]): void {
-  const flows = new Set(
-    facts
-      .flatMap((entry) => entry.radii)
-      .flatMap((radius) => radius.flows.map((flow) => flow.flow)),
-  );
-  const ids = new Set<string>();
+  const flows = new Set(radiiOf(facts).flatMap((radius) => radius.flows.map((flow) => flow.flow)));
+  // The files and not the nodes. This block prints one line per test, and a test is something a
+  // reviewer opens, which is a file: a suite exporting three cases under a pack that ids by symbol
+  // is three `testNodes` in one file, and looking each id up printed that one file three times as
+  // though three separate tests reached the change. `testFiles` is deduplicated where it is built,
+  // so the count a reader takes away is the number of files they would have to read.
+  const files = new Set<string>();
   for (const flow of flows) {
-    for (const test of graph.coverage[flow]?.testNodes ?? []) ids.add(test);
+    for (const file of graph.coverage[flow]?.testFiles ?? []) files.add(file);
   }
 
   console.log("");
   console.log(
     "tests that reach the changed code  (step 4 judges these by reading, never by running)",
   );
-  if (ids.size === 0) {
+  if (files.size === 0) {
     console.log("  none. Every behavioural change here is unasserted.");
     return;
   }
-  for (const id of [...ids].sort(compareStrings)) {
-    const node = graph.nodes.find((candidate) => candidate.id === id);
-    if (node === undefined) continue;
-    console.log(`  ${node.file}  ${node.assertsValue ? "asserts a value" : "ASSERTS NO VALUE"}`);
+  for (const file of [...files].sort(compareStrings)) {
+    // Any node of the file asserting a value makes the file one that does. The grade is read off
+    // the nodes because it is a fact about the code and only the nodes carry it, and folding it
+    // with `some` is the same rule coverage.ts applies to a flow: one assertion in a file is what
+    // stops that file being the reassuring line beside an unchecked change.
+    const asserts = graph.nodes.some((node) => node.file === file && node.assertsValue);
+    console.log(`  ${file}  ${asserts ? "asserts a value" : "ASSERTS NO VALUE"}`);
   }
 }
 

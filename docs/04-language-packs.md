@@ -42,7 +42,7 @@ exactly the honesty this tradeoff requires.
       "namespacePattern": "^[ \\t]*namespace\\s+([A-Za-z0-9_\\\\]+)\\s*;",
       "namePattern": "^[ \\t]*(?:class|interface|trait|enum)\\s+([A-Za-z0-9_]+)",
       "fallback": "path",                    // no class in the file? id is its repo-relative path
-      "indexNames": ["index"]                // module-path only: a basename that stands for its dir
+      "indexNames": ["index"]                // module resolution: a basename that stands for its dir
     },
     "kindRules": [
       // resolvedBy:  the framework reaches this kind by name, so a fan-in of zero is no evidence
@@ -193,16 +193,19 @@ Every language needs a stable id for a unit of code so edges can point at it. Th
 abstracts what "a unit" means:
 
 - `fqcn`: one file is one class, id is the fully-qualified name (PHP, Java, C#).
-- `module-path`: id is the repo-relative file path (TypeScript, Go, Python where a file is a
-  module of many exports).
-- `symbol`: id is `path#exportName`, for languages where you want per-export granularity.
+- `module-path`: id is the repo-relative file path (Go, Python where a file is a module of many
+  exports, and anything else a file-level answer suits).
+- `symbol`: id is `path#exportName`, for languages where a file is a module of many exports and a
+  file-level answer is too coarse to act on. The shipped typescript pack declares it.
 
-The strategy list is engine-side and closed here too, and only two of the three are built. `fqcn`
-and `module-path` are implemented; `symbol` is declared and refused with a "not implemented yet"
-configuration error by `compilePack` in `engine/extractor.ts`, and it lands with the first pack that
-wants per-export granularity. A pack naming it fails loudly instead of quietly handing back the
-file-level node the other two strategies produce, which is the same bargain every unbuilt strategy
-in this contract has made: a pack naming one fails loudly rather than silently resolving nothing.
+The strategy list is engine-side and closed here too, and all three are built. `symbol` is the only
+one that needs a second key, **`symbolPattern`**, a regex over the file's masked source whose group 1
+is the exported name; a pack declaring `symbol` without it is refused by `compilePack` in
+`engine/extractor.ts`. That refusal is narrow on purpose. The other two strategies derive their ids
+from what the engine already reads, a path for `module-path` and one class declaration for `fqcn`,
+and `symbol` is the one that cannot: it has named a granularity and handed the engine no way to
+reach it, and falling back to the file-level node the other two produce would answer every later
+question about that root with ids the pack did not ask for.
 
 The refusal is raised when the pack is compiled, which happens once and before a single file is
 read, and it names the pack that asked. That matters for the two cases the older per-file refusal
@@ -211,13 +214,100 @@ read all of them; and a pack whose `match.extensions` happened to select no file
 indexed and reported as a success, with the strategy it declared never reached and its root silently
 empty.
 
+**What `symbol` sees is a line partition, not a parse.** Every top-level match of `symbolPattern`
+opens an extent that runs to the line before the next match, and the last one runs to the end of the
+file. That is the whole bargain of this engine restated at node granularity: every rule in it is a
+regex over masked text, and a real scope tree would need a parser per language, which is the thing a
+language-agnostic pack contract exists to avoid. The consequences follow, and none of them is hidden
+here.
+
+A declaration not written at column 0 opens no extent. The shipped pattern anchors at `^`, and every
+language this strategy suits indents a nested declaration, so a function declared inside another
+function is read as part of the enclosing export rather than as an export of its own. That is the
+property that makes the partition safe enough to answer with, and it is a property of the pattern
+rather than of the engine.
+
+An extent begins where the declaration begins, which is not always the keyword, and saying where
+that is belongs to the pack. A decorator is written on the lines **above** the thing it decorates, so
+a pattern anchored at `export` leaves `@Injectable()` inside the extent of whatever was declared
+above it. That is not a cosmetic off-by-one: the reference scan then finds `Injectable` in the
+neighbour's extent, which is enough to suppress the "nothing references this binding" fallback, and
+the import is attributed to the class written above rather than to the class being decorated. The
+decorated class gets no edge at all, which is under-attribution, the one direction a blast radius may
+not be wrong in. The repair is the pack's, because a decorator is a language's spelling and the
+engine holds the verbs while the pack holds the sentence: the typescript `symbolPattern` takes a run
+of decorator lines immediately above the declaration as part of the match, so the extent opens on the
+first of them. Angular, NestJS, TypeORM and MobX all write this shape, and all of them write
+decorators that span lines, so the run admits a continuation line that is indented or opens with a
+closing bracket. It admits nothing written at column 0, which is what stops a run of decorator lines
+over an unexported declaration from swallowing the next export and costing it its node.
+
+Text between two exports belongs to the export above it. A helper written at column 0 between two
+exported declarations is inside the earlier one's extent, so a capture on its lines is attributed to
+the earlier export. There is no third answer available to a partition: the alternatives are to invent
+an owner or to give the line to everything, and giving it to the neighbour it was written under is
+the one that matches how the file reads.
+
+A name declared twice owns two extents and is still one node. TypeScript merges declarations as a
+matter of course: a type beside a function, an interface beside a value, a `declare module` beside
+what it describes. Every match opens a boundary, including the repeat, because the alternative is
+that no boundary opens at the second declaration and its whole body is read as the tail of whatever
+was declared above it, which credits that neighbour with every import the second body needed and
+leaves the name itself with none. The extents fold back into one node where nodes are made, so
+`graph.json` still holds one node per id and a reader never sees the name twice.
+
+A file whose pattern matches nothing yields exactly the file-level node it always did, with no
+`symbol` field on it. Test files, Vue single-file components and barrel files are the ordinary cases
+in a TypeScript repository, and this is why adopting the strategy moved nothing about how they are
+ided, counted or resolved. Ordinary cases and not a rule: a test file that exports its cases yields a
+node per export like any other file, and a `.vue` writing `export const` at column 0 does too. The
+pattern decides it and the extension never does.
+
+**What the shipped pattern does not read is worth the list, because it is not the list the shape of
+it suggests.** An export form the pattern has no branch for keeps its lines inside the neighbouring
+extent, or leaves the file with no export at all and therefore with its file-level node. The forms
+are: a re-export naming what it re-exports (`export * from "./x"`), an `export { a, b }` clause
+listing names declared elsewhere in the file, a declaration written anywhere but column 0, a binding
+destructured out of an expression (`export const {a, b} = …`), a CommonJS `module.exports`, and the
+one that costs the most while being the easiest to leave out, an **anonymous default export**. The
+pattern requires a name after the keyword, so `export default () => {}`, `export default {…}`,
+`export default class {}` and `export default function () {}` all match nothing and the file keeps
+the file-level node it had before. That is the ordinary React and Vue component export form, so it
+reaches far more real files than the `export { a, b }` clause a list like this usually stops at, and
+a reader who assumes per-export ids everywhere in a React codebase will find whole directories still
+ided by path. Every one of them fails in the same safe direction: the export is not a node of its
+own, so a reference to it is attributed to the file or to a neighbouring export, which is too wide
+rather than lost.
+
+**An import is attributed to the exports that reference what it binds.** An import statement is
+written above every declaration in the file, so no extent encloses it, and both of the easy answers
+are wrong in the direction that matters: giving it to the first export invents a dependency, and
+giving it to all of them is the file-level answer this strategy exists to stop giving. So the engine
+reads the names the statement binds and attributes it to the exports whose own lines reference one of
+them. Where nothing in the file references the binding, the import is attributed to every export of
+the reading file, and the same fallback runs again on the far side: where the statement binds no name
+the target module exports under that spelling, the edge reaches **every** export of the target module
+rather than none. A side-effect import binds no name at all, a dynamic `import()` binds none at the
+statement, and a default or namespace import binds a local name that the target need not export under
+that spelling, so all three land on the whole module. In each of those the honest answer is that any
+export of that file may be the one reached, and the closing line of every report already says the
+flow list is a floor rather than a ceiling. This fallback is that floor and not a ceiling: it
+over-reaches rather than under-reaches, which is the only direction a blast radius may be wrong in.
+
+**`kind`, `isTest` and `assertsValue` stay file-level facts, copied onto every node the file yields.**
+A `kindRules` entry reads a path glob and a content pattern over the whole file, and a test file
+asserts or does not assert as a file. Naming any of the three per symbol would be inventing a
+distinction this contract does not draw anywhere else, so the copy is the honest representation of
+what was actually measured.
+
 `fallback: "path"` covers the files the strategy cannot name: a route file, a bootstrap script,
 anything with no class declaration in it. Without it those files yield no node at all, and
 everything they declare (routes above all) is invisible to the graph, so a `fqcn` pack for a
 framework with route files wants it. Leave it unset when a file with no unit of code should simply
 be skipped.
 
-`indexNames` is what `module-path` resolution needs and only it reads: the basenames that stand for
+`indexNames` is what module resolution needs, under `module-path` and under `symbol` alike, since
+both turn a specifier into a file before they turn it into an id: the basenames that stand for
 their own directory, so `import "../components"` finds `components/index.ts`. It is declared rather
 than assumed because "index" is a Node convention and Python's answer is `__init__`. An engine that
 hardcoded either would be a language leaking into the engine, which is the one thing this contract
@@ -541,20 +631,41 @@ a bare name, and only they read it. It exists because a name is only as safe as 
 resolves into, and a JSX tag's namespace is mostly other people's packages: `<View>`, `<Text>` and
 `<Link>` name nothing in this repository, their vendor import resolves to no node and leaves no
 competing edge, so a local file that happens to share the basename collects the tag and is then the
-only thing the graph says about that pair. **The uniqueness question is asked first and the filter is
-applied to the survivor**, which is the order that only ever refuses: a name in several nodes yields
-nothing whatever the kinds are, and a name in exactly one node yields nothing if that node is of a
-kind the rule does not list. This document said the opposite order at first, on the
-argument that two files named `Badge` of which one is a component and one a type module would leave
-exactly one candidate and resolve. **Running it is what settled it**: in a repository holding both
+only thing the graph says about that pair. **The filter is applied first and the uniqueness question
+is asked of what survives it.** A node of a kind the rule does not list was never a second reading of
+the reference: the rule declaring `["component"]` is the pack saying what a tag of this family can
+denote, so such a node is a different thing that happens to be spelled the same, and counting it
+makes the name ambiguous against a candidate that could not have won. Two nodes the rule's own kinds
+both admit are still refused, because there the field really does hold two readings and narrowing it
+would be a guess.
+
+This order was tried, rejected, and adopted, and the record of why is worth keeping whole rather than
+quietly reversing. It was rejected on a measurement: in a repository holding both
 `components/Link.tsx` and `util/Link.ts`, a `<Link />` that names react-router's component resolved
-to the local component under the filter-first order and to nothing under the shipped one, and the tag
-names neither file. Narrowing the candidate list does not make an unreadable name readable; it hides
+to the local component under the filter-first order and to nothing under the filter-last one, and the
+tag names neither file. Narrowing the candidate list did not make an unreadable name readable, it hid
 the ambiguity behind a plausible pick, which is a confident wrong answer where the refusal was merely
-a missing edge. So the field closes the case where the basename twin is the **only** candidate and
-leaves the ambiguous case exactly as `short-name` already had it. Which kinds a tag can name is a
-fact about the language, so it stays pack data like every other language fact, and the kind and the
-rule are declared in the same file.
+a missing edge.
+
+Two things changed. **`importsVendorName` was added afterwards**, and it is asked of the one name that
+was about to become an edge, which is exactly the position this order delivers a name into. The
+`<Link />` case is now caught by the guard built for it: the file's own import says the name came from
+a package the repository depends on and does not carry, so the verdict is `vendor` and no edge is
+written. An ambiguity standing in for a vendor check was never load-bearing anyway, since it only
+fired where a second local file happened to share the name.
+
+And **the `symbol` node-id strategy made the cost of the old order unpayable**. While a node was a
+file, a short name was a file basename and two files of different kinds rarely shared one, so asking
+the kind last cost almost nothing. Under per-export ids the namespace is every exported name in the
+repository, and a single `export const Modal = ...` in a constants file is then enough to refuse every
+`<Modal />` in the codebase. That refusal takes every edge to the name with it, including the ones
+nothing else covers: a globally registered component that no import binds has no other evidence, so
+the coupling disappears and no count reports that it went missing. Both orders can lose an edge; only
+the old one loses edges that nothing else records. `resolveName` in `engine/resolver.ts` carries the
+argument and `test/engine/resolver.test.ts` pins all three cases, the vendor one included.
+
+Which kinds a tag can name is a fact about the language, so it stays pack data like every other
+language fact, and the kind and the rule are declared in the same file.
 
 The strategy list is engine-side and closed: a pack selects one, it cannot define one. All six are
 built. Note that `view` and `short-name` are different strategies for different jobs and neither
@@ -591,9 +702,9 @@ key does.
 What it resolves is a **path below a root**, never a name looked up in the index of node names. A
 view name is not a short name: `orders/show` is where the file sits, and the only thing no line of
 the repository writes down is which directory that is, which is what the `views` block below says.
-So the strategy shares none of `resolveName`'s four post-uniqueness questions — the kind, the
-reading file's own declarations, its imports, its workspace packages — because not one of them can
-say anything about a path. What it does share is the refusal: a name in no template and a name in
+So the strategy shares none of the four further questions `resolveName` asks around its uniqueness
+test, the kind, the reading file's own declarations, its imports and its workspace packages, because
+not one of them can say anything about a path. What it does share is the refusal: a name in no template and a name in
 several both yield nothing, and both are counted in `names` beside the `short-name` verdicts, since
 a strategy whose yield can quietly be zero is not one anybody can call proven.
 
@@ -625,13 +736,26 @@ unambiguous" differently would be a defect invisible from either pack. So a name
 nothing (a vendor component, or a Blade built-in like `<x-slot>`), and so does a name in several. The
 ambiguity bites harder here than it does for observers: `forms.text-input` and `fields.text-input`
 both fold to `TextInput`, and a component library with namespaced folders is the normal case rather
-than the odd one. **Resolved against refused is counted rather than assumed**, on whatever repository
+than the odd one.
+
+**Which names that index holds depends on the pack's node-id strategy, and that is not a detail.** A
+node's short name is the class name under `fqcn`, the file basename under `module-path`, and the
+**export name** under `symbol`. So the same repository presents this strategy with two different
+namespaces depending on which the pack declared, and the export-name namespace is the stricter of the
+two: two files whose basenames differ only in case carry two distinct names under `module-path` and
+one shared name under `symbol` if both export it under the same spelling. A pack changing strategy
+therefore changes what `ambiguous` means for it, which is why doing so is a major version and why the
+counts either side of the change are not comparable. The typescript pack's own corpus records this
+happening, at the end of "Testing a pack" below.
+
+**Resolved against refused is counted rather than assumed**, on whatever repository
 the pack is pointed at. Every name these two strategies read reaches one of six verdicts, and a
 `view` name reaches three of the same six (`resolved`, `unknown`, `ambiguous`), counted into the same
 per-family record for the same reason:
 `resolved`, `unknown` (the name is in no node at all — a vendor component, a Blade built-in like
 `<x-slot>`), `ambiguous` (the name is in several nodes, so no edge is emitted to any of them),
-`wrong-kind` (the name is in exactly one node, of a kind the rule's `targetKinds` does not list),
+`wrong-kind` (every node carrying the name holds a kind the rule's `targetKinds` does not list, and
+the count that comes back with it is how many were found),
 `local` (the file that wrote the reference declares that name itself, so no other node can be what
 the reference means — the pack's `declares` patterns below are what say so) and `vendor` (that file
 imports the name from a package this repository depends on, so the node carrying it is a basename
@@ -640,10 +764,13 @@ tally is recorded on the graph as `names`, one record per edge family, counted p
 and not per distinct name, and both `empo index` and `empo doctor` print it
 ([06-cli](06-cli.md)).
 The five refusals are asked in a fixed order and the order is load-bearing.
-Where the rule declares `targetKinds`, the uniqueness question is asked first and the
-filter is applied to whatever survived it, so a name carried by two nodes is ambiguous even where
-only one of the two is a legal target: `resolveName` in `engine/resolver.ts` refuses on the count
-before it looks at a kind, and its docstring records why. `local` and `vendor` are asked **last**, of
+Where the rule declares `targetKinds`, the filter is applied first and the uniqueness question is
+asked of what survived it, so a name carried by two nodes of which only one is a legal target
+resolves to that one, and a name carried by two legal targets is still ambiguous: `resolveName` in
+`engine/resolver.ts` drops what the rule could never have named before it counts, and its docstring
+records why. Where the filter leaves nothing the verdict is `wrong-kind` and it reports how many were
+found, because the name is in the graph and what a reader needs to know is that the rule declined it,
+not that nothing carried it. `local` and `vendor` are asked **last**, of
 the one name that was about to become an edge, for the reason the two paragraphs on them below give.
 That order is also why the refusals are
 counted apart: `ambiguous` is the only one of the five that hides a coupling this repository really
@@ -658,9 +785,10 @@ including the ones written in a file whose own import says which is meant. **Mea
 on a synthetic 16-file React tree: adding a second `OrderTable.tsx` under another feature directory
 took it from 12 template edges to 7, in silence, and on a 640-file copy where every component name
 was 40-way ambiguous no template edge resolved at all. It fails safe, which is the right direction.
-`targetKinds` does not soften that measurement at all, because the collapse is decided before any
-kind is consulted: the count is what refuses, and it refuses whether the duplicate is a component, a
-type module or a test.
+`targetKinds` does not soften that measurement at all, and it does not soften it under the shipped
+order either. A second `OrderTable.tsx` is a second component, so both copies survive the kind filter
+and the count is what refuses; the filter only ever removes a candidate the rule could not have
+named, and a duplicate of the very kind the rule asked for is not one of those.
 
 **What the count changed is the silence, and not one of those two measurements.** Stated plainly,
 because the distinction is easy to lose: counting the refusal is not narrowing it. The second
@@ -677,8 +805,9 @@ repository and `badge.tsx` in the next, and both are a component this graph hold
 now keeps a second index keyed by the lower-cased name and `resolveName` asks it **only** where the
 exact spelling is carried by no node at all. The order is the whole of the safety: a repository that
 spells its files as it spells its tags is answered by the exact map and can never be handed an answer
-a fold produced. `targetKinds` still filters whatever survives, so nothing about the two paragraphs
-above is softened for a repository that already resolved. **Measured** on a real 186-file React Native
+a fold produced. `targetKinds` narrows whatever the fold admitted before the uniqueness question is
+put to it, the same order the exact map is read under, so nothing about the two paragraphs above is
+softened for a repository that already resolved. **Measured** on a real 186-file React Native
 application whose components are all named in lowerCamelCase (`src/components/badge.tsx`, rendered
 `<Badge />`): `template` resolved 3 of 1531 tag references before the fold and 735 of 1531 after it,
 with 682 in no node and 114 `local`. Every one of those 1528 earlier misses was `unknown`, not one was
@@ -690,7 +819,7 @@ the safety and the half a first version of this section did without. A tag spell
 is the language's own convention answering; a fold is the engine guessing that a naming style is in
 play, and a guess needs a witness. The witness is the rendering file's own imports: a folded candidate
 stands only where that file carries an `import` capture whose statement text binds the name and whose
-specifier resolves — through `resolveModulePath`, so relative paths and the root's configured aliases
+specifier resolves — through `resolveModuleFile`, so relative paths and the root's configured aliases
 — to exactly that candidate. **Measured** on cal.com, which names its shadcn-style files
 `toaster.tsx`, `collapsible.tsx` and `textarea.tsx`: the uncorroborated fold produced 53 extra
 template edges there, and a sample of 6 was 5 wrong — `<Toaster />` imported from the `sonner`
@@ -1475,7 +1604,10 @@ Two, deliberately different, to keep the interface honest:
   whole of Laravel — `->afterCommit()` at the site and
   `public $afterCommit = true` on the job, and the one that declares a compound-extension comment
   syntax, `.blade.php` masking `{{-- --}}`.
-- **typescript** (`strategy: module-path`, four `import` rules, two `template` rules for the JSX and
+- **typescript** (`strategy: symbol`, with the `symbolPattern` that reads an exported `function`,
+  `class`, `abstract class`, `const`, `let`, `var`, `type`, `interface` or `enum` written at column 0,
+  together with any run of decorator lines written directly above it,
+  four `import` rules, two `template` rules for the JSX and
   Vue component tag, scoped with `pathGlob` to `**/*.{tsx,jsx,vue}` and confined by `targetKinds` to
   landing on a `component` or a `screen`, three `declares` patterns so those two rules refuse a tag
   naming something the rendering file declares itself, a `packages` block naming `package.json`,
@@ -1618,5 +1750,47 @@ otherwise have resolved: `CardFooter` reaches it through the fold, which `CardSt
 corroborate, so that name is honestly `unknown` and the shadow verdict was no longer gated by
 anything. `OrderCard.tsx` is carried by the exact index and kinded `component`, so a file declaring
 its own `const OrderCard` and rendering it is the case `local` exists for. With all of it the corpus
-is 47 nodes and its `template` record reads `resolved 19, unknown 1, ambiguous 2, wrongKind 1,
-local 1, vendor 1`.
+stood at 47 nodes and its `template` record read `resolved 19, unknown 1, ambiguous 2, wrongKind 1,
+local 1, vendor 1`, which is where it was when the pack still ided a node by its path.
+
+**Adopting `symbol` at pack 2.0.0 cost the corpus one template edge, and the loss is worth stating
+rather than absorbing.** `src/components/PriceRow.tsx` and `src/browser/widgets/priceRow.jsx` both
+export a symbol spelled `PriceRow`. Under a path-shaped id the two nodes were named from their
+basenames, `PriceRow` and `priceRow`, so the exact short-name map held one `PriceRow` and `<PriceRow
+/>` resolved to it, with the second file reachable only through the case fold. Under `symbol` a
+node's short name is the export name, both files export `PriceRow` under that exact spelling, and the
+map now holds two nodes of that name, so the reference is refused as `ambiguous`. Measured on the
+adoption commit itself, with the corpus otherwise untouched, the `template` record went from
+`resolved 19, ambiguous 2` to `resolved 18, ambiguous 3`, and the third ambiguous name is `PriceRow`
+beside `Badge` and `Total`. The corpus has grown since, so read that as the arithmetic of the change
+and not as the corpus's current totals, which the snapshot in `fixtures/expected.json` carries.
+
+**Two of those three ambiguities are still ambiguous and the third is not, which is the kind filter
+showing up in the same corpus.** The snapshot now reads `resolved 20, unknown 1, ambiguous 2,
+wrongKind 1, local 1, vendor 1`, and the two names under `ambiguousNames` are `Badge` and `PriceRow`.
+`Total` left the list when the filter moved ahead of the uniqueness test: `src/react/types/Total.ts`
+is kinded `module` and the `template` rule lists only `component` and `screen`, so that node stops
+being a candidate before it can be counted, `src/react/cards/Total.tsx` is left alone, and `<Total />`
+resolves. The corpus gained exactly one edge for it and lost none, which is the whole measurement:
+`src/react/cards/OrderRowList.tsx#OrderRowList -> src/react/cards/Total.tsx#Total`, family
+`template`, cited at `OrderRowList.tsx:17`. Nor did dropping the type module cost anything, since
+`Total.tsx` imports it and that `import` edge was already there and still is.
+
+`Badge` and `PriceRow` are untouched by that change for the reason the paragraph above
+gives about `OrderTable`: both of each pair are kinded `component`, so the filter removes neither and
+the count still refuses. The one recovered and the two kept are the whole shape of what the order
+change does: it drops what the rule could never have named and never picks between two things it
+could.
+
+The refusal is true rather than conservative, which is the reason it is accepted and not repaired.
+Two files really do export that name, the graph really cannot say which one the tag meant, and the
+old answer separated them by a file-naming convention rather than by anything the language declares.
+Nor is the coupling lost: the file that renders the tag imports it, and the import edge still joins
+the pair, so the blast radius holds the same two nodes it held before through a different family.
+What changed is that a reader comparing `names` counts across the 1.x to 2.0.0 bump is comparing two
+different namespaces: under 1.x a short name was a file basename, under 2.x it is an export name,
+and a repository whose files and exports are spelled alike will find names that used to be unique
+carried by two nodes and refused. The honest reading of a `template` count that fell across that
+bump is a remeasure under a stricter namespace and not a regression in the rules, and the pack's
+major version is exactly what says the two sets of counts are not comparable. This is the measurement
+that shows why the bump was needed rather than optional.

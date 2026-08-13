@@ -31,8 +31,9 @@ function node(id: string, name: string, filePath: string, captures: Capture[] = 
     consumes: [],
     captures,
     declares: [],
-    // The resolver reads neither, but an ExtractedFile carries them, and a hand-made one that
+    // The resolver reads none of these, but an ExtractedFile carries them, and a hand-made one that
     // omitted them would stop compiling rather than quietly resolve differently.
+    symbols: [],
     dispatches: [],
     defersCommit: false,
   };
@@ -276,7 +277,7 @@ describe("resolveEdges, view", () => {
 
   test("finds the root anywhere in a repo-relative path, so a monorepo resolves", () => {
     // `apps/api/resources/views/...` is as normal a Laravel layout as the bare one, and a node id
-    // is repo-relative for exactly the reason resolveModulePath's are.
+    // is repo-relative for exactly the reason resolveModuleFile's are.
     const show = template("apps/api/resources/views/orders/show.blade.php");
     const controller = node("Acme\\OrderController", "OrderController", "apps/api/app/O.php", [
       viewCapture("orders/show", 3),
@@ -797,12 +798,23 @@ describe("resolveEdges, the names it declined", () => {
     ]);
   });
 
-  test("calls two nodes of which one is a legal kind ambiguous, never wrong-kind", () => {
-    // Uniqueness is asked before the kind filter, and this is where that order is visible. Exactly
-    // one of these two `Badge`s is a "component", so a filter-first resolver would narrow the field
-    // to one candidate, resolve, and report `resolved`. It would also be guessing: a name shared by
-    // two files is a name this strategy cannot read, and narrowing the field only hides that behind
-    // a plausible pick. The verdict has to stay `ambiguous`, or the record would launder the guess.
+  test("resolves past a node of a kind the rule cannot name, and still refuses two of one kind", () => {
+    // The kind filter runs before the uniqueness test, and this is where that order is visible.
+    //
+    // It used to run after, on the argument that narrowing the field hides a guess behind a
+    // plausible pick. That argument reads a `targetKinds` list as a tiebreaker, and it is not one: a
+    // rule declaring `["component"]` is the pack saying what a reference of this family can denote,
+    // so a node of another kind was never a second reading of the tag. It is a different thing that
+    // happens to be spelled the same, and counting it makes the name ambiguous against a candidate
+    // that could not have won.
+    //
+    // What forced the order is the `symbol` strategy. While a node was a file, a short name was a
+    // file basename and two files of different kinds rarely shared one, so asking last cost almost
+    // nothing. Under per-export ids the namespace is every exported name in the repository, and one
+    // `export const Modal = ...` in a constants file is then enough to refuse every `<Modal />` in
+    // the codebase. The refusal takes every edge to that name with it, including the ones nothing
+    // else covers: a globally registered component that no import binds has no other evidence, so
+    // the coupling disappears and no count reports that it went missing.
     const component = kinded(
       "Acme\\View\\Components\\Badge",
       "Badge",
@@ -819,9 +831,72 @@ describe("resolveEdges, the names it declined", () => {
 
     const resolved = resolveEdges(view, buildNodeIndex([component, type, view]), PHP);
 
+    expect(resolved.edges.map((edge) => edge.to)).toEqual(["Acme\\View\\Components\\Badge"]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "Badge", outcome: "resolved", candidates: 1 },
+    ]);
+
+    // The refusal this did not weaken: two nodes the rule's own kinds both admit are still a name
+    // this strategy cannot read, and narrowing there really would be a guess. Only the impossible
+    // candidate is removed, never a possible one.
+    const second = kinded(
+      "Acme\\View\\Components\\Widgets\\Badge",
+      "Badge",
+      "app/View/Components/Widgets/Badge.php",
+      "component",
+    );
+    const both = resolveEdges(view, buildNodeIndex([component, second, view]), PHP);
+
+    expect(both.edges).toEqual([]);
+    expect(both.names).toEqual([
+      { family: "template", name: "Badge", outcome: "ambiguous", candidates: 2 },
+    ]);
+  });
+
+  test("still refuses a vendor tag the kind filter leaves exactly one local candidate for", () => {
+    // The measured case that argued against this order when it was first tried, re-run against the
+    // resolver as it now stands. A repository holds `components/Link.tsx` and `util/Link.ts`, and a
+    // file renders `<Link />` meaning react-router's component. Under uniqueness-first the two
+    // candidates refuse each other and nothing is emitted; under kind-first the type module is
+    // dropped, one local component is left, and the fear was that the tag would land on it. That is
+    // a confident wrong answer where the refusal had been merely unhelpful, and it is why the
+    // filter-last order was kept at the time.
+    //
+    // It no longer holds, and for a reason that has nothing to do with the order. `importsVendorName`
+    // was added afterwards and is asked of the one name that was about to become an edge, which is
+    // exactly the position this order delivers a name into. The file's own import says `Link` came
+    // from a package the repository depends on and does not carry, so the verdict is `vendor` and no
+    // edge is written. The guard that catches this is the one built for it, rather than an ambiguity
+    // standing in for it by accident, and an ambiguity standing in for a vendor check was never
+    // load-bearing: it only ever fired where a second local file happened to share the name.
+    const component = kinded(
+      "src/components/Link.tsx",
+      "Link",
+      "src/components/Link.tsx",
+      "component",
+    );
+    const type = kinded("src/util/Link.ts", "Link", "src/util/Link.ts", "module");
+    const view = {
+      ...kinded("src/screens/Nav.tsx", "Nav", "src/screens/Nav.tsx", "component"),
+      captures: [
+        {
+          family: "import" as const,
+          resolve: "module-path" as const,
+          groups: ['import { Link } from "react-router-dom"', "react-router-dom"],
+          line: 2,
+        },
+        kindedCapture("Link", 9, ["component"]),
+      ],
+    };
+
+    const resolved = resolveEdges(view, buildNodeIndex([component, type, view]), {
+      ...TS,
+      vendorPackages: new Set(["react-router-dom"]),
+    });
+
     expect(resolved.edges).toEqual([]);
     expect(resolved.names).toEqual([
-      { family: "template", name: "Badge", outcome: "ambiguous", candidates: 2 },
+      { family: "template", name: "Link", outcome: "vendor", candidates: 1 },
     ]);
   });
 
@@ -1420,6 +1495,113 @@ describe("resolveEdges, a name bound from a workspace package", () => {
 
     expect(resolved.edges.map((edge) => edge.to)).toEqual([
       "packages/ui/components/button/Button.tsx",
+    ]);
+  });
+});
+
+/**
+ * What resolution does once a file yields several nodes. `test/engine/build.test.ts` pins the same
+ * strategy end to end over a fixture; these are the two decisions this file makes on its own, and
+ * both fail silently if they are wrong: an import that resolves to nothing looks exactly like a
+ * vendor import, which this file drops by design.
+ */
+describe("resolveEdges under a pack whose files yield many nodes", () => {
+  /** A file partitioned into exports, as extraction hands it over. */
+  function exporting(filePath: string, names: string[], captures: Capture[] = []): ExtractedFile {
+    return {
+      ...module_(filePath, captures),
+      symbols: names.map((name, position) => ({
+        name,
+        id: `${filePath}#${name}`,
+        startLine: 10 + position,
+        endLine: 10 + position,
+      })),
+    };
+  }
+
+  function importer(filePath: string, statement: string, specifier: string): ExtractedFile {
+    const owners = [`${filePath}#use`];
+    return exporting(
+      filePath,
+      ["use"],
+      [
+        {
+          family: "import",
+          resolve: "module-path",
+          groups: [statement, specifier],
+          line: 1,
+          owners,
+        },
+      ],
+    );
+  }
+
+  test("resolves a specifier against the files the index holds, no path being a node id", () => {
+    const money = exporting("src/money.ts", ["formatMoney", "parseMoney"]);
+    const total = importer("src/total.ts", 'import { formatMoney } from "./money"', "./money");
+
+    const resolved = resolveEdges(total, buildNodeIndex([money, total]), TS);
+
+    expect(resolved.edges.map((edge) => edge.to)).toEqual(["src/money.ts#formatMoney"]);
+    expect(resolved.edges.map((edge) => edge.from)).toEqual(["src/total.ts#use"]);
+  });
+
+  test("reaches the whole module where the statement binds no name the target exports", () => {
+    // A default import names the module and not one of its exports, so every export of it is in
+    // reach and the floor stays a floor.
+    const money = exporting("src/money.ts", ["formatMoney", "parseMoney"]);
+    const total = importer("src/total.ts", 'import money from "./money"', "./money");
+
+    const resolved = resolveEdges(total, buildNodeIndex([money, total]), TS);
+
+    expect(resolved.edges.map((edge) => edge.to)).toEqual([
+      "src/money.ts#formatMoney",
+      "src/money.ts#parseMoney",
+    ]);
+  });
+
+  test("corroborates a folded short name against a file that yields many nodes", () => {
+    // The regression this exists to catch is silent, which is why it is worth a test of its own.
+    // `importsNameFrom` asks whether this file imports a name from the file a candidate node lives
+    // in. A specifier names a module and never one export of it, so the only honest comparison is
+    // against the file. Comparing against a resolved **id** answers false for every file holding
+    // more than one export, because no specifier resolves to one of them, and the fold is then
+    // refused as a name that corroborated nothing. Nothing errors, no count drops to zero, and every
+    // JSX edge whose target module happens to export a second symbol simply stops existing.
+    const badge: ExtractedFile = {
+      ...node("src/components/badge.tsx", "badge", "src/components/badge.tsx"),
+      lang: "typescript",
+      kind: "component",
+      symbols: [
+        { name: "badge", id: "src/components/badge.tsx#badge", startLine: 1, endLine: 4 },
+        { name: "helper", id: "src/components/badge.tsx#helper", startLine: 5, endLine: 9 },
+      ],
+    };
+    const screen: ExtractedFile = {
+      ...node("src/screens/Cart.tsx", "Cart", "src/screens/Cart.tsx"),
+      lang: "typescript",
+      kind: "screen",
+      captures: [
+        {
+          family: "import" as const,
+          resolve: "module-path" as const,
+          groups: ['import { Badge } from "../components/badge"', "../components/badge"],
+          line: 1,
+        },
+        { ...shortNameCapture("Badge", 7), targetKinds: ["component", "screen"] },
+      ],
+    };
+
+    const resolved = resolveEdges(screen, buildNodeIndex([badge, screen]), TS);
+
+    // The template edge is the one under test. The import capture emits its own edges to both
+    // exports beside it, which is the documented fallback: the clause binds `Badge`, that file
+    // exports no such name, and an import this engine cannot pin to one export reaches the module.
+    expect(
+      resolved.edges.filter((edge) => edge.kind === "template").map((edge) => edge.to),
+    ).toEqual(["src/components/badge.tsx#badge"]);
+    expect(resolved.names).toEqual([
+      { family: "template", name: "Badge", outcome: "resolved", candidates: 1 },
     ]);
   });
 });

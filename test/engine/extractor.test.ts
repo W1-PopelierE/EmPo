@@ -850,28 +850,254 @@ describe("declared names", () => {
 });
 
 /**
- * The one node id strategy the schema accepts and the engine does not build. It is left declared
- * rather than dropped (docs/04-language-packs.md, section 2), so what needs pinning is that the
- * refusal is loud, arrives at the pack rather than at a file, and says whose pack it is.
+ * The one node id strategy that cannot be read off the path or off a single class declaration, so
+ * it is the one that needs the pack to say how a symbol is found. What needs pinning is that the
+ * refusal of an incomplete pack is loud, arrives at the pack rather than at a file, and says whose
+ * pack it is, and that a pack which does say survives compiling.
  */
-describe("an unbuilt node id strategy", () => {
-  const symbolPack: Pack = {
+describe("a symbol node id strategy", () => {
+  const patternless: Pack = {
     ...basePack,
     name: "wants-per-export",
     node: { ...basePack.node, id: { strategy: "symbol" } },
   };
 
-  test("refuses the pack at compile time, naming the pack that asked, with exit code 2", () => {
+  test("refuses a pack declaring no symbolPattern, naming the pack that asked, with exit code 2", () => {
     try {
-      compilePack(symbolPack);
-      expect.unreachable("compiling a pack that declares symbol should have thrown");
+      compilePack(patternless);
+      expect.unreachable("compiling a symbol pack with no pattern should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(EmpoError);
       expect((error as EmpoError).exitCode).toBe(2);
-      expect((error as EmpoError).message).toContain("not implemented yet");
+      expect((error as EmpoError).message).toMatch(/symbolPattern/);
       // Which pack asked, which a per-file throw could not say: a monorepo compiles one pack per
       // root, and "some pack wants symbol" sends the author to read all of them.
       expect((error as EmpoError).details.join("\n")).toContain("wants-per-export");
     }
+  });
+
+  test("compiles a pack that declares one", () => {
+    expect(() =>
+      compilePack({
+        ...patternless,
+        node: {
+          ...basePack.node,
+          id: {
+            strategy: "symbol",
+            symbolPattern: "^export\\s+(?:const|function)\\s+([A-Za-z0-9_$]+)",
+          },
+        },
+      }),
+    ).not.toThrow();
+  });
+});
+
+/**
+ * The extents a `symbol` pack reads out of one file. A file is partitioned by where its exports are
+ * declared, so what needs pinning is where one extent ends and the next begins, that a pack asking
+ * for no symbols gets none, and that one name never opens two extents.
+ */
+const SYMBOL_PATTERN =
+  "^export\\s+(?:default\\s+)?(?:async\\s+)?(?:function\\s*\\*?|class|const|let|var|type|interface|enum)\\s+([A-Za-z0-9_$]+)";
+
+describe("symbol extents", () => {
+  const symbolPack: Pack = withNode(basePack, {
+    ...basePack.node,
+    id: {
+      strategy: "symbol",
+      symbolPattern: SYMBOL_PATTERN,
+      indexNames: ["index"],
+    },
+  });
+
+  const modulePathPack: Pack = withNode(basePack, {
+    ...basePack.node,
+    id: { strategy: "module-path" },
+  });
+
+  const source = [
+    'import { formatMoney } from "./money";', // 1
+    "", // 2
+    "export function total(items) {", // 3
+    "  return formatMoney(items);", // 4
+    "}", // 5
+    "", // 6
+    "export const LABEL = 'x';", // 7
+  ].join("\n");
+
+  test("partitions a file into one extent per exported symbol", () => {
+    const extracted = extract(symbolPack, file("apps/web/src/total.ts", source));
+
+    expect(extracted.symbols).toEqual([
+      { name: "total", id: "apps/web/src/total.ts#total", startLine: 3, endLine: 6 },
+      { name: "LABEL", id: "apps/web/src/total.ts#LABEL", startLine: 7, endLine: 7 },
+    ]);
+  });
+
+  test("yields no symbols for a pack that declares no symbolPattern", () => {
+    const extracted = extract(modulePathPack, file("apps/web/src/total.ts", source));
+
+    expect(extracted.symbols).toEqual([]);
+  });
+
+  /**
+   * A pack that spells strings, which is what the partition has to be read against: an export
+   * written inside a template literal is a string's contents and not a declaration of the file.
+   */
+  const quotingPack: Pack = {
+    ...withNode(basePack, {
+      ...basePack.node,
+      id: { strategy: "symbol", symbolPattern: SYMBOL_PATTERN, indexNames: ["index"] },
+    }),
+    comments: {
+      line: ["//"],
+      block: [["/*", "*/"]],
+      stringQuotes: ['"', "'", "`"],
+      stringEscape: "\\",
+      multilineQuotes: ["`"],
+    },
+    edges: { import: [{ pattern: "^import\\b.*$", resolve: "module-path" }] },
+  };
+
+  test("opens no extent for an export written inside a string literal", () => {
+    const source = [
+      'import { dep } from "./dep";', // 1
+      "", // 2
+      "export function render() {", // 3
+      "  return `", // 4
+      "export const snippet = 1;", // 5
+      "` + dep();", // 6
+      "}", // 7
+    ].join("\n");
+
+    const extracted = extract(quotingPack, file("src/render.ts", source));
+
+    expect(extracted.symbols).toEqual([
+      { name: "render", id: "src/render.ts#render", startLine: 3, endLine: 7 },
+    ]);
+    // The real consumer of ./dep, rather than a node that is a string's contents.
+    expect(extracted.captures[0]?.owners).toEqual(["src/render.ts#render"]);
+  });
+
+  test("opens an extent at every match, so one name can own two of them", () => {
+    // Declaration merging is ordinary TypeScript: a type and a value, an interface and a function.
+    // Skipping the second match opened no boundary there, so the second declaration's body fell
+    // inside the extent of whatever was declared before it.
+    const extracted = extract(
+      symbolPack,
+      file(
+        "x.ts",
+        [
+          "export type Handler = () => void;", // 1
+          "export const middle = 1;", // 2
+          "export function Handler() {", // 3
+          "  return 2;", // 4
+          "}", // 5
+        ].join("\n"),
+      ),
+    );
+
+    expect(extracted.symbols).toEqual([
+      { name: "Handler", id: "x.ts#Handler", startLine: 1, endLine: 1 },
+      { name: "middle", id: "x.ts#middle", startLine: 2, endLine: 2 },
+      { name: "Handler", id: "x.ts#Handler", startLine: 3, endLine: 5 },
+    ]);
+  });
+
+  test("attributes an import to a repeated name off any of its extents, once", () => {
+    const extracted = extract(
+      quotingPack,
+      file(
+        "x.ts",
+        [
+          'import { dep } from "./dep";', // 1
+          "export type Handler = () => void;", // 2
+          "export const middle = 1;", // 3
+          "export function Handler() { return dep(); }", // 4
+        ].join("\n"),
+      ),
+    );
+
+    // `middle` never touches dep and must not be handed it, and `Handler` is named once however
+    // many extents of it referenced the binding.
+    expect(extracted.captures[0]?.owners).toEqual(["x.ts#Handler"]);
+  });
+});
+
+/**
+ * Which symbols a capture belongs to. An import sits above every extent, so the file's own text is
+ * the only evidence of which export needed it, and a capture inside an extent belongs to that export
+ * and to nothing else. What needs pinning is both halves of that, and that a pack yielding one node
+ * per file writes no owners at all rather than an owners list naming its single node.
+ */
+describe("capture owners", () => {
+  const symbolNode: Pack["node"] = {
+    ...basePack.node,
+    id: { strategy: "symbol", symbolPattern: SYMBOL_PATTERN, indexNames: ["index"] },
+  };
+
+  const ownerPack: Pack = {
+    ...withNode(basePack, symbolNode),
+    edges: { import: [{ pattern: "^import\\b.*$", resolve: "module-path" }] },
+    consumes: [{ symbol: "http-route", pattern: 'fetch\\("([^"]+)"\\)', map: { path: 1 } }],
+  };
+
+  const filePack: Pack = {
+    ...ownerPack,
+    node: { ...basePack.node, id: { strategy: "module-path" } },
+  };
+
+  test("gives an import to the exports that reference what it binds", () => {
+    const source = [
+      'import { formatMoney } from "./money";',
+      'import { parseMoney } from "./parse";',
+      "",
+      "export function total(items) {",
+      "  return formatMoney(items);",
+      "}",
+      "",
+      "export const LABEL = 'x';",
+    ].join("\n");
+
+    const extracted = extract(ownerPack, file("src/total.ts", source));
+    const byLine = new Map(extracted.captures.map((capture) => [capture.line, capture.owners]));
+
+    expect(byLine.get(1)).toEqual(["src/total.ts#total"]);
+    // Nothing references parseMoney, so no export can be said to be the one that needs it.
+    expect(byLine.get(2)).toEqual(["src/total.ts#total", "src/total.ts#LABEL"]);
+  });
+
+  test("gives a capture inside an extent to that symbol alone", () => {
+    const source = [
+      "export function a() {",
+      '  return fetch("/api/one");',
+      "}",
+      "export function b() {}",
+    ].join("\n");
+
+    const extracted = extract(ownerPack, file("src/x.ts", source));
+
+    expect(extracted.consumes[0]?.owners).toEqual(["src/x.ts#a"]);
+  });
+
+  test("gives a side-effect import to every export, because it binds no name to argue from", () => {
+    const source = ['import "./polyfill";', "export const a = 1;", "export const b = 2;"].join(
+      "\n",
+    );
+
+    const extracted = extract(ownerPack, file("src/x.ts", source));
+
+    expect(extracted.captures[0]?.owners).toEqual(["src/x.ts#a", "src/x.ts#b"]);
+  });
+
+  test("leaves owners absent, not empty, for a pack whose file yields one node", () => {
+    const extracted = extract(
+      filePack,
+      file("src/x.ts", 'import { y } from "./y";\nexport const a = fetch("/api/one");'),
+    );
+
+    expect(extracted.captures[0]?.owners).toBeUndefined();
+    expect(extracted.consumes[0]?.owners).toBeUndefined();
+    expect("owners" in (extracted.captures[0] ?? {})).toBe(false);
   });
 });

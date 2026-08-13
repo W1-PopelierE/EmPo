@@ -420,7 +420,7 @@ describe("the alias map a root may carry", () => {
   });
 
   test("refuses a pattern spelled relative, which could never be matched against", () => {
-    // `resolveModulePath` resolves a `./` or `../` specifier against the importing file and answers
+    // `resolveModuleFile` resolves a `./` or `../` specifier against the importing file and answers
     // before it ever looks at this map, so such a key matches nothing forever.
     expect(refusal({ "./lib/money": ["src/lib/money.ts"] })).toContain("./lib/money");
     expect(refusal({ "../shared/*": ["src/shared/*"] })).toContain("../shared/*");

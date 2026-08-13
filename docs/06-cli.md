@@ -240,22 +240,50 @@ graph rather than replace it. A full rebuild is fast enough that nothing has nee
 
 ## `empo query <symbol>`
 
-The core question. Accepts a file path or a short symbol name:
+The core question. Accepts a node id, a repo-relative file path, a path suffix or a short name, tried
+in that order:
 
 ```bash
 empo query apps/api/app/Libraries/Price/PriceCalculator.php
 empo query PriceCalculator          # short name resolves if unambiguous
 empo query Order
+empo query apps/mobile/src/api/client.ts#createOrder   # one export, under a symbol pack
+empo query apps/mobile/src/api/client.ts               # every export that file holds, unioned
 ```
+
+**A path answers for every node the file holds, and that is not a convenience.** Under `fqcn` and
+`module-path` a path names one node and the question does not arise. Under `symbol` a file holding
+four exports holds four nodes, so refusing the path as ambiguous would refuse nearly every path a
+reader can type at a TypeScript repository, and it would do so while saying the answer is
+unknowable, when the answer is simply the union over that file's exports. The radius is unioned
+before it is counted, so a consumer that imports two exports of the file is one consumer and one row
+rather than two.
+
+What is genuinely ambiguous is unchanged and still refused: candidates spanning more than one file.
+There the reader asked about one thing and the graph holds two, and picking either would be this
+command guessing which file was meant. The refusal lists the candidates with their files so the next
+command can be the full id or the full path.
 
 Output (human-readable, and `--json` for machines):
 
 - **fan-in**: how many nodes import/reference this one, counted once per node however many rule
   families found it ([05-graph-model](05-graph-model.md)), which is why a file that imports a
-  component and then renders it is one consumer and one row.
+  component and then renders it is one consumer and one row. A node is what the asked-about pack
+  ids, so under `symbol` the unit being counted is the export: one file whose two exports each
+  reference the target is two consumers, because two things in it would have to be read before the
+  change is safe, and the rows name which two.
 - **flows reached**: every flow this change can reach, across roots, not just the obvious one.
 - **blind flows**: the flows that reach this code but have no value-asserting test, printed in
   capitals, because a wrong result ships silently there.
+- **the reaching tests, counted in files**: the `N tests reach it` beside a flow and the
+  `reached by` lines under `--blind` are both read from `coverage[].testFiles` and never from
+  `testNodes`, which is the same unit `empo review` prints and the one
+  [05-graph-model](05-graph-model.md) fixes for every surface that says "N tests". It only ever
+  mattered under `symbol`: a test file exporting three cases is three test nodes and one file, so
+  counting nodes reports one reaching test as three and inflates the apparent coverage of exactly
+  the flows this command exists to be honest about. Under `fqcn` and `module-path` the two lists are
+  the same reach in two units, which is why the wrong one read as correct for as long as no pack
+  ided by symbol.
 - **top consumers**: the highest-fan-in nodes that depend on this one, each row naming the
   consumer's own kind and the edge family the reference was written in. The two columns are what
   make the list readable once a template can be a sink: a changed Laravel layout is consumed both by
@@ -315,8 +343,10 @@ often a Laravel layout, and it deserves to be: a change to the file every page `
 reach every page. What a reader could not do was tell that from a list printing a count, an id and a
 path. Neither of the two alternatives was taken: holding framework-resolved kinds back would hide the
 very fact the list exists to show, and capping the rows one kind may take would make the top 20
-something other than the widest 20. The path is dropped from a row whose id already is its path,
-which is every node a pack ids by path — the `--json` form keeps both fields either way, since an
+something other than the widest 20. The path is dropped from a row whose id already spells its path,
+which is every node a pack ids by path and every node a `symbol` pack ids by an export, since
+`src/money.ts#formatMoney` carries the path in front of the `#` and the export name is the only part
+of the row a reader did not already have. The `--json` form keeps both fields either way, since an
 agent reading it should not have to know which strategy ided the node.
 
 `--blind` carries its denominator as `flowsConsidered` in the JSON, always: how many flows the graph
@@ -342,6 +372,31 @@ who resolves the kind, not that an instance can never gain an edge — the php `
 `view('orders.show')` and `@extends`, so the blade file they name leaves this list through the
 fan-in test rather than through the filter, while the one rendered by `view($name)`, a view composer
 or a computed `@include` looks exactly like a view nobody renders at all and is still held back.
+
+**What a row is depends on the pack, and under `symbol` a row is an unused export rather than a dead
+file.** A live `src/money.ts` whose `formatMoney` everything imports and whose `parseMoney` nothing
+does yields one orphan row, for `parseMoney`, and no row for the file. That is the more useful of the
+two answers and the more easily misread one: nothing on the row says the file is dead, because the
+file is not, and an agent that deletes a file off an orphan row is now deleting live code rather than
+merely unused code. So the unit is stated on the answer rather than left to be inferred from the
+shape of an id: the
+heading reads `orphans: nothing in the graph references these exports` there and `… references
+these` everywhere else.
+
+**The unit is named only where the whole graph agrees on one**, which is a third case and not a
+rounding of the first two. The heading says `these exports` where **every** node in the graph carries
+a symbol, and not where merely some do, because a monorepo holding a php root beside a TypeScript one
+yields a list whose rows are class names, route files and exports together, and one word cannot be
+true of all three. So `fixtures/acme-platform` prints the unit-neutral heading even though
+`apps/mobile/src/api/client.ts#fetchLoyaltyPoints` sits on it beside
+`Acme\Http\Controllers\AdminController`: the ids on the rows still say which each one is, and the
+heading declines to say it for them. The rule is the one every heading in this tool follows, that a
+summary line may not claim more than the answer under it supports.
+
+The same two fallbacks that widen an import edge widen this list's silence in
+the safe direction: an
+export reached only through a side-effect, dynamic or default import is credited with the fan-in of
+the whole module and so never appears here, which is a floor on what the list claims is unused.
 Measured over a Laravel application the unfiltered rule returned a few hundred candidates and almost
 none of them were dead code: blade views and migrations dominated the list, then the config and
 bootstrap files the framework loads by path, then the policies, factories, seeders and console
@@ -501,6 +556,30 @@ commit and may therefore only fail on a rule its author wrote down, while a revi
 who can weigh a weaker signal, and `guarded` is curated to be gateable while a chain runs through
 files nobody wants gated. None of this adds a flag, and a spine-derived finding is still `impact` or
 `coverage`: the findings schema is unchanged.
+
+**The brief prints one blast radius per changed file, whatever the pack's node-id strategy**, and
+under `symbol` that is a deliberate collapse rather than an oversight. A changed 20-export module
+holds twenty nodes, and printing twenty fan-in blocks for one line in a diff would bury the change
+under its own file. So the file's nodes are resolved together, their radii unioned, and one block
+printed. What the per-export ids buy back is the column beside the path, which names the exports the
+file holds, capped at five with a `+N more` for the rest: the ids all begin with the path already
+printed two columns to the left, so the export names are the only new information the line can
+carry. Where the nodes carry no export name the column falls back to the ids, which under a `fqcn`
+pack is usually the class name and is then the whole answer.
+
+**Usually, and not always.** A `fqcn` pack that declares `fallback: "path"` ids a file holding no
+class by its path, so the id and the path are one string and the column repeats verbatim what is
+already two columns to its left. `fixtures/acme-platform` has the case in
+`apps/api/routes/api.php`, a route file the php pack names by its path because there is no class in
+it to name. The line is not wrong, it is empty of new information, and that is the honest floor of a
+column built out of ids: the fallback exists so those files get a node at all
+([04-language-packs](04-language-packs.md)), and a node ided by its path has no shorter name to
+print. Trimming the repeat would take the column deciding a row deserves nothing, which reads as a
+file whose nodes it could not name.
+
+The tests block names each reaching test **file** once, from `coverage[].testFiles` rather than from
+`testNodes` ([05-graph-model](05-graph-model.md)). A test file exporting three cases is three nodes
+and one file, and a reviewer told "3 tests reach this" would go looking for three files.
 
 **The spines are read from your own checkout, and their coordinates are resolved against the code
 under review**, which on a pull request are two different commits and deliberately so. The map is the
@@ -912,7 +991,8 @@ convention answering, while a fold is the engine guessing a naming style is in p
 corroborates counts as `in no node` rather than `ambiguous` — it was never admitted as a candidate, so
 nothing was weighed — and since the witness is asked per candidate and before the uniqueness test, a
 name two files carry once case is set aside still resolves where the reading file imports exactly one
-of them. `targetKinds` still filters the survivor. On the 186-file React Native application above,
+of them. `targetKinds` narrows whatever the fold admitted before that uniqueness question rather
+than after it, exactly as it does for the exact map. On the 186-file React Native application above,
 whose components live in `src/components/badge.tsx`, `template` went from 3 of 1531 tag references
 resolved to 735 of 1531, and not one of the 1528 misses had been an ambiguity anybody could have
 repaired by renaming a file. **This is why a `names` yield can jump between runs of two empo
@@ -960,7 +1040,7 @@ the component.
 
 A family that refused something adds a clause per refusal it made: `, N ambiguous` for a name several
 nodes carry, `, N in no node` for a name no node carries (a vendor component, a Blade built-in like
-`<x-slot>`), `, N of the wrong kind` for a name in exactly one node of a kind the rule's
+`<x-slot>`), `, N of the wrong kind` for a name every node carrying it holds under a kind the rule's
 `targetKinds` does not list, `, N declared where they are used` for a name the file that wrote
 the reference declares itself, through the pack's `declares` patterns, and
 `, N imported from a package` for a name that file imports from a package the repository depends on,

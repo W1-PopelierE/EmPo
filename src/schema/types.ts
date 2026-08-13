@@ -19,6 +19,13 @@ export interface SymbolRef {
   symbol: string; // "http-route", "event", ...
   key: string; // normalized key, e.g. "POST v1/orders"
   line: number;
+  /**
+   * The nodes this belongs to, for a pack whose file yields more than one. Absent where the file
+   * yields a single node, which is every file of a `fqcn` or `module-path` pack: "all of them" and
+   * "the only one" are the same answer there, and writing it out would put a node id in `graph.json`
+   * for every ref of every pack that never asked for one.
+   */
+  owners?: string[];
 }
 
 export interface GraphNode {
@@ -33,6 +40,13 @@ export interface GraphNode {
   isTest: boolean;
   /** A test that uses one of the pack's assertionTerms. Always false on a non-test node. */
   assertsValue: boolean;
+  /**
+   * The name this node is the export of, for a `symbol`-strategy pack. Absent on a file-level node,
+   * which is every node of a `fqcn` or a `module-path` pack and the node a `symbol` pack's file
+   * yields when its pattern found no export in it. Present is what tells a printer that a path names
+   * several nodes and that saying "export" rather than "file" is the truth about this graph.
+   */
+  symbol?: string;
 }
 
 /** One end-user journey from flows.json. `paths` are repo-relative path prefixes. */
@@ -54,6 +68,19 @@ export interface GraphEdge {
 export interface CoverageInfo {
   flow: string;
   testNodes: string[];
+  /**
+   * The files those nodes live in, deduplicated and sorted. It is the count a reader is owed, because
+   * "3 tests reach this flow" means three test files and never three exported symbols: a pack whose
+   * ids name an export turns one test file that exports three cases into three `testNodes`, and every
+   * printer that reported the length of that list would then claim a suite three times the size of
+   * the one on disk.
+   *
+   * Kept beside `testNodes` rather than replacing it, because the two answer different questions. The
+   * ids are what a reader follows to the code that does the reaching, and the paths are what they
+   * open. Under a pack that yields one node per file the two lists have the same length, which is why
+   * nothing needed this before.
+   */
+  testFiles: string[];
   reaches: boolean;
   assertsValue: boolean;
   blind: boolean; // reaches && !assertsValue
@@ -268,6 +295,12 @@ export interface PackNodeId {
   strategy: NodeStrategy;
   namespacePattern?: string;
   namePattern?: string;
+  /**
+   * How a `symbol`-strategy pack finds one exported symbol. Group 1 is the name. Declared by that
+   * strategy and by no other, because it is the only one whose ids are not derivable from the path
+   * or from a single class declaration.
+   */
+  symbolPattern?: string;
   /** What to do when the strategy cannot produce an id (a file with no class). */
   fallback?: "path";
   /**

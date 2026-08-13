@@ -4,20 +4,52 @@ import { runPackFixtures } from "../../src/commands/pack";
 import { compilePack, compileTestPath, extractFile } from "../../src/engine/extractor";
 import { maskComments } from "../../src/engine/mask";
 import { fixturesDir, loadPack } from "../../src/engine/pack-loader";
-import { resolveModulePath } from "../../src/engine/resolver";
+import { resolveModuleFile } from "../../src/engine/resolver";
 import type { GraphEdge, GraphNode } from "../../src/schema/types";
 
 /**
  * The same gate the php pack passes (docs/04-language-packs.md), against a pack built the other
- * way round: module-path ids instead of class names, no hook family, consumes instead of produces.
+ * way round: per-export ids instead of class names, no hook family, consumes instead of produces.
  * Everything below the snapshot pins a property the snapshot alone would not name.
  */
 describe("typescript pack", () => {
   const { pack, actual } = runPackFixtures("typescript");
   const expected = JSON.parse(readFileSync(`${fixturesDir("typescript")}/expected.json`, "utf8"));
 
-  const node = (id: string): GraphNode | undefined => actual.nodes.find((n) => n.id === id);
-  const from = (id: string): GraphEdge[] => actual.edges.filter((edge) => edge.from === id);
+  /**
+   * The node an id names, or, where the id is a path, the single node that path yields.
+   *
+   * A path stopped being an id when this pack adopted the `symbol` strategy, and most of what the
+   * tests below assert is a file-level fact: a kind read off a path glob, a `lang`, an `isTest`
+   * score. Those questions are still asked of the file and the file still answers them, so spelling
+   * an export name into every one of them would say the assertion is about the export when it is
+   * not. Where a file yields several nodes the question really is ambiguous and this throws rather
+   * than picking one, which is what stops a per-symbol claim being written as a per-file one.
+   */
+  const node = (id: string): GraphNode | undefined => {
+    const exact = actual.nodes.find((n) => n.id === id);
+    if (exact !== undefined) return exact;
+    const ofFile = actual.nodes.filter((n) => n.file === id);
+    if (ofFile.length > 1) {
+      throw new Error(`${id} yields ${ofFile.length} nodes: ${ofFile.map((n) => n.id).join(", ")}`);
+    }
+    return ofFile[0];
+  };
+
+  /**
+   * Every edge leaving a node, or leaving any node of a file where the id is a path. A rule reads
+   * one statement out of one file and the statement is still written once however many exports the
+   * file has, so "what does this file couple to" stays the question a rule is tested by; which
+   * export carries the coupling is asserted by the ids on the far end.
+   */
+  const from = (id: string): GraphEdge[] =>
+    actual.edges.filter((edge) => edge.from === id || edge.from.startsWith(`${id}#`));
+
+  /** Every route one file consumes, spelled with the node that consumes it, since that moved. */
+  const routes = (file: string): string[] =>
+    actual.nodes
+      .filter((n) => n.file === file)
+      .flatMap((n) => n.consumes.map((ref) => `${n.id} ${ref.key}`));
 
   /**
    * Every module specifier the pack's import rules read out of one line, in the order the rules are
@@ -41,7 +73,7 @@ describe("typescript pack", () => {
 
   test("loads with its declared identity", () => {
     expect(pack.name).toBe("typescript");
-    expect(pack.version).toBe("1.10.0");
+    expect(pack.version).toBe("2.0.1");
   });
 
   test("reproduces the expected nodes", () => {
@@ -52,17 +84,112 @@ describe("typescript pack", () => {
     expect(actual.edges).toEqual(expected.edges);
   });
 
-  test("identifies a module by its path and names it by its basename", () => {
-    expect(node("src/shared/money.ts")?.name).toBe("money");
-    // Only the final extension comes off, so a colocated test keeps the .test that names it.
+  test("identifies a node by the symbol it exports, and names it that", () => {
+    // The whole point of the 2.0.1 bump. money.ts exports two names and carries two nodes, neither
+    // of them the file, and each is named by its export rather than by the basename they share.
+    expect(actual.nodes.filter((n) => n.file === "src/shared/money.ts").map((n) => n.id)).toEqual([
+      "src/shared/money.ts#Money",
+      "src/shared/money.ts#formatMoney",
+    ]);
+    expect(node("src/shared/money.ts#formatMoney")?.name).toBe("formatMoney");
+    expect(node("src/shared/money.ts#formatMoney")?.symbol).toBe("formatMoney");
+  });
+
+  /** The extents the shipped symbolPattern reads out of one probe file, as `name[start-end]`. */
+  const extents = (source: string): string[] => {
+    const extracted = extractFile(compilePack(pack), {
+      root: ".",
+      lang: "typescript",
+      file: "src/probe.ts",
+      relPath: "src/probe.ts",
+      source,
+    });
+    if (extracted === null) throw new Error("expected the probe to yield a node");
+    return extracted.symbols.map((s) => `${s.name}[${s.startLine}-${s.endLine}]`);
+  };
+
+  test("starts a decorated export's extent at its first decorator, not at the keyword", () => {
+    // A decorator is written above the declaration it decorates, so an extent opened at `export`
+    // leaves those lines inside the extent of whatever was declared above. The reference scan then
+    // finds the decorator's name there, which is enough to suppress the "nothing references it"
+    // fallback, and the import is handed to the class that happens to sit above rather than to the
+    // one being decorated. That is the standard shape in Angular, NestJS, TypeORM and MobX.
+    const source = [
+      'import { Injectable } from "./di";', // 1
+      "", // 2
+      "export class Alpha {}", // 3
+      "", // 4
+      "@Injectable()", // 5
+      "export class Beta {}", // 6
+    ].join("\n");
+
+    expect(extents(`${source}\n`)).toEqual(["Alpha[3-4]", "Beta[5-7]"]);
+
+    const extracted = extractFile(compilePack(pack), {
+      root: ".",
+      lang: "typescript",
+      file: "src/probe.ts",
+      relPath: "src/probe.ts",
+      source: `${source}\n`,
+    });
+    expect(extracted?.captures[0]?.owners).toEqual(["src/probe.ts#Beta"]);
+  });
+
+  test("takes a decorator that spans lines, which is how Angular and NestJS write one", () => {
+    // The single-line form is the smaller half of the problem: `@Component({ ... })` runs over
+    // three or more lines in every Angular file there is. A continuation line is recognized by
+    // being indented or by opening with a closer, and an `export` at column 0 can never be one, so
+    // no run of decorator lines can swallow the next declaration and cost it its node.
+    expect(
+      extents(
+        [
+          "export const SELECTOR = 'app-cart';", // 1
+          "", // 2
+          "@Component({", // 3
+          "  selector: SELECTOR,", // 4
+          "})", // 5
+          "export class CartComponent {}", // 6
+          "",
+        ].join("\n"),
+      ),
+    ).toEqual(["SELECTOR[1-2]", "CartComponent[3-7]"]);
+  });
+
+  test("names a `const enum` by the enum, not by the keyword that follows const", () => {
+    // `const` and `enum` are both declaration keywords the pattern lists, and `export const enum
+    // Color` is the one place they are written together. Matched by the bare `const` alternative
+    // the capture is the word after it, so the file carried a node called `enum`: an id no import
+    // can name, and an extent named after nothing the file declares.
+    expect(extents("export const enum Color {\n  Red,\n}\nexport const x = 1;\n")).toEqual([
+      "Color[1-3]",
+      "x[4-5]",
+    ]);
+  });
+
+  test("leaves a decorator over something unexported where it was", () => {
+    // The run has to reach an `export` or it is not a prefix of one. A decorated local declaration
+    // opens no extent of its own and must not drag the next export's start line up to it.
+    expect(extents("@decorate()\nconst local = 1;\nexport const after = 2;\n")).toEqual([
+      "after[3-4]",
+    ]);
+  });
+
+  test("falls back to the file where the pattern matches nothing, and names it by its basename", () => {
+    // A test file declares its cases and exports nothing, so the partition finds no extent and the
+    // node is exactly the one this pack yielded at 1.10.0: the strategy narrows what a node is
+    // where it can and never invents one. Only the final extension comes off, so a colocated test
+    // keeps the .test that names it.
     expect(node("src/screens/OrderScreen.test.tsx")?.name).toBe("OrderScreen.test");
+    expect(node("src/screens/OrderScreen.test.tsx")?.symbol).toBeUndefined();
   });
 
   test("drops a vendor import, which names a package and not a file here", () => {
     // OrderScreen imports react and the api client imports axios. Neither is a coupling this
     // repository can break, so neither is an edge.
     expect(actual.edges.some((edge) => edge.to === "react" || edge.to === "axios")).toBe(false);
-    expect(from("src/screens/OrderScreen.tsx")).toHaveLength(3);
+    // Four, not the three this read at 1.10.0: `import { createOrder, fetchOrder }` binds two names
+    // the target file exports, and each is now a node of its own, so one statement is two edges.
+    expect(from("src/screens/OrderScreen.tsx")).toHaveLength(4);
   });
 
   test("resolves a directory import through the barrel, per the pack's indexNames", () => {
@@ -76,23 +203,26 @@ describe("typescript pack", () => {
 
   test("follows a re-export out of the barrel to both components", () => {
     expect(from("src/components/index.ts").map((edge) => edge.to)).toEqual([
-      "src/components/OrderBadge.tsx",
-      "src/components/PriceRow.tsx",
+      "src/components/OrderBadge.tsx#OrderBadge",
+      "src/components/PriceRow.tsx#PriceRow",
     ]);
   });
 
   test("reports a multi-line import on the line the statement starts, not the line it ends", () => {
     // PriceRow.tsx opens its import on line 1 and names the module on line 4. A citation pointing
     // at line 4 would send a reader to a closing brace.
-    const edge = from("src/components/PriceRow.tsx")[0];
+    // The statement binds `formatMoney` and `Money` and so is two edges now, both cited on line 1.
+    const edges = from("src/components/PriceRow.tsx");
 
-    expect(edge?.to).toBe("src/shared/money.ts");
-    expect(edge?.evidence.line).toBe(1);
+    expect(edges.map((edge) => `${edge.to}:${edge.evidence.line}`)).toEqual([
+      "src/shared/money.ts#Money:1",
+      "src/shared/money.ts#formatMoney:1",
+    ]);
   });
 
   test("finds a dynamic import inside a function body", () => {
     const lazy = from("src/screens/OrderScreen.tsx").find((edge) =>
-      edge.to.endsWith("OrderBadge.tsx"),
+      edge.to.startsWith("src/components/OrderBadge.tsx"),
     );
 
     expect(lazy?.evidence.line).toBe(6);
@@ -103,28 +233,31 @@ describe("typescript pack", () => {
     // dynamic import on a line comment, each pointing at a module that does exist. Removing the
     // pack's `comments` block turns both into edges, which is what makes this fixture worth having.
     expect(from("src/legacy/OldOrderScreen.tsx").map((edge) => edge.to)).toEqual([
-      "src/shared/money.ts",
+      "src/shared/money.ts#formatMoney",
     ]);
   });
 
   test("does not let a // inside a string start a comment", () => {
     // health() calls an absolute URL. If the masker took the // in https:// for a comment, the
     // rest of that line would be blanked and the call would vanish from consumes.
-    const keys = node("src/api/orders.ts")?.consumes.map((ref) => ref.key);
-
-    expect(keys).toContain("GET https://api.acme.test/api/v1/health");
+    expect(routes("src/api/orders.ts")).toContain(
+      "src/api/orders.ts#health GET https://api.acme.test/api/v1/health",
+    );
   });
 
-  test("reads a route out of every call shape the pack declares", () => {
-    expect(node("src/api/orders.ts")?.consumes).toEqual([
+  test("reads a route out of every call shape the pack declares, on the export that calls it", () => {
+    // The four shapes, and the second claim this now carries: each route lands on the one export
+    // whose extent holds the call, not on all four. That is the payoff of the strategy on the file
+    // where it is most visible, an api client whose exports call one endpoint each.
+    expect(routes("src/api/orders.ts")).toEqual([
       // The ${id} is the literal text of the route the app calls, not an interpolation this file
       // wants evaluated. Joining it to the {order} the api declares is the bridge's job.
       // biome-ignore-start lint/suspicious/noTemplateCurlyInString: this is source text, quoted
-      { symbol: "http-route", key: "DELETE api/v1/orders/${id}", line: 17 },
-      { symbol: "http-route", key: "GET api/v1/orders/${id}", line: 9 },
+      "src/api/orders.ts#cancelOrder DELETE api/v1/orders/${id}",
+      "src/api/orders.ts#createOrder POST api/v1/orders",
+      "src/api/orders.ts#fetchOrder GET api/v1/orders/${id}",
       // biome-ignore-end lint/suspicious/noTemplateCurlyInString: this is source text, quoted
-      { symbol: "http-route", key: "GET https://api.acme.test/api/v1/health", line: 13 },
-      { symbol: "http-route", key: "POST api/v1/orders", line: 5 },
+      "src/api/orders.ts#health GET https://api.acme.test/api/v1/health",
     ]);
   });
 
@@ -132,10 +265,10 @@ describe("typescript pack", () => {
     // The two fetch rules are deliberately disjoint: one requires the call to close right after
     // the url, the other requires a method in the options object. A url that carries a method
     // must not also be reported as a GET.
-    const keys = node("src/api/orders.ts")?.consumes.map((ref) => ref.key) ?? [];
+    const keys = routes("src/api/orders.ts");
 
-    expect(keys).toContain("POST api/v1/orders");
-    expect(keys).not.toContain("GET api/v1/orders");
+    expect(keys).toContain("src/api/orders.ts#createOrder POST api/v1/orders");
+    expect(keys.some((key) => key.endsWith("GET api/v1/orders"))).toBe(false);
   });
 
   test("indexes a single-file component as a node, named and kinded like any other", () => {
@@ -157,10 +290,12 @@ describe("typescript pack", () => {
   test("reads an import out of an SFC's script block", () => {
     // The edge the gap was about: a component that imports a shared module. The script block is
     // TypeScript and the rule that reads it is the same one that reads a .ts file.
-    const edge = from("src/components/CartLine.vue")[0];
-
-    expect(edge?.to).toBe("src/shared/money.ts");
-    expect(edge?.evidence.line).toBe(2);
+    // Two edges out of the one statement, because it binds `formatMoney` and `Money` and each is
+    // a node of the target file now. Both cite line 2, which is the claim this test is about.
+    expect(from("src/components/CartLine.vue").map((e) => `${e.to}:${e.evidence.line}`)).toEqual([
+      "src/shared/money.ts#Money:2",
+      "src/shared/money.ts#formatMoney:2",
+    ]);
   });
 
   test("resolves an SFC named by the explicit .vue specifier a Vue import carries", () => {
@@ -168,7 +303,7 @@ describe("typescript pack", () => {
     // bundler's default resolve list. candidatePaths yields the bare base first, so this needs no
     // resolver change once .vue files are nodes: it is the first candidate, not the last.
     expect(from("src/screens/CartScreen.ts").map((edge) => edge.to)).toEqual([
-      "src/api/orders.ts",
+      "src/api/orders.ts#fetchOrder",
       "src/components/CartPanel.vue",
       "src/shared/register-handlers.ts",
     ]);
@@ -193,7 +328,8 @@ describe("typescript pack", () => {
       "src/components/CartBadge.vue template",
       "src/components/CartLine.vue import",
       "src/components/CartLine.vue template",
-      "src/shared/money.ts import",
+      "src/shared/money.ts#Money import",
+      "src/shared/money.ts#formatMoney import",
     ]);
   });
 
@@ -224,7 +360,7 @@ describe("typescript pack", () => {
     // repository that hid a browser-side behaviour layer whole, and every file in it was absent
     // from the graph rather than present with no edges, so nothing printed said so.
     expect(node("src/browser/analytics.js")?.lang).toBe("typescript");
-    expect(node("src/browser/tracker.js")?.name).toBe("tracker");
+    expect(node("src/browser/tracker.js")?.name).toBe("trackOrder");
     expect(node("src/browser/widgets/PriceWidget.jsx")?.name).toBe("PriceWidget");
     expect(node("src/browser/instrument.mjs")?.name).toBe("instrument");
     expect(node("src/browser/legacy-bridge.cjs")?.name).toBe("legacy-bridge");
@@ -236,11 +372,15 @@ describe("typescript pack", () => {
     // needs .js on the list is the one pointing *at* JavaScript, which is how the graph learns
     // that typed code depends on the untyped layer.
     expect(from("src/browser/analytics.js").map((edge) => edge.to)).toEqual([
-      "src/browser/tracker.js",
-      "src/shared/money.ts",
+      "src/browser/tracker.js#trackOrder",
+      "src/shared/money.ts#formatMoney",
     ]);
-    expect(from("src/browser/widgets/PriceWidget.jsx")[0]?.to).toBe("src/shared/money.ts");
-    expect(from("src/browser/analytics.test.js")[0]?.to).toBe("src/browser/analytics.js");
+    expect(from("src/browser/widgets/PriceWidget.jsx")[0]?.to).toBe(
+      "src/shared/money.ts#formatMoney",
+    );
+    expect(from("src/browser/analytics.test.js")[0]?.to).toBe(
+      "src/browser/analytics.js#reportTotal",
+    );
   });
 
   test("prefers the TypeScript file where one specifier could name either", () => {
@@ -252,6 +392,13 @@ describe("typescript pack", () => {
     const pack = loadPack("typescript");
     const index = {
       ids: new Set(["src/shared/money.js", "src/shared/money.ts"]),
+      // The candidate walk reads this one, a specifier naming a file and not a node: see NodeIndex
+      // in engine/resolver.ts. Both spellings are a node of their own here, which is what a
+      // module-path pack indexes.
+      byFile: new Map([
+        ["src/shared/money.js", ["src/shared/money.js"]],
+        ["src/shared/money.ts", ["src/shared/money.ts"]],
+      ]),
       byShortName: new Map<string, string[]>(),
       byFoldedName: new Map<string, string[]>(),
       kindById: new Map<string, string>(),
@@ -259,7 +406,7 @@ describe("typescript pack", () => {
     };
 
     expect(
-      resolveModulePath("src/browser/analytics.js", "../shared/money", index, {
+      resolveModuleFile("src/browser/analytics.js", "../shared/money", index, {
         extensions: pack.match.extensions,
         indexNames: pack.node.id.indexNames ?? [],
       }),
@@ -272,7 +419,7 @@ describe("typescript pack", () => {
     // .cjs file has to say a coupling with.
     const edge = from("src/browser/legacy-bridge.cjs")[0];
 
-    expect(edge?.to).toBe("src/browser/tracker.js");
+    expect(edge?.to).toBe("src/browser/tracker.js#trackOrder");
     expect(edge?.evidence.line).toBe(1);
   });
 
@@ -284,8 +431,8 @@ describe("typescript pack", () => {
     const into = actual.edges.filter((edge) => edge.to === "src/shared/register-handlers.ts");
 
     expect(into.map((edge) => [edge.from, edge.evidence.line])).toEqual([
-      ["src/browser/instrument.mjs", 1],
-      ["src/screens/CartScreen.ts", 4],
+      ["src/browser/instrument.mjs#instrument", 1],
+      ["src/screens/CartScreen.ts#CartScreen", 4],
     ]);
   });
 
@@ -351,8 +498,8 @@ describe("typescript pack", () => {
     // CardDocs is asserted here beside it because a rule that stopped matching altogether would buy
     // the module answer too, and would be a worse defect: `resolveName` in engine/resolver.ts filters
     // candidates on kind, so a component miskinded module stops being reachable as a tag target.
-    expect(node("src/react/cards/CardTemplates.tsx")?.kind).toBe("module");
-    expect(node("src/react/cards/CardDocs.tsx")?.kind).toBe("component");
+    expect(node("src/react/cards/CardTemplates.tsx#templates")?.kind).toBe("module");
+    expect(node("src/react/cards/CardDocs.tsx#CardDocs")?.kind).toBe("component");
     // The tag rules read the same blanked view, so the quoted markup produces no edge either.
     expect(from("src/react/cards/CardTemplates.tsx")).toEqual([]);
   });
@@ -364,7 +511,7 @@ describe("typescript pack", () => {
     // whatever the ordering.
     expect(node("src/screens/OrderScreenView.tsx")?.kind).toBe("screen");
     expect(node("src/screens/OrderScreen.tsx")?.kind).toBe("screen");
-    expect(node("src/api/orders.ts")?.kind).toBe("api-client");
+    expect(node("src/api/orders.ts#fetchOrder")?.kind).toBe("api-client");
   });
 
   test("reads a rendered component out of JSX, in both tag forms", () => {
@@ -377,11 +524,11 @@ describe("typescript pack", () => {
         .filter((edge) => edge.kind === "template")
         .map((edge) => `${edge.to}:${edge.evidence.line}`),
     ).toEqual([
-      "src/react/cards/OrderCard.tsx:11",
-      "src/react/cards/OrderList.tsx:18",
+      "src/react/cards/OrderCard.tsx#OrderCard:11",
+      "src/react/cards/OrderList.tsx#OrderList:18",
       // A screen is a tag target too, which is the second kind the rules declare. Drop "screen"
       // from targetKinds and this row goes.
-      "src/screens/OrderScreenView.tsx:17",
+      "src/screens/OrderScreenView.tsx#OrderScreenView:17",
     ]);
   });
 
@@ -399,8 +546,8 @@ describe("typescript pack", () => {
     // 14, and coverage travels along every non-bridge edge, so a test touching this module would
     // start reaching two components it never mounted.
     expect(from("src/react/cards/CardDocs.tsx").map((edge) => `${edge.kind} ${edge.to}`)).toEqual([
-      "import src/react/cards/OrderCard.tsx",
-      "template src/react/cards/OrderCard.tsx",
+      "import src/react/cards/OrderCard.tsx#OrderCard",
+      "template src/react/cards/OrderCard.tsx#OrderCard",
     ]);
   });
 
@@ -419,15 +566,24 @@ describe("typescript pack", () => {
     // OrderRowList renders `<OrderRow />` from a package, so that import resolves to no node and
     // leaves no competing edge, while src/react/types/OrderRow.ts shares the basename. Without
     // targetKinds the tag resolves to the type module and the invented edge is the only thing the
-    // graph says about the pair. `<Total />` is the same two questions in the other order: two
-    // files carry that name, one component and one type module, and a kind filter applied before
-    // the uniqueness test would resolve it. Asking uniqueness first refuses it, which is the only
-    // honest answer about a name this strategy cannot read. The same file's `<CardHeader/>` shows
-    // neither refusal is the rule failing to fire: written with no space before the slash, it
-    // resolves.
+    // graph says about the pair. One node, of a kind no tag may name, so the whole field is
+    // declined and the verdict is `wrong-kind`.
+    //
+    // `<Total />` is the same two questions in the other order, and it is where the kind filter
+    // running before the uniqueness test is visible. Two nodes carry that name, one component and
+    // one type module. The type module could never have been what a tag meant, so removing it is
+    // not picking between two readings, it is dropping one that was never a reading, and the
+    // component is left as the single candidate. It resolves, and the edge below is that.
+    //
+    // The same file's `<CardHeader/>` shows neither refusal is the rule failing to fire: written
+    // with no space before the slash, it resolves.
     expect(
       from("src/react/cards/OrderRowList.tsx").map((edge) => `${edge.to} ${edge.kind}`),
-    ).toEqual(["src/react/cards/CardHeader.tsx import", "src/react/cards/CardHeader.tsx template"]);
+    ).toEqual([
+      "src/react/cards/CardHeader.tsx#CardHeader import",
+      "src/react/cards/CardHeader.tsx#CardHeader template",
+      "src/react/cards/Total.tsx#Total template",
+    ]);
   });
 
   test("reads a tag whose props hold an arrow, which the obvious pattern would have missed", () => {
@@ -435,7 +591,8 @@ describe("typescript pack", () => {
     // at it and matches nothing. Almost every real prop list holds one, so this is the case that
     // decides whether the family is worth having at all.
     const rendered = from("src/react/cards/OrderCard.tsx").find(
-      (edge) => edge.kind === "template" && edge.to.endsWith("PriceWidget.jsx"),
+      (edge) =>
+        edge.kind === "template" && edge.to.startsWith("src/browser/widgets/PriceWidget.jsx"),
     );
 
     expect(rendered?.evidence.line).toBe(17);
@@ -449,12 +606,15 @@ describe("typescript pack", () => {
       from("src/react/cards/OrderCard.tsx")
         .filter((edge) => edge.kind === "template")
         .map((edge) => `${edge.to}:${edge.evidence.line}`),
-    ).toEqual(["src/browser/widgets/PriceWidget.jsx:17", "src/react/cards/CardHeader.tsx:16"]);
+    ).toEqual([
+      "src/browser/widgets/PriceWidget.jsx#PriceWidget:17",
+      "src/react/cards/CardHeader.tsx#CardHeader:16",
+    ]);
     expect(
       from("src/react/cards/OrderList.tsx")
         .filter((edge) => edge.kind === "template")
         .map((edge) => `${edge.to}:${edge.evidence.line}`),
-    ).toEqual(["src/react/cards/CardHeader.tsx:11"]);
+    ).toEqual(["src/react/cards/CardHeader.tsx#CardHeader:11"]);
   });
 
   test("reads no tag out of a generic type argument", () => {
@@ -464,7 +624,7 @@ describe("typescript pack", () => {
     // times, 31 of them generics. Both rules require a closing or self-closing tag instead.
     expect(
       from("src/react/cards/OrderCard.tsx")
-        .filter((edge) => edge.to === "src/react/types/OrderRow.ts")
+        .filter((edge) => edge.to === "src/react/types/OrderRow.ts#OrderRow")
         .map((edge) => edge.kind),
     ).toEqual(["import"]);
   });
@@ -476,31 +636,67 @@ describe("typescript pack", () => {
     // tag rule adds reach where a name is unique and subtracts none where it is not.
     expect(
       from("src/react/Pages/Orders/Index.tsx")
-        .filter((edge) => edge.to.endsWith("cards/Badge.tsx"))
+        .filter((edge) => edge.to.startsWith("src/react/cards/Badge.tsx"))
         .map((edge) => edge.kind),
     ).toEqual(["import"]);
   });
 
   test("counts every verdict a name-resolving rule can reach, refusals included", () => {
     // This corpus is the only place all six verdicts are exercised at once, which is why the tally
-    // is pinned here rather than left to the snapshot. `Badge` and `Total` are ambiguous by
-    // construction, each carried by two files; `OrderRow` is the `targetKinds` refusal, a name in
-    // exactly one node of a kind no tag may name; `Spinner` is the vendor component in no node at
+    // is pinned here rather than left to the snapshot. `Badge` and `PriceRow` are ambiguous by
+    // construction, each carried by two nodes the tag rule's own kinds both admit; `Total` is
+    // carried by two nodes of which only one is a component, so the kind filter removes the other
+    // before the uniqueness test and the name resolves, which is the one verdict that moved when
+    // that filter was put ahead of the count; `OrderRow` is the `targetKinds` refusal, a name in
+    // exactly one node of a kind no tag may name, and it is still `wrong-kind` rather than
+    // `unknown`, because the name is in the graph and what a reader needs to know is that the rule
+    // declined it; `Spinner` is the vendor component in no node at
     // all, so it lands in `unknown` and must never be counted with the ambiguous ones; and
     // CardStory.tsx renders a `<CardFooter />` it declares itself, which `local` counts and the
     // other four must not, because that refusal prevented a wrong edge instead of losing a right
     // one. `CardShelf.tsx` renders the same name without declaring it and resolves through the case
     // fold to `cardFooter.tsx`, which is what says the guard is about the shadowing and not the
-    // name.
+    // name. That last one resolves by exact spelling now rather than through the fold: the file is
+    // `cardFooter.tsx` and the export inside it is `CardFooter`, so per-export ids answer it before
+    // the fold is ever consulted.
     //
     // Pinning the counts is what makes a silent refusal gate-able at all. Every other test here
     // asserts an edge that is present or a list an edge is absent from, and no edge disappears from
     // a diff that was never there: a rule that quietly stopped resolving, or started refusing a
     // name it used to read, moves these numbers and nothing else.
+    //
+    // `PriceRow` is the third ambiguity and it is what adopting the `symbol` strategy cost, recorded
+    // here rather than argued away. At 1.10.0 a node was named by its basename, so
+    // `src/components/PriceRow.tsx` was `PriceRow` and `src/browser/widgets/priceRow.jsx` was
+    // `priceRow`: the exact map held one node of that name and OrderScreenView.tsx's `<PriceRow />`
+    // resolved to it. Both files export a symbol spelled `PriceRow`, so under per-export ids the
+    // exact map holds two and the reference is refused, which costs one resolution and adds the
+    // third ambiguity. The narrowing by `targetKinds` ahead of the uniqueness test pays both back
+    // on a different name: `Total` was ambiguous at 1.10.0 and resolves now, so the tally lands at
+    // resolved 20 with `Badge` and `PriceRow` the only ambiguities. Put that narrowing back after
+    // the count and this corpus answers 19 and 3, `Total` joining the two below.
+    //
+    // The refusal is the honest answer and it costs no coupling. Two nodes really do carry the name
+    // now, and the distinction that used to separate them was the casing of a file name and not
+    // anything either file says about itself. OrderScreenView.tsx imports `PriceRow` from
+    // `../components/PriceRow` on line 1, and that import is still an edge to
+    // `src/components/PriceRow.tsx#PriceRow`, so the pair is coupled in the graph exactly as the
+    // `Badge` row above is: the tag rule adds reach where a name is unique and subtracts none where
+    // it is not. What would be a regression, and is not what happened, is a file-level coupling
+    // present at 1.10.0 and absent now; the snapshot holds none such.
+    //
+    // One of the 20 is there to hold the case fold under a gate, and only that. Adopting the
+    // `symbol` strategy took most of the fold's work away: an export and the tag that renders it
+    // are spelled the same, so the exact map now answers references the fold used to. It is still
+    // load-bearing, because a single-file component exports nothing the symbolPattern matches and
+    // so is still named by its basename. CartTray.vue renders `<CartFlag />` against cartFlag.vue,
+    // whose node is named `cartFlag`, and the import in its script is the corroboration witness the
+    // fold demands. Gut `foldedCandidates` to return an empty list and this count drops to 19 while
+    // unknown rises to 2, which is that one reference and nothing else.
     expect(actual.names).toEqual([
       {
         family: "template",
-        resolved: 19,
+        resolved: 20,
         local: 1,
         vendor: 1,
         unknown: 1,
@@ -508,7 +704,7 @@ describe("typescript pack", () => {
         wrongKind: 1,
         ambiguousNames: [
           { name: "Badge", nodes: 2, references: 1 },
-          { name: "Total", nodes: 2, references: 1 },
+          { name: "PriceRow", nodes: 2, references: 1 },
         ],
       },
     ]);
@@ -520,7 +716,7 @@ describe("typescript pack", () => {
     //
     // `PriceRow` is the redirect. `src/components/PriceRow.tsx` carries the name spelled exactly, so
     // the index answers it confidently and wrongly; the specifier says the name came out of
-    // `@acme/widgets`, and under that directory exactly one node carries it once case is set aside.
+    // `@acme/widgets`, and under that directory exactly one node carries it.
     // That is cal.com's `<Button />` from the internal `@coss/ui`, whose real file is
     // `packages/coss-ui/src/components/button.tsx` while the index answers
     // `packages/ui/components/button/Button.tsx`.
@@ -537,7 +733,10 @@ describe("typescript pack", () => {
         .filter((edge) => edge.kind === "template")
         .map((edge) => edge.to)
         .sort(),
-    ).toEqual(["src/browser/widgets/priceRow.jsx", "src/components/OrderBadge.tsx"]);
+    ).toEqual([
+      "src/browser/widgets/priceRow.jsx#PriceRow",
+      "src/components/OrderBadge.tsx#OrderBadge",
+    ]);
   });
 
   test("reads no tag out of a comment, and none out of a lowercase element", () => {
@@ -546,7 +745,7 @@ describe("typescript pack", () => {
     // the second is JSX's own rule that a capitalized tag is a component and a lowercase one is an
     // element: an `em` edge would be an edge to nothing, and worse, to whatever file is named em.
     expect(from("src/react/cards/OrderList.tsx").map((edge) => edge.to)).not.toContain(
-      "src/react/cards/OrderCard.tsx",
+      "src/react/cards/OrderCard.tsx#OrderCard",
     );
     expect(from("src/react/cards/Badge.tsx")).toEqual([]);
   });
@@ -568,13 +767,25 @@ describe("typescript pack", () => {
     // produced no page symbol at all and its controller consumed a key nothing declared. The join
     // itself never had to change: engine/bridger.ts matches a symbol and a key and reads no
     // extension.
-    expect(node("src/react/Pages/Orders/Index.tsx")?.produces).toEqual([
-      { symbol: "inertia-page", key: "Orders/Index", line: 1 },
+    // Attributed to the page's own export, which is where an owner-less capture lands when the
+    // file yields exactly one node: a page's identity really is the whole file.
+    expect(node("src/react/Pages/Orders/Index.tsx#Index")?.produces).toEqual([
+      {
+        symbol: "inertia-page",
+        key: "Orders/Index",
+        line: 1,
+        owners: ["src/react/Pages/Orders/Index.tsx#Index"],
+      },
     ]);
     // Both dialects, because a tree mid-migration holds both under one Pages/ directory and an
     // alternation that named only one would leave half the pages producing nothing.
-    expect(node("src/react/Pages/Orders/Print.jsx")?.produces).toEqual([
-      { symbol: "inertia-page", key: "Orders/Print", line: 1 },
+    expect(node("src/react/Pages/Orders/Print.jsx#Print")?.produces).toEqual([
+      {
+        symbol: "inertia-page",
+        key: "Orders/Print",
+        line: 1,
+        owners: ["src/react/Pages/Orders/Print.jsx#Print"],
+      },
     ]);
   });
 

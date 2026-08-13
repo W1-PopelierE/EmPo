@@ -18,21 +18,23 @@ $ empo query PriceCalculator
 symbol     Acme\Libraries\Price\PriceCalculator
 file       apps/api/app/Libraries/Price/PriceCalculator.php
 kind       class (php, root apps/api)
-fan-in     3 direct, 8 transitive (the direct ones included)
+fan-in     3 direct, 9 transitive (the direct ones included)
 
 flows reached
   checkout  BLIND  1 test reaches it, none asserts a value
             via apps/api/app/Http/Controllers/CheckoutController.php (1 of 1 node reached)
   orders    covered  3 tests reach it, at least one asserts a value
-            via apps/api/app/Http/Controllers/OrderController.php (4 of 8 nodes reached)
+            via apps/api/app/Http/Controllers/OrderController.php (5 of 10 nodes reached)
 
 top consumers
-     2  Acme\Http\Controllers\CheckoutController  apps/api/app/Http/Controllers/CheckoutController.php:5
-     1  Acme\Http\Controllers\OrderController     apps/api/app/Http/Controllers/OrderController.php:5
+     2  Acme\Http\Controllers\CheckoutController  class import  apps/api/app/Http/Controllers/CheckoutController.php:5
+     1  Acme\Http\Controllers\OrderController     class import  apps/api/app/Http/Controllers/OrderController.php:5
 
 cross-language reach
-  http-route  apps/mobile/src/api/client.ts
+  http-route  apps/mobile/src/api/client.ts#createOrder
               consumes apps/api/routes/api.php  named at apps/mobile/src/api/client.ts:2
+  http-route  apps/mobile/src/api/client.ts#fetchOrder
+              consumes apps/api/routes/api.php  named at apps/mobile/src/api/client.ts:6
 
 names      hook     2 of 2 resolved
 names      template 1 of 1 resolved
@@ -47,6 +49,12 @@ suite green.
 
 The cross-language edge is not an import. The mobile client names a route string the PHP backend
 produces, which no import parser on either side can see.
+
+The two `client.ts#…` rows are one file, answered per export. A PHP file is one class and EmPo ids it
+by that class; a TypeScript file is a module of many exports and EmPo ids it by the export, so a
+consumer list says which of a shared module's functions is on the path to your change rather than
+naming the file and leaving the rest to grep. Ask for the file and you get the union over its
+exports, which is the answer you meant.
 
 The `names` lines are the answer's own yield: a component tag or a Blade `<x-...>` names a file by a
 bare name, and where that name is carried by two files or by none, no edge is written. Both counts

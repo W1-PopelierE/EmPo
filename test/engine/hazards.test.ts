@@ -1,4 +1,8 @@
-import { describe, expect, test } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, test } from "vitest";
+import { buildRoot } from "../../src/engine/build";
 import {
   type CompiledHazards,
   compileHazards,
@@ -461,5 +465,96 @@ describe("declaresDeferral", () => {
     });
 
     expect(declaresDeferral(none, "public $afterCommit = true;")).toBe(false);
+  });
+});
+
+/**
+ * The half of the axis this module does not decide. `findEnclosedDispatches` reads one file and says
+ * what it dispatched, and `declaresDeferral` reads one file and says whether its jobs wait, but
+ * joining the two takes the node index: the dispatch names a job and the deferral is declared in the
+ * job's own file, so nothing can be cancelled until that name is a node. `resolveHazards` in
+ * engine/build.ts is where that join happens, and `buildRoot` is the only door to it.
+ *
+ * The corpus is a temporary directory rather than a fixture, on the reasoning engine/determinism.ts
+ * gives for the same trick: the shipped fixtures hold no transaction at all, and a pack whose markers
+ * are `begin`, `commit` and `defer` teaches the engine no language.
+ */
+const symbolHazardPack: Pack = {
+  name: "symbol-hazard-corpus",
+  version: "0.0.0",
+  match: { extensions: [".txt"] },
+  node: { id: { strategy: "symbol", symbolPattern: "^export ([A-Za-z]+)$" }, kindRules: [] },
+  edges: {},
+  produces: [],
+  consumes: [],
+  tests: { paths: [], assertionTerms: [], assertionExcludes: [] },
+  hazards: {
+    transactions: [{ pattern: "^begin$", extent: "span", endPattern: "^commit$" }],
+    dispatches: [{ pattern: "send\\(([A-Za-z]+)\\)", job: 1 }],
+    deferAtSite: [],
+    deferAtDeclaration: ["^defer$"],
+  },
+};
+
+const corpora: string[] = [];
+
+afterAll(() => {
+  for (const dir of corpora.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+/**
+ * A job file exporting two symbols, so the file yields two nodes and neither of them is the file's
+ * own path. That is the whole point of the pair below: the dispatch resolves to one of the two, and
+ * the deferral is written in the file that holds both.
+ */
+function symbolHazardCorpus(job: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "empo-symbol-hazard-"));
+  corpora.push(dir);
+  writeFileSync(join(dir, "job.txt"), job);
+  writeFileSync(join(dir, "caller.txt"), "begin\nsend(worker)\ncommit\n");
+  return dir;
+}
+
+function buildCorpus(job: string) {
+  return buildRoot({
+    repoRoot: symbolHazardCorpus(job),
+    root: { path: ".", lang: symbolHazardPack.name },
+    pack: symbolHazardPack,
+  });
+}
+
+describe("resolveHazards, a deferral declared by a file that yields many nodes", () => {
+  test("reports the dispatch when the job's file declares nothing", () => {
+    // The control, and the line that makes the case below mean something: without it a change that
+    // cancelled every hazard would pass the assertion that matters.
+    const built = buildCorpus("export worker\nexport sibling\n");
+
+    // Spelled out because the case below is only worth anything if the job's file really does yield
+    // two nodes and neither of them is `job.txt`. The caller exports nothing, so it yields the
+    // file-level node it would have yielded under any strategy.
+    expect(built.nodes.map((node) => node.id)).toEqual([
+      "caller.txt",
+      "job.txt#sibling",
+      "job.txt#worker",
+    ]);
+    expect(built.hazards).toEqual([
+      {
+        file: "caller.txt",
+        line: 2,
+        job: "worker",
+        target: "job.txt#worker",
+        transactionLine: 1,
+      },
+    ]);
+  });
+
+  test("cancels it once that file declares its jobs wait for the commit", () => {
+    // The deferral is one line of the job's file and the dispatch resolves to one export of it, so a
+    // set keyed by the file's own path would hold `job.txt` while the target reads `job.txt#worker`
+    // and the two would never meet. The hazard reported then would be against code that already
+    // waits, which is the fabrication this axis leans away from.
+    const built = buildCorpus("export worker\nexport sibling\ndefer\n");
+
+    expect(built.hazards).toEqual([]);
   });
 });

@@ -243,8 +243,10 @@ describe("indexCommand", () => {
     // the shape this number exists for: a field whose name stayed and whose meaning moved. 5 is
     // `names`, and it is 3's case rather than 4's: an added field announces itself only where its
     // absence and its emptiness mean the same thing, and those are the two answers this one exists
-    // to tell apart.
-    expect(graph.schema).toBe(6);
+    // to tell apart. 6 is 4's case twice over. 7 is 4's case at its widest: a pack may identify a
+    // node by an exported symbol rather than by a file, so `nodes[].id`, `edges`, `fanin` and
+    // `flows` all keep their names and answer per export.
+    expect(graph.schema).toBe(7);
     expect(graph.roots).toEqual([
       { path: "apps/api", lang: "php" },
       { path: "apps/mobile", lang: "typescript" },
@@ -673,8 +675,16 @@ describe("indexCommand", () => {
 // A root that declares aliases
 // ---------------------------------------------------------------------------------------------
 
-const MONEY = "apps/mobile/src/shared/money.ts";
-const RECEIPT_SCREEN = "apps/mobile/src/screens/ReceiptScreen.tsx";
+/**
+ * The path and the node, which stopped being the same string when the TypeScript pack adopted the
+ * `symbol` strategy. A file is still what an alias resolves to and still what a citation names, and
+ * the node the edge lands on is one export of it: `formatMoney` here, because that is the binding
+ * the aliased import below carries. Both spellings are needed and neither substitutes for the other.
+ */
+const MONEY_FILE = "apps/mobile/src/shared/money.ts";
+const MONEY = `${MONEY_FILE}#formatMoney`;
+const RECEIPT_SCREEN_FILE = "apps/mobile/src/screens/ReceiptScreen.tsx";
+const RECEIPT_SCREEN = `${RECEIPT_SCREEN_FILE}#ReceiptScreen`;
 const ALIAS_IMPORT = 'import { formatMoney, type Money } from "@/shared/money";';
 
 /**
@@ -684,7 +694,7 @@ const ALIAS_IMPORT = 'import { formatMoney, type Money } from "@/shared/money";'
  */
 function writeAliasedScreen(): void {
   writeFileSync(
-    join(repo, RECEIPT_SCREEN),
+    join(repo, RECEIPT_SCREEN_FILE),
     [
       ALIAS_IMPORT,
       "",
@@ -744,8 +754,8 @@ describe("a root whose config declares aliases", () => {
     expect(edge?.kind).toBe("import");
     // The evidence is the import line in the importing file, the same as for a relative import: an
     // alias changes which node the specifier names and nothing about where the coupling is written.
-    expect(edge?.evidence.file).toBe(RECEIPT_SCREEN);
-    expect(edge?.evidence.line).toBe(lineOf(RECEIPT_SCREEN, ALIAS_IMPORT));
+    expect(edge?.evidence.file).toBe(RECEIPT_SCREEN_FILE);
+    expect(edge?.evidence.line).toBe(lineOf(RECEIPT_SCREEN_FILE, ALIAS_IMPORT));
 
     // And the answer the whole feature exists for: the shared module's fan-in counts this importer
     // now, where before the aliased half of its importers were invisible.

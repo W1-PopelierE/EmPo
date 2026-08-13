@@ -19,9 +19,11 @@ import type { ReviewFinding } from "../../src/discipline/findings";
 import { reviewWorkflow } from "../../src/discipline/load";
 import type { ChangedFile } from "../../src/engine/diff";
 import { run } from "../../src/engine/git";
-import { GRAPH_PATH } from "../../src/engine/graph";
+import { GRAPH_PATH, GRAPH_SCHEMA, graphPath, serializeGraph } from "../../src/engine/graph";
+import { loadPack } from "../../src/engine/pack-loader";
 import { EmpoError } from "../../src/errors";
 import { buildProgram } from "../../src/program";
+import type { Graph, GraphEdge, GraphNode } from "../../src/schema/types";
 
 /**
  * `empo review` end to end: the brief in phase 1, the verification gate in phase 2.
@@ -413,7 +415,11 @@ describe("the brief", () => {
 
     expect(row).toBeDefined();
     // Both ends and the separator word, the same three things the query pin holds.
-    expect(row ?? "").toContain("apps/mobile/src/api/client.ts consumes apps/api/routes/api.php");
+    // The near end is one export of the client now, not the file: two of its functions call a route
+    // the api declares and the row says which. `#` and not a bare path is the claim to notice.
+    expect(row ?? "").toContain(
+      "apps/mobile/src/api/client.ts#createOrder consumes apps/api/routes/api.php",
+    );
     expect(row ?? "").toMatch(/named at apps\/mobile\/src\/api\/client\.ts:\d+$/);
   });
 
@@ -2016,5 +2022,145 @@ describe("reviewableFiles", () => {
 
     expect(result.files.map((file) => file.path)).toEqual(["apps/api/.empo/generated/graph.json"]);
     expect(result.skipped).toEqual([]);
+  });
+});
+
+/**
+ * A brief over a graph whose ids name exported symbols rather than files.
+ *
+ * The acme fixture cannot ask this question: it is php under a pack that ids by class, where a file
+ * is always one node, so every count in the brief is the same whether it folds per file or per node.
+ * The symbol fixture is TypeScript, and its `src/money.ts` exports two functions.
+ *
+ * The graph is written rather than indexed, because the shipped TypeScript pack still ids by module
+ * path. What is under test here is the brief's folding, which reads a graph and never builds one, so
+ * handing it the graph the pack will produce is the honest input and not a stand-in for one.
+ */
+describe("a changed file that holds several exports", () => {
+  const symbolFixture = fileURLToPath(new URL("../../fixtures/symbol-fixture", import.meta.url));
+
+  const MONEY = "src/money.ts";
+  const SETUP_TEST = "src/setup.test.ts";
+
+  function symbolNode(file: string, symbol: string, isTest = false): GraphNode {
+    return {
+      id: `${file}#${symbol}`,
+      file,
+      root: ".",
+      lang: "typescript",
+      kind: "module",
+      name: symbol,
+      symbol,
+      produces: [],
+      consumes: [],
+      isTest,
+      assertsValue: isTest,
+    };
+  }
+
+  /**
+   * Two exports in the changed file, two in its consumer, and two test cases exported from one test
+   * file. Every pair is there to catch a printer that still counts nodes: one blast-radius block, one
+   * row of export names, and one line naming the test file.
+   */
+  function symbolGraph(): Graph {
+    const nodes = [
+      symbolNode(MONEY, "formatMoney"),
+      symbolNode(MONEY, "parseMoney"),
+      symbolNode("src/total.ts", "LABEL"),
+      symbolNode("src/total.ts", "total"),
+      symbolNode(SETUP_TEST, "addsUp", true),
+      symbolNode(SETUP_TEST, "formats", true),
+    ];
+    const edge = (from: string, to: string, file: string, line: number): GraphEdge => ({
+      from,
+      to,
+      kind: "import",
+      symbol: null,
+      evidence: { file, line },
+    });
+
+    return {
+      schema: GRAPH_SCHEMA,
+      builtAgainst: "",
+      builtAtCommitSubject: "",
+      roots: [{ path: ".", lang: "typescript" }],
+      packs: { typescript: loadPack("typescript").version },
+      stats: { files: 3, nodes: nodes.length, edges: 4, bridgedEdges: 0 },
+      nodes,
+      edges: [
+        edge("src/total.ts#total", `${MONEY}#formatMoney`, "src/total.ts", 1),
+        edge("src/total.ts#total", `${MONEY}#parseMoney`, "src/total.ts", 1),
+        edge(`${SETUP_TEST}#addsUp`, "src/total.ts#total", SETUP_TEST, 1),
+        edge(`${SETUP_TEST}#formats`, "src/total.ts#total", SETUP_TEST, 1),
+      ],
+      flows: { checkout: ["src/total.ts#total"] },
+      fanin: {
+        [`${MONEY}#formatMoney`]: 1,
+        [`${MONEY}#parseMoney`]: 1,
+        "src/total.ts#total": 2,
+      },
+      coverage: {
+        checkout: {
+          flow: "checkout",
+          testNodes: [`${SETUP_TEST}#addsUp`, `${SETUP_TEST}#formats`],
+          testFiles: [SETUP_TEST],
+          reaches: true,
+          assertsValue: true,
+          blind: false,
+        },
+      },
+      hazards: [],
+      hazardsScanned: [],
+      names: [],
+    };
+  }
+
+  function symbolRepo(): string {
+    const dir = mkdtempSync(join(tmpdir(), "empo-review-symbol-"));
+    repos.push(dir);
+    cpSync(symbolFixture, dir, { recursive: true });
+    mkdirSync(dirname(graphPath(dir)), { recursive: true });
+    writeFileSync(graphPath(dir), serializeGraph(symbolGraph()));
+
+    git(dir, ["init", "-b", "main"]);
+    git(dir, ["add", "-A", "-f"]);
+    commit(dir, "the fixture as it stands");
+    return dir;
+  }
+
+  test("prints one blast radius per changed file, not one per export", () => {
+    const dir = symbolRepo();
+    writeFileSync(join(dir, MONEY), "export function formatMoney(): string {\n  return '0';\n}\n");
+
+    const printed = capture(() => reviewCommand(dir, undefined, { workflow: false }));
+
+    // Two nodes changed and one block printed, whose fan-in is the union: the direct count is the
+    // one file that imports both names and not the two edges it wrote, and the transitive count is
+    // that file's export plus the two test cases above it.
+    expect(printed.match(/fan-in/g)?.length).toBe(1);
+    expect(printed).toContain("fan-in 1 direct, 3 transitive");
+  });
+
+  test("names the exports on the changed-files row, since the path is already there", () => {
+    const dir = symbolRepo();
+    writeFileSync(join(dir, MONEY), "export function formatMoney(): string {\n  return '0';\n}\n");
+
+    const printed = capture(() => reviewCommand(dir, undefined, { workflow: false }));
+    const row = printed
+      .split("\n")
+      .find((line) => line.trimStart().startsWith("modified") && line.includes(MONEY));
+
+    expect(row ?? "").toContain("formatMoney, parseMoney");
+  });
+
+  test("names a test file once however many test nodes it exports", () => {
+    const dir = symbolRepo();
+    writeFileSync(join(dir, MONEY), "export function formatMoney(): string {\n  return '0';\n}\n");
+
+    const printed = capture(() => reviewCommand(dir, undefined, { workflow: false }));
+
+    expect(printed.match(/src\/setup\.test\.ts/g)?.length).toBe(1);
+    expect(printed).toContain(`${SETUP_TEST}  asserts a value`);
   });
 });
