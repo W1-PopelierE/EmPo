@@ -56,9 +56,13 @@ layer between the types and the disk format. A rename layer is where drift start
   "produces": [ { "symbol": "http-route", "key": "POST v1/orders", "line": 143 } ],
   "consumes": [ { "symbol": "http-route", "key": "POST v1/orders", "line": 88 } ],
   // a symbol pack's refs also carry  "owners": [ "<node-id>", … ]:  which of the file's nodes the
-  // line was filed under. Absent where the file yields one node, since "all of them" and "the only
-  // one" are the same answer there and writing it out would put an id beside every ref of every
-  // pack that never asked for one.
+  // line was filed under. Absent where the pack's pattern found no export in the file at all, which
+  // is every file of an `fqcn` or `module-path` pack and every file a `symbol` pack's pattern did
+  // not match, since there is no extent to file a line under and writing the file's own id out
+  // again would put an id beside every ref of every pack that never asked for one. A file a symbol
+  // pack matched **once** does carry it, naming that single export on every ref: the key is
+  // present as soon as there is an export to attribute to, not once there are two to choose
+  // between.
   "isTest": false,
   "assertsValue": false
   // a node a `symbol` pack ided by an export carries one key more:
@@ -110,9 +114,11 @@ saying any export of that file may be the one reached. It never narrows a radius
 is the direction the contract at the foot of this doc commits to.
 
 **A file whose pattern matched nothing yields the one file-level node it always did.** In a
-TypeScript repository that is every test file, every Vue single-file component and every barrel, so
-those nodes are ided by path, carry no `symbol` key, and sit in `flows`, `fanin` and `coverage`
-exactly as they did before the strategy existed.
+TypeScript repository test files, Vue single-file components and barrels are the ordinary cases, and
+they are cases rather than a rule: a test file that exports its cases yields a node per export like
+any other file, and a `.vue` writing `export const` at column 0 does too. What decides it is the
+pattern and never the extension. Those nodes are ided by path, carry no `symbol` key, and sit in
+`flows`, `fanin` and `coverage` exactly as they did before the strategy existed.
 
 **`kind`, `isTest` and `assertsValue` are file-level facts copied onto every node of the file.** A
 kind rule reads a path glob and a content pattern over the whole file and an assertion term is looked

@@ -259,7 +259,25 @@ leaves the name itself with none. The extents fold back into one node where node
 A file whose pattern matches nothing yields exactly the file-level node it always did, with no
 `symbol` field on it. Test files, Vue single-file components and barrel files are the ordinary cases
 in a TypeScript repository, and this is why adopting the strategy moved nothing about how they are
-ided, counted or resolved.
+ided, counted or resolved. Ordinary cases and not a rule: a test file that exports its cases yields a
+node per export like any other file, and a `.vue` writing `export const` at column 0 does too. The
+pattern decides it and the extension never does.
+
+**What the shipped pattern does not read is worth the list, because it is not the list the shape of
+it suggests.** An export form the pattern has no branch for keeps its lines inside the neighbouring
+extent, or leaves the file with no export at all and therefore with its file-level node. The forms
+are: a re-export naming what it re-exports (`export * from "./x"`), an `export { a, b }` clause
+listing names declared elsewhere in the file, a declaration written anywhere but column 0, a binding
+destructured out of an expression (`export const {a, b} = …`), a CommonJS `module.exports`, and the
+one that costs the most while being the easiest to leave out, an **anonymous default export**. The
+pattern requires a name after the keyword, so `export default () => {}`, `export default {…}`,
+`export default class {}` and `export default function () {}` all match nothing and the file keeps
+the file-level node it had before. That is the ordinary React and Vue component export form, so it
+reaches far more real files than the `export { a, b }` clause a list like this usually stops at, and
+a reader who assumes per-export ids everywhere in a React codebase will find whole directories still
+ided by path. Every one of them fails in the same safe direction: the export is not a node of its
+own, so a reference to it is attributed to the file or to a neighbouring export, which is too wide
+rather than lost.
 
 **An import is attributed to the exports that reference what it binds.** An import statement is
 written above every declaration in the file, so no extent encloses it, and both of the easy answers
@@ -684,9 +702,9 @@ key does.
 What it resolves is a **path below a root**, never a name looked up in the index of node names. A
 view name is not a short name: `orders/show` is where the file sits, and the only thing no line of
 the repository writes down is which directory that is, which is what the `views` block below says.
-So the strategy shares none of `resolveName`'s four post-uniqueness questions — the kind, the
-reading file's own declarations, its imports, its workspace packages — because not one of them can
-say anything about a path. What it does share is the refusal: a name in no template and a name in
+So the strategy shares none of the four further questions `resolveName` asks around its uniqueness
+test, the kind, the reading file's own declarations, its imports and its workspace packages, because
+not one of them can say anything about a path. What it does share is the refusal: a name in no template and a name in
 several both yield nothing, and both are counted in `names` beside the `short-name` verdicts, since
 a strategy whose yield can quietly be zero is not one anybody can call proven.
 
@@ -736,7 +754,8 @@ the pack is pointed at. Every name these two strategies read reaches one of six 
 per-family record for the same reason:
 `resolved`, `unknown` (the name is in no node at all — a vendor component, a Blade built-in like
 `<x-slot>`), `ambiguous` (the name is in several nodes, so no edge is emitted to any of them),
-`wrong-kind` (the name is in exactly one node, of a kind the rule's `targetKinds` does not list),
+`wrong-kind` (every node carrying the name holds a kind the rule's `targetKinds` does not list, and
+the count that comes back with it is how many were found),
 `local` (the file that wrote the reference declares that name itself, so no other node can be what
 the reference means — the pack's `declares` patterns below are what say so) and `vendor` (that file
 imports the name from a package this repository depends on, so the node carrying it is a basename
@@ -766,9 +785,10 @@ including the ones written in a file whose own import says which is meant. **Mea
 on a synthetic 16-file React tree: adding a second `OrderTable.tsx` under another feature directory
 took it from 12 template edges to 7, in silence, and on a 640-file copy where every component name
 was 40-way ambiguous no template edge resolved at all. It fails safe, which is the right direction.
-`targetKinds` does not soften that measurement at all, because the collapse is decided before any
-kind is consulted: the count is what refuses, and it refuses whether the duplicate is a component, a
-type module or a test.
+`targetKinds` does not soften that measurement at all, and it does not soften it under the shipped
+order either. A second `OrderTable.tsx` is a second component, so both copies survive the kind filter
+and the count is what refuses; the filter only ever removes a candidate the rule could not have
+named, and a duplicate of the very kind the rule asked for is not one of those.
 
 **What the count changed is the silence, and not one of those two measurements.** Stated plainly,
 because the distinction is easy to lose: counting the refusal is not narrowing it. The second
@@ -785,8 +805,9 @@ repository and `badge.tsx` in the next, and both are a component this graph hold
 now keeps a second index keyed by the lower-cased name and `resolveName` asks it **only** where the
 exact spelling is carried by no node at all. The order is the whole of the safety: a repository that
 spells its files as it spells its tags is answered by the exact map and can never be handed an answer
-a fold produced. `targetKinds` still filters whatever survives, so nothing about the two paragraphs
-above is softened for a repository that already resolved. **Measured** on a real 186-file React Native
+a fold produced. `targetKinds` narrows whatever the fold admitted before the uniqueness question is
+put to it, the same order the exact map is read under, so nothing about the two paragraphs above is
+softened for a repository that already resolved. **Measured** on a real 186-file React Native
 application whose components are all named in lowerCamelCase (`src/components/badge.tsx`, rendered
 `<Badge />`): `template` resolved 3 of 1531 tag references before the fold and 735 of 1531 after it,
 with 682 in no node and 114 `local`. Every one of those 1528 earlier misses was `unknown`, not one was
@@ -1744,13 +1765,30 @@ adoption commit itself, with the corpus otherwise untouched, the `template` reco
 beside `Badge` and `Total`. The corpus has grown since, so read that as the arithmetic of the change
 and not as the corpus's current totals, which the snapshot in `fixtures/expected.json` carries.
 
+**Two of those three ambiguities are still ambiguous and the third is not, which is the kind filter
+showing up in the same corpus.** The snapshot now reads `resolved 20, unknown 1, ambiguous 2,
+wrongKind 1, local 1, vendor 1`, and the two names under `ambiguousNames` are `Badge` and `PriceRow`.
+`Total` left the list when the filter moved ahead of the uniqueness test: `src/react/types/Total.ts`
+is kinded `module` and the `template` rule lists only `component` and `screen`, so that node stops
+being a candidate before it can be counted, `src/react/cards/Total.tsx` is left alone, and `<Total />`
+resolves. The corpus gained exactly one edge for it and lost none, which is the whole measurement:
+`src/react/cards/OrderRowList.tsx#OrderRowList -> src/react/cards/Total.tsx#Total`, family
+`template`, cited at `OrderRowList.tsx:17`. Nor did dropping the type module cost anything, since
+`Total.tsx` imports it and that `import` edge was already there and still is.
+
+`Badge` and `PriceRow` are untouched by that change for the reason the paragraph above
+gives about `OrderTable`: both of each pair are kinded `component`, so the filter removes neither and
+the count still refuses. The one recovered and the two kept are the whole shape of what the order
+change does: it drops what the rule could never have named and never picks between two things it
+could.
+
 The refusal is true rather than conservative, which is the reason it is accepted and not repaired.
 Two files really do export that name, the graph really cannot say which one the tag meant, and the
 old answer separated them by a file-naming convention rather than by anything the language declares.
 Nor is the coupling lost: the file that renders the tag imports it, and the import edge still joins
 the pair, so the blast radius holds the same two nodes it held before through a different family.
 What changed is that a reader comparing `names` counts across the 1.x to 2.0.0 bump is comparing two
-different namespaces: under 1.x a short name was a file basename, under 2.0.0 it is an export name,
+different namespaces: under 1.x a short name was a file basename, under 2.x it is an export name,
 and a repository whose files and exports are spelled alike will find names that used to be unique
 carried by two nodes and refused. The honest reading of a `template` count that fell across that
 bump is a remeasure under a stricter namespace and not a regression in the rules, and the pack's

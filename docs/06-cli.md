@@ -565,7 +565,17 @@ printed. What the per-export ids buy back is the column beside the path, which n
 file holds, capped at five with a `+N more` for the rest: the ids all begin with the path already
 printed two columns to the left, so the export names are the only new information the line can
 carry. Where the nodes carry no export name the column falls back to the ids, which under a `fqcn`
-pack is the class name and is the whole answer.
+pack is usually the class name and is then the whole answer.
+
+**Usually, and not always.** A `fqcn` pack that declares `fallback: "path"` ids a file holding no
+class by its path, so the id and the path are one string and the column repeats verbatim what is
+already two columns to its left. `fixtures/acme-platform` has the case in
+`apps/api/routes/api.php`, a route file the php pack names by its path because there is no class in
+it to name. The line is not wrong, it is empty of new information, and that is the honest floor of a
+column built out of ids: the fallback exists so those files get a node at all
+([04-language-packs](04-language-packs.md)), and a node ided by its path has no shorter name to
+print. Trimming the repeat would take the column deciding a row deserves nothing, which reads as a
+file whose nodes it could not name.
 
 The tests block names each reaching test **file** once, from `coverage[].testFiles` rather than from
 `testNodes` ([05-graph-model](05-graph-model.md)). A test file exporting three cases is three nodes

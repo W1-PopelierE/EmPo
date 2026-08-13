@@ -69,7 +69,7 @@ commented-out routes and class names inside block comments. That is fixed in `en
 runtime or distribution cost. The one open argument in tree-sitter's favour was the `symbol` node-id
 strategy, per-export granularity for TypeScript, on the grounds that a grammar reads every export
 form and a regex reads the ones somebody wrote a branch for. That strategy is built and the typescript
-pack ships on it at 2.0.0, so the argument has been taken rather than deferred, and it was taken
+pack ships on it at 2.0.1, so the argument has been taken rather than deferred, and it was taken
 without a parser: a `symbolPattern` reading declarations at column 0, a line partition into extents,
 and imports attributed to the exports that reference what they bind. This is the place the decision
 was to be revisited, so here is the revision.
@@ -78,8 +78,14 @@ What the regex bought is what a partition can buy. It reads the declaration form
 enumerates, in the typescript pack `function`, `class`, `abstract class`, `const`, `let`, `var`,
 `type`, `interface` and `enum`, each written at column 0 and optionally `default` or `async`. What it
 does not read is what a grammar would have: a re-export naming what it re-exports, a declaration not
-at column 0, an `export { a, b }` clause listing names declared elsewhere in the file, and the scope
-that would say where one export's body actually ends. Those are the ceilings, they are stated in
+at column 0, an `export { a, b }` clause listing names declared elsewhere in the file, an
+**anonymous** default export, a binding destructured out of an expression (`export const {a, b} =
+…`), a CommonJS `module.exports`, and the scope that would say where one export's body actually ends.
+The anonymous default is the largest of those in practice and the easiest to leave off a list like
+this, because the pattern demands a name after the keyword and every one of `export default () =>
+{}`, `export default {…}`, `export default class {}` and `export default function () {}` declines to
+give it one: that is the ordinary React and Vue component export, a far wider gap than the
+`export { a, b }` clause it is easy to cite instead. Those are the ceilings, they are stated in
 [04-language-packs](04-language-packs.md) beside the strategy rather than buried here, and every one
 of them fails in the same safe direction: the export is not a node of its own and its file's other
 exports absorb what it declared, so a reference to it is attributed too widely rather than lost.
@@ -424,7 +430,7 @@ export interface NameResolution {
   resolved: number;
   unknown: number;       // the name is in no node: a vendor component, a Blade built-in
   ambiguous: number;     // the name is in several nodes, so no edge is emitted to any of them
-  wrongKind: number;     // one node carries it, of a kind the rule's `targetKinds` does not list
+  wrongKind: number;     // every node carrying it is of a kind the rule's `targetKinds` bars
   local: number;         // the file that wrote the reference declares the name itself
   vendor: number;        // that file imports the name from a package this repository depends on
   ambiguousNames: AmbiguousName[];       // so the count names something a reader can go and fix
@@ -779,7 +785,8 @@ proven before anything depends on it. Order within phase 1:
    every hook fails open where `empo` is not installed, deliberately, which is why `empo check` in CI
    is still the gate that has to hold.
 
-9. **Done: the `symbol` node-id strategy**, and with it the typescript pack at 2.0.0. This is the
+9. **Done: the `symbol` node-id strategy**, and with it the typescript pack's bump to 2.0.0, since
+   shipped as 2.0.1. This is the
    first change that moved what an id *means* rather than what the graph holds, so it is the first
    one whose whole risk was in the surfaces that had quietly assumed one node per file. What landed:
    `node.id.symbolPattern` in the pack contract, refused at compile time when a pack names `symbol`
@@ -1068,9 +1075,18 @@ is safe there for that reason rather than by its own logic. A JSX tag's namespac
 people's packages, so `<View>`, `<Link>` and `<Text>` name nothing here, their vendor imports resolve
 to no node and leave no competing edge, and a local file that happens to share the basename collects
 the coupling instead. `targetKinds` narrows what a name may land on, and the order it is applied in
-was itself the second defect: filtering the candidates before asking whether the name is unique turns
-a refusal into a confident wrong answer, so uniqueness is asked first and the kind filters the
-survivor. Before reusing a strategy in a second language, ask what its namespace is there.
+was itself the second defect, twice over and in both directions. It was first written filter-first,
+measured, and reversed: a `<Link />` naming react-router resolved onto a local `components/Link.tsx`
+because filtering had left it alone against a `util/Link.ts`, which is a confident wrong answer where
+the refusal was merely a missing edge. It is filter-first again now, and what makes that safe is that
+the case which condemned it is answered by the guard built for it since: the reading file imports
+`Link` from a package the repository depends on, so the verdict is `vendor` and no edge is written.
+What forced the reversal back was the `symbol` strategy, which turned the namespace from file
+basenames into every exported name in the repository, where one `export const Modal = ...` in a
+constants file refuses every `<Modal />` in the codebase. Both orders can lose an edge; only
+filter-last loses the ones nothing else records. Before reusing a strategy in a second language, ask
+what its namespace is there, and note that an ordering standing in for a check that does not exist
+yet will be reargued the moment the check does.
 
 ## The name tally, and the silence it ends
 
@@ -1087,9 +1103,10 @@ a file whose own import is unambiguous and whose author could not have known any
 Measured on a synthetic 16-file React tree: a second `OrderTable.tsx` under another feature directory
 took it from 12 template edges to 7, in silence, no hazard, `empo doctor` OK. On a 640-file copy
 where every component name was 40-way ambiguous, zero template edges resolved at all. `targetKinds`
-does not change that arithmetic, and it is worth stating because the paragraph above can be misread
-as saying it does: the ambiguity test runs first, and the kind filter applies to whatever survives
-it.
+does not change that arithmetic under either order, and it is worth stating because the paragraph
+above can be misread as saying it does. The filter runs first and removes only a candidate the rule
+could never have named; a second `OrderTable.tsx` is a second component, so both copies survive it
+and the count is what refuses.
 
 **Two directions were on the table and only one shipped, so say plainly which.** The first was to
 narrow the refusal, by letting an ambiguous name resolve against the imports the same file already
@@ -1186,8 +1203,9 @@ application the same rules then resolved **735 of 1531**, with 795 in no node an
 It is consulted **only** when the exact spelling is in no node, and that ordering is half the safety
 argument rather than an optimization. A repository that spells its files as it spells its tags is
 answered by the exact map on every reference and can never be handed a fold, so it cannot pay for a
-convention it does not use. `targetKinds` still filters the survivor after the uniqueness question, in
-that order, for the reason the paragraph on `<Link />` above gives.
+convention it does not use. `targetKinds` narrows what the fold admitted before the uniqueness
+question is put to it, the same order the exact map is read under, for the reason the paragraph on
+`<Link />` above gives.
 
 **The other half is the `filter`, and it is what a first version of this went without.** A tag spelled
 exactly as a file is the language's own convention answering; a fold is the engine guessing that a
