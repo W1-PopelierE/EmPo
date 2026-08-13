@@ -66,11 +66,29 @@ exactly, so on clean code the two approaches are equivalent. What decided it:
 
 What tree-sitter was genuinely right about was comments, and that defect was real: rules were reading
 commented-out routes and class names inside block comments. That is fixed in `engine/mask.ts` at no
-runtime or distribution cost. The one open argument in tree-sitter's favour is the unimplemented
-`symbol` node-id strategy (per-export granularity for TypeScript), where it extracts 7 of 7 export
-forms against a regex's 4 of 7. If that strategy is ever built, revisit this decision then. There is
-nowhere else to revisit it: a pack is rules and holds no code, so a parser would go in the engine,
-behind that one strategy, and every other pack would go on paying nothing for it.
+runtime or distribution cost. The one open argument in tree-sitter's favour was the `symbol` node-id
+strategy, per-export granularity for TypeScript, on the grounds that a grammar reads every export
+form and a regex reads the ones somebody wrote a branch for. That strategy is built and the typescript
+pack ships on it at 2.0.0, so the argument has been taken rather than deferred, and it was taken
+without a parser: a `symbolPattern` reading declarations at column 0, a line partition into extents,
+and imports attributed to the exports that reference what they bind. This is the place the decision
+was to be revisited, so here is the revision.
+
+What the regex bought is what a partition can buy. It reads the declaration forms the pattern
+enumerates, in the typescript pack `function`, `class`, `abstract class`, `const`, `let`, `var`,
+`type`, `interface` and `enum`, each written at column 0 and optionally `default` or `async`. What it
+does not read is what a grammar would have: a re-export naming what it re-exports, a declaration not
+at column 0, an `export { a, b }` clause listing names declared elsewhere in the file, and the scope
+that would say where one export's body actually ends. Those are the ceilings, they are stated in
+[04-language-packs](04-language-packs.md) beside the strategy rather than buried here, and every one
+of them fails in the same safe direction: the export is not a node of its own and its file's other
+exports absorb what it declared, so a reference to it is attributed too widely rather than lost.
+
+That is why the parser argument stays closed. The cost of a grammar was never the export forms it
+reads, it was a native dependency per language against a pack format that holds no code, and the
+gap it would close here is a wider attribution rather than a missing edge. Nowhere else does the
+question arise: a pack is rules and holds no code, so a parser would go in the engine, behind this
+one strategy, and every other pack would go on paying nothing for it.
 
 ## Repository layout (target state)
 
@@ -341,6 +359,8 @@ export interface SymbolRef {
   symbol: string;        // "http-route", "event", ...
   key: string;           // normalized key, e.g. "POST v1/orders"
   line: number;
+  owners?: string[];     // which of the file's nodes this ref belongs to. Absent = all of them,
+                         // which is every file of a pack that yields one node per file.
 }
 
 export interface GraphNode {
@@ -354,6 +374,7 @@ export interface GraphNode {
   consumes: SymbolRef[];
   isTest: boolean;
   assertsValue: boolean;   // a test using one of the pack's assertionTerms. False on a non-test.
+  symbol?: string;         // the export this node is, for a `symbol` pack. Absent on a file-level node.
 }
 
 /** One end-user journey from flows.json. `paths` are repo-relative path prefixes. */
@@ -375,6 +396,7 @@ export interface GraphEdge {
 export interface CoverageInfo {
   flow: string;
   testNodes: string[];
+  testFiles: string[];   // the same reach in files. What every "N tests" line counts.
   reaches: boolean;
   assertsValue: boolean;
   blind: boolean;        // reaches && !assertsValue
@@ -452,7 +474,8 @@ export interface PackNodeId {
   namespacePattern?: string;
   namePattern?: string;
   fallback?: "path";     // what to do when the strategy cannot produce an id
-  indexNames?: string[]; // module-path: basenames that stand for their own directory ("index")
+  indexNames?: string[]; // module resolution: basenames that stand for their own directory ("index")
+  symbolPattern?: string; // `symbol` only, and required by it: group 1 is one exported name
 }
 
 /** How this language writes comments and string literals, so `engine/mask.ts` can blank comments. */
@@ -755,6 +778,32 @@ proven before anything depends on it. Order within phase 1:
    formatting, which is why "unchanged" is decided on the parsed object and never on the text. And
    every hook fails open where `empo` is not installed, deliberately, which is why `empo check` in CI
    is still the gate that has to hold.
+
+9. **Done: the `symbol` node-id strategy**, and with it the typescript pack at 2.0.0. This is the
+   first change that moved what an id *means* rather than what the graph holds, so it is the first
+   one whose whole risk was in the surfaces that had quietly assumed one node per file. What landed:
+   `node.id.symbolPattern` in the pack contract, refused at compile time when a pack names `symbol`
+   without it; `extractSymbolExtents` in `engine/extractor.ts`, partitioning a file into one line
+   extent per exported name; `owners` on every capture and every `SymbolRef`, attributing a line to
+   the extent that encloses it and an import to the exports that reference what it binds;
+   `NodeIndex.byFile` in `engine/resolver.ts`, because module resolution turns a specifier into a
+   file and under this strategy no file is an id; one edge per bound name rather than one per
+   statement; `CoverageInfo.testFiles` beside `testNodes`; `resolveNodes` and a set-taking
+   `blastRadius` in `commands/query.ts`; one blast-radius block per changed file in
+   `commands/review.ts`; and graph schema 7.
+
+   What it proved: the assumption to hunt for was never spelled `file`, it was spelled `the node`.
+   Five call sites read a path as an id, a node as a file, or a node count as a file count, and every
+   one of them compiled and passed its tests under the old strategy because the two were the same
+   string. The pack fixture snapshot is what caught them, which is the case
+   for a corpus that is regenerated and read rather than asserted against by hand.
+
+   What it cost: one template edge on the pack's own corpus, argued at the end of
+   [04-language-packs](04-language-packs.md). Under a path-shaped id a node's short name was its file
+   basename, under `symbol` it is the export name, and two files exporting one name now collide where
+   two basenames differing only in case did not. That is a stricter namespace rather than a worse
+   rule, and it is the concrete reason the pack version is major and the two sets of `names` counts
+   are not comparable.
 
 Steps 1 through 5 need no network and no real repository. Everything is provable against synthetic
 fixtures, which is exactly the [11-security-boundaries](11-security-boundaries.md) requirement.
