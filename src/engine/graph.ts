@@ -63,8 +63,21 @@ export const LOCK_PATH = ".empo/generated/packs.lock.json";
  * answers apart: a schema 5 graph has no `local` key because nothing asked whether a file declared
  * the name it rendered, and reading that as "nothing did" is a clean bill of health invented out of
  * a field nobody wrote.
+ *
+ * 7 is a meaning change under unchanged names, which is the case this list exists for, and the
+ * widest one yet. A pack may now identify a node by an exported symbol rather than by a file, so
+ * `nodes[].id` can name one export of a file, `edges` point between exports, and `fanin` and `flows`
+ * are keyed by those ids. Every one of those keys is spelled exactly as it was in 6. A repository
+ * whose only pack is TypeScript holds no second pack whose version would signal the drift, so a
+ * graph written before this is indistinguishable from one written after it except by this number,
+ * and a stale one would answer every blast radius with file-level fan-ins reported as per-export.
+ *
+ * It carries an added key too, `coverage[].testFiles`, and that half is `hazards`' case rather than
+ * this one: a schema 6 graph has no `testFiles` because a test file and a test node were the same
+ * thing when it was written, and a reader defaulting the absence to the empty array would report
+ * that nothing tests a flow whose tests it is holding the node ids of.
  */
-export const GRAPH_SCHEMA = 6;
+export const GRAPH_SCHEMA = 7;
 
 export function graphPath(repoRoot: string): string {
   return join(repoRoot, GRAPH_PATH);

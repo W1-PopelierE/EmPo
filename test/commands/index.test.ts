@@ -243,8 +243,10 @@ describe("indexCommand", () => {
     // the shape this number exists for: a field whose name stayed and whose meaning moved. 5 is
     // `names`, and it is 3's case rather than 4's: an added field announces itself only where its
     // absence and its emptiness mean the same thing, and those are the two answers this one exists
-    // to tell apart.
-    expect(graph.schema).toBe(6);
+    // to tell apart. 6 is 4's case twice over. 7 is 4's case at its widest: a pack may identify a
+    // node by an exported symbol rather than by a file, so `nodes[].id`, `edges`, `fanin` and
+    // `flows` all keep their names and answer per export.
+    expect(graph.schema).toBe(7);
     expect(graph.roots).toEqual([
       { path: "apps/api", lang: "php" },
       { path: "apps/mobile", lang: "typescript" },
