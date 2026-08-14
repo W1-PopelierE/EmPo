@@ -1,6 +1,6 @@
 {
   "name": "empo",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Language-agnostic impact and review toolkit that keeps an AI agent honest about a codebase",
   "type": "module",
   "license": "MIT",
