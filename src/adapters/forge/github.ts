@@ -1,6 +1,7 @@
 import { run } from "../../engine/git";
 import { compareStrings } from "../../engine/order";
 import { type EmpoError, environmentError } from "../../errors";
+import { isObject, list, readObject, text } from "../gh-json";
 import type {
   CiResult,
   ForgeAdapter,
@@ -248,28 +249,13 @@ function notJson(attempt: string): EmpoError {
   ]);
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function readObject(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return isObject(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function text(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-function list(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-/** gh nests every author as `{login}`, and a comment from a deleted account has no login at all. */
+/**
+ * gh nests every author as `{login}`, and a comment from a deleted account has no login at all.
+ *
+ * Stays here rather than joining the coercions in gh-json.ts: `"unknown"` is a forge decision, not a
+ * shared one. The github-issues tracker reads a missing login as `""`, and folding the two together
+ * would change what one of the two reports prints.
+ */
 function login(value: unknown): string {
   if (!isObject(value)) return "unknown";
   const name = text(value.login);

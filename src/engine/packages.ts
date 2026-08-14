@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join, posix } from "node:path";
 import { globSync } from "tinyglobby";
-import type { PackPackageSource } from "../schema/types";
+import type { PackPackageSource } from "../schema/pack.schema";
 
 /**
  * What one pass over a repository's manifests says: the package names it depends on and is not

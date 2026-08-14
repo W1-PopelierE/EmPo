@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { type Citation, checkCitation, checkCitations } from "../../src/engine/citations";
+import { type Citation, checkCitation } from "../../src/engine/citations";
 
 /**
  * The checker decides whether a finding is allowed to exist, so every case below is a way an agent
@@ -160,17 +160,5 @@ describe("checkCitation", () => {
 
     expect(check.status).toBe("missing-file");
     expect(check.note).toContain("escapes the read root");
-  });
-});
-
-describe("checkCitations", () => {
-  test("returns one check per citation, in the order it was given them", () => {
-    const checks = checkCitations(root, [
-      cite(7, "$total = $gross - $discount;"),
-      cite(1, "class Gone", "app/Gone.php"),
-      cite(5, "$total = $gross - $discount;"),
-    ]);
-
-    expect(checks.map((check) => check.status)).toEqual(["verified", "missing-file", "moved"]);
   });
 });

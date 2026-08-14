@@ -1,4 +1,4 @@
-import type { HazardExtent, HazardTransactionRule, Pack } from "../schema/types";
+import type { HazardExtent, HazardTransactionRule, Pack } from "../schema/pack.schema";
 import { compareStrings } from "./order";
 
 /**

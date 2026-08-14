@@ -1,6 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { configError } from "../errors";
+import { configError, parseOrThrow, readJson } from "../errors";
 import { configSchema, type EmpoConfig } from "../schema/config.schema";
 
 /** Both locations are supported on purpose, see docs/02-on-disk-layout.md. First match wins. */
@@ -22,14 +22,7 @@ export function findConfigPath(repoRoot: string): string | null {
 
 /** Validate an already-parsed config value. Throws a config error (exit 2) with every issue. */
 export function parseConfig(raw: unknown, source: string): EmpoConfig {
-  const result = configSchema.safeParse(raw);
-  if (result.success) return result.data;
-
-  const details = result.error.issues.map((issue) => {
-    const path = issue.path.join(".");
-    return path ? `${path}: ${issue.message}` : issue.message;
-  });
-  throw configError(`${source} is not a valid EmPo config`, details);
+  return parseOrThrow(configSchema, raw, source, "EmPo config");
 }
 
 export function loadConfig(repoRoot: string): LoadedConfig {
@@ -41,12 +34,5 @@ export function loadConfig(repoRoot: string): LoadedConfig {
     ]);
   }
 
-  let raw: unknown;
-  try {
-    raw = JSON.parse(readFileSync(path, "utf8"));
-  } catch (error) {
-    throw configError(`${path} is not valid JSON`, [(error as Error).message]);
-  }
-
-  return { config: parseConfig(raw, path), path };
+  return { config: parseConfig(readJson(path, path), path), path };
 }

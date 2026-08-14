@@ -1,4 +1,4 @@
-import type { CommentSyntax } from "../schema/types";
+import type { CommentSyntax } from "../schema/pack.schema";
 
 /**
  * Blanks out comments before any pack rule sees the source.
@@ -30,9 +30,11 @@ export function maskComments(
 ): string {
   if (syntax === undefined) return source;
 
-  const line = syntax.line ?? [];
-  const block = syntax.block ?? [];
-  const quotes = syntax.stringQuotes ?? [];
+  // No fallbacks: the schema gives all three `.default([])`, so a parsed syntax always carries
+  // them, empty at worst. `undefined` above is the only absence there is, and it is a whole syntax.
+  const line = syntax.line;
+  const block = syntax.block;
+  const quotes = syntax.stringQuotes;
   const escapeChar = syntax.stringEscape;
   const multiline = syntax.multilineQuotes;
   // Nothing to blank and nothing asked for: the walk could only return the source it was given.

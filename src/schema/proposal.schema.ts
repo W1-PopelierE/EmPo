@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { configError } from "../errors";
+import { parseOrThrow } from "../errors";
 import { flowDefinitionSchema } from "./flows.schema";
 import { spineFileSchema } from "./spine.schema";
 
@@ -43,14 +43,7 @@ export type ProposalFile = z.infer<typeof proposalFileSchema>;
 
 /** Validate an already-parsed proposal value. Throws a config error (exit 2) with every issue. */
 export function parseProposalFile(raw: unknown, source: string): ProposalFile {
-  const result = proposalFileSchema.safeParse(raw);
-  if (result.success) return result.data;
-
-  const details = result.error.issues.map((issue) => {
-    const path = issue.path.join(".");
-    return path ? `${path}: ${issue.message}` : issue.message;
-  });
-  throw configError(`${source} is not a valid EmPo proposal`, details);
+  return parseOrThrow(proposalFileSchema, raw, source, "EmPo proposal");
 }
 
 /** The JSON Schema editors validate against. Generated, never hand-written. */

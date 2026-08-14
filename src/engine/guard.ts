@@ -1,7 +1,7 @@
 import picomatch from "picomatch";
 import type { EmpoConfig } from "../schema/config.schema";
+import type { Pack } from "../schema/pack.schema";
 import type { SpineFile } from "../schema/spine.schema";
-import type { Pack } from "../schema/types";
 import type { ChangedFile } from "./diff";
 import { compileTestPath } from "./extractor";
 import { compareStrings } from "./order";

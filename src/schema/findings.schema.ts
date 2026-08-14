@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ReviewFinding } from "../discipline/findings";
-import { configError } from "../errors";
+import { parseOrThrow } from "../errors";
 
 /**
  * The runtime validator for a findings file (docs/07-review-discipline.md step 5). An agent writes
@@ -39,14 +39,7 @@ export type FindingsFile = z.infer<typeof findingsFileSchema>;
 
 /** Validate an already-parsed findings value. Throws a config error (exit 2) with every issue. */
 export function parseFindingsFile(raw: unknown, source: string): ReviewFinding[] {
-  const result = findingsFileSchema.safeParse(raw);
-  if (result.success) return result.data.findings;
-
-  const details = result.error.issues.map((issue) => {
-    const path = issue.path.join(".");
-    return path ? `${path}: ${issue.message}` : issue.message;
-  });
-  throw configError(`${source} is not a valid EmPo findings file`, details);
+  return parseOrThrow(findingsFileSchema, raw, source, "EmPo findings file").findings;
 }
 
 /** The JSON Schema editors validate against. Generated, never hand-written. */

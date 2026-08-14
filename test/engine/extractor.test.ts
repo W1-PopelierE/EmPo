@@ -7,7 +7,7 @@ import {
 } from "../../src/engine/extractor";
 import type { ScannedFile } from "../../src/engine/scanner";
 import { EmpoError } from "../../src/errors";
-import type { Pack, SymbolRule } from "../../src/schema/types";
+import type { Pack, SymbolRule } from "../../src/schema/pack.schema";
 
 /**
  * Engine tests run on tiny inline packs and hand-made files, per the testing discipline in

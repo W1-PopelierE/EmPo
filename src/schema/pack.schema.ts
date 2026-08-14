@@ -37,6 +37,11 @@ const resolveStrategySchema = z.enum([
   "observer",
   "short-name",
 ]);
+/**
+ * String operations a pack composes, applied per part before a symbol key is assembled and per
+ * capture group before an edge rule's `resolve` strategy reads it. The vocabulary is engine-side
+ * and closed: a pack selects and orders them, it cannot define one.
+ */
 const normalizerSchema = z.enum([
   "upper",
   "lower",
@@ -57,6 +62,8 @@ const GROUPS_REQUIRED: Record<z.infer<typeof resolveStrategySchema>, number> = {
 };
 
 /**
+ * One extraction rule in an `edges.<family>` list. Capture group 1 is the target.
+ *
  * `normalize` runs over every capture group before `resolve` reads it, which is what lets a rule
  * whose call site spells a name differently from its declaration (a Blade `<x-forms.text-input>`
  * against a `Forms\TextInput` class) stay pack data. It is declared here rather than assumed,
@@ -132,21 +139,38 @@ export const extractRuleSchema = z
 const RESOLVES_BY_NAME: z.infer<typeof resolveStrategySchema>[] = ["short-name", "observer"];
 
 /**
- * A named value an enclosing construct contributes to the symbols declared under it
- * (`types.ts`, `ScopeRule`). The two extent forms carry different companions, and each is checked
- * here for the same reason a hazard's is: `balanced` without its delimiter pair would scope
- * nothing, and `file` without the group naming the file would scope every file at once. The second
- * failure invents route prefixes across a whole repository, which is worse than missing one, so
- * both fail at load where the message can name the pack.
+ * A named value that some *enclosing* construct contributes to a symbol declared under it, for the
+ * case where the line that declares the symbol does not carry the whole of its identity. A Laravel
+ * route group's `prefix` is the archetype: `Route::get('orders')` inside `Route::prefix('api')`
+ * answers `/api/orders`, and read on its own the line says `orders`.
+ *
+ * Two forms, because a language spells "under this" two ways:
+ *
+ * - `balanced` is textual containment. The extent runs from the match to the delimiter that closes
+ *   it, counted with the same walk `engine/hazards.ts` uses for a transaction, and every symbol
+ *   whose match sits inside it is scoped. Scopes nest, and nested values compose outermost first.
+ * - `file` is containment by reference: the match names another file, and everything that file
+ *   produces is scoped. A Laravel `RouteServiceProvider` writes exactly this, and it is the reason
+ *   a route file's paths are not the URLs it serves.
+ *
+ * The two extent forms carry different companions, and each is checked here for the same reason a
+ * hazard's is: `balanced` without its delimiter pair would scope nothing, and `file` without the
+ * group naming the file would scope every file at once. The second failure invents route prefixes
+ * across a whole repository, which is worse than missing one, so both fail at load where the
+ * message can name the pack.
  */
 const scopeRuleSchema = z
   .object({
+    /** What a `scopedBy` names to ask for this scope. Several rules may share one name. */
     name: z.string().min(1),
     pattern: regex,
+    /** The capture group holding the value this scope contributes. */
     value: z.number().int().positive(),
     extent: z.enum(["balanced", "file"]),
+    /** `balanced` only: the delimiter pair to count. */
     open: z.string().min(1).optional(),
     close: z.string().min(1).optional(),
+    /** `file` only: the capture group naming the repo-relative file this scope covers. */
     file: z.number().int().positive().optional(),
   })
   .superRefine((rule, ctx) => {
@@ -194,6 +218,7 @@ const scopeRuleSchema = z
  */
 export const symbolRuleSchema = z
   .object({
+    /** "http-route", "event", ... */
     symbol: z.string().min(1),
     /** A regex over the file's source. The usual case: a route registered in code, a call made. */
     pattern: regex.optional(),
@@ -205,19 +230,29 @@ export const symbolRuleSchema = z
      * `pattern`, and the bridge joins the two. Exactly one of the two is set.
      */
     pathPattern: regex.optional(),
+    /** Part name -> capture group. */
     map: z.record(z.string().min(1), z.number().int().positive()),
+    /** Template over parts, e.g. "{method} {path}". Default: parts joined by space. */
     key: z.string().optional(),
     /**
      * One match, several symbols. A construct that registers a family of them in a line writes it
      * here rather than as N copies of one rule differing only in their key template, which is a
      * shape nobody keeps in sync: a fix to the pattern lands in six of the seven.
+     *
+     * A Laravel `Route::resource('orders', ...)` is one line registering seven actions, spelled
+     * here as eight keys: `update` is one route answering both PUT and PATCH, and a key is one
+     * method and one path. Exactly one of key / keys is set.
      */
     keys: z.array(z.string()).min(1).optional(),
     normalize: z.record(z.string().min(1), z.array(normalizerSchema)).optional(),
     /**
-     * What an enclosing construct contributes to one part of this symbol. `join` is required and
-     * not defaulted to "/": a scope is not always a path (a namespace joins on the language's
-     * separator, a route name on a dot), and a default would be the engine guessing at a language.
+     * The enclosing scopes that contribute to one part of this symbol, outermost first. A route
+     * registered inside a prefixed group carries that prefix in the URL it really answers, and
+     * nothing on its own line says so. See `scopeRuleSchema`.
+     *
+     * `join` is required and not defaulted to "/": a scope is not always a path (a namespace joins
+     * on the language's separator, a route name on a dot), and a default would be the engine
+     * guessing at a language.
      */
     scopedBy: z
       .object({
@@ -298,6 +333,10 @@ function templateParts(key: string | undefined): string[] {
  * How the masker (engine/mask.ts) recognizes comments and strings, so a class name or a route
  * inside either is not read as a coupling.
  *
+ * String literals are tracked so the masker knows where a comment does not start; their contents
+ * are blanked only for a rule that declared `maskStrings`, and left as written for every other,
+ * which is what the `string` family and every route path need.
+ *
  * `multilineQuotes` names the quotes whose literal may hold a raw newline. It has to be declared
  * because the two languages a pack can describe disagree: PHP's `'...'` spans lines, JavaScript's
  * `'...'` and `"..."` do not and only its backtick does. Absent means every quote may, which is
@@ -309,6 +348,10 @@ const commentSyntaxSchema = z.object({
   line: z.array(z.string().min(1)).default([]),
   block: z.array(z.tuple([z.string().min(1), z.string().min(1)])).default([]),
   stringQuotes: z.array(z.string().min(1)).default([]),
+  /**
+   * The subset of `stringQuotes` whose literal may hold a raw newline. A pack that says so stops
+   * one stray apostrophe in a Vue template from unmasking the rest of the file.
+   */
   multilineQuotes: z.array(z.string().min(1)).optional(),
   stringEscape: z.string().min(1).optional(),
 });
@@ -316,7 +359,20 @@ const commentSyntaxSchema = z.object({
 /**
  * The optional transaction-hazard axis (docs/04-language-packs.md). Every string here is a marker
  * the engine walks, never a language the engine knows: `engine/hazards.ts` counts delimiters and
- * compares offsets, exactly as `engine/mask.ts` walks pack-declared comment markers.
+ * compares offsets, exactly as `engine/mask.ts` walks pack-declared comment markers. The mechanism
+ * is the engine's and the markers are the pack's, which is the same split engine/mask.ts already
+ * makes for comments: a pack names its delimiters, the engine walks them. No language name appears
+ * in either.
+ *
+ * How a transaction's extent is found once its opening pattern matched has two forms, because the
+ * two ways to open one are structurally different and neither expresses the other.
+ *
+ * `balanced` is the callback form (`DB::transaction(function () { ... })`, or the arrow
+ * `DB::transaction(fn () => ...)` balancing `(`/`)` rather than `{`/`}`): the extent runs from the
+ * match to the delimiter that balances the first `open` after it. `span` is the manual form
+ * (`DB::beginTransaction() ... DB::commit()`): the extent runs to the next `endPattern` match, or to
+ * the end of the file when none arrives, because an unclosed transaction is the worse hazard rather
+ * than a reason to report nothing.
  *
  * The two `extent` forms carry different companions, so each is checked rather than left to a reader
  * of the pack: `balanced` without its delimiter pair would count nothing and report every dispatch
@@ -328,8 +384,10 @@ const hazardTransactionRuleSchema = z
   .object({
     pattern: regex,
     extent: z.enum(["balanced", "span"]),
+    /** `balanced` only: the delimiter pair to count. */
     open: z.string().min(1).optional(),
     close: z.string().min(1).optional(),
+    /** `span` only: what closes the transaction. */
     endPattern: regex.optional(),
   })
   .superRefine((rule, ctx) => {
@@ -352,6 +410,7 @@ const hazardTransactionRuleSchema = z
     }
   });
 
+/** `job` is the 1-based capture group holding the dispatched job's name. */
 const hazardDispatchRuleSchema = z
   .object({ pattern: regex, job: z.number().int().positive() })
   .refine((rule) => rule.job <= groupCount(rule.pattern), {
@@ -359,10 +418,17 @@ const hazardDispatchRuleSchema = z
     path: ["job"],
   });
 
+/**
+ * The optional transaction-hazard axis. A pack populates it or leaves it out, because not every
+ * language or framework has the hazard. Absent means this pack makes no claim, which is why `empo
+ * query --hazards` distinguishes "found none" from "nobody looked".
+ */
 const hazardsSchema = z.object({
   transactions: z.array(hazardTransactionRuleSchema).default([]),
   dispatches: z.array(hazardDispatchRuleSchema).default([]),
+  /** Matched at the dispatch site: this one dispatch waits for the commit. */
   deferAtSite: z.array(regex).default([]),
+  /** Matched in the dispatched job's own file: every dispatch of that job waits. */
   deferAtDeclaration: z.array(regex).default([]),
 });
 
@@ -400,9 +466,16 @@ const aliasSourceSchema = z.object({
  * Where this framework keeps its templates, which is what the `view` strategy resolves a name
  * against. `roots` is matched anywhere in a repo-relative path, so one entry covers both a
  * single-application repository and a monorepo's `apps/api/resources/views`.
+ *
+ * It is the one thing about a rendered template no line of the repository writes down:
+ * `view('orders.show')` names `resources/views/orders/show.blade.php` only because Laravel knows
+ * where views live and what they are called. So the pack says it, exactly as `indexNames` says what
+ * "index" means for a module path, and the engine goes on doing nothing but path arithmetic.
  */
 const viewsSchema = z.object({
+  /** Directory a view name is relative to, matched anywhere in a repo-relative path. */
   roots: z.array(z.string().min(1)).min(1),
+  /** Suffixes a template carries, longest-first is not assumed: the first that matches wins. */
   extensions: z.array(z.string().min(1)).min(1),
 });
 
@@ -525,8 +598,19 @@ export const packSchema = z
         strategy: z.enum(["fqcn", "module-path", "symbol"]),
         namespacePattern: regex.optional(),
         namePattern: regex.optional(),
+        /**
+         * How a `symbol`-strategy pack finds one exported symbol. Group 1 is the name. Declared by
+         * that strategy and by no other, because it is the only one whose ids are not derivable
+         * from the path or from a single class declaration.
+         */
         symbolPattern: regex.optional(),
+        /** What to do when the strategy cannot produce an id (a file with no class). */
         fallback: z.literal("path").optional(),
+        /**
+         * Basenames that stand for their own directory, so a module path naming a folder resolves
+         * to a file. "index" in Node, "__init__" in Python. The pack declares it because it is a
+         * language convention, and an engine that assumed "index" would be assuming Node.
+         */
         indexNames: z.array(z.string().min(1)).optional(),
       }),
       kindRules: z
@@ -582,7 +666,7 @@ export const packSchema = z
                *
                * An enum and not a boolean for the same reason as `resolvedBy`: the useful fact is *who*
                * arrives, so a scheduler or a webhook sender is a sibling value rather than a second
-               * flag.
+               * flag. See src/engine/kinds.ts.
                */
               arrivedBy: z.enum(["user"]).optional(),
             })
@@ -693,12 +777,16 @@ export const packSchema = z
      * left is the set that is not this repository.
      *
      * Declared as field names rather than as values, like `aliasSources` above, so composer's
-     * `require` fills it for php exactly as npm's `dependencies` does for TypeScript.
+     * `require` fills it for php exactly as npm's `dependencies` does for TypeScript. Optional; a
+     * pack that declares none behaves as every pack did before the field existed.
      */
     packages: z
       .object({
+        /** Manifest basename, matched anywhere under the repository ("package.json", "composer.json"). */
         file: z.string().min(1),
+        /** Field holding this package's own name ("name"). */
         name: z.string().min(1),
+        /** Fields whose **keys** are dependency names ("dependencies", "require"). */
         dependencies: z.array(z.string().min(1)).min(1),
       })
       .optional(),
@@ -814,3 +902,40 @@ export const packSchema = z
       });
     }
   });
+
+/**
+ * The pack, as the engine sees it: the parse output and never the file. Inferred rather than
+ * written out beside the schema, because a hand-kept mirror of these rules drifted once already and
+ * TypeScript could not see it — a `.default([])` field the mirror called optional made the engine
+ * guard a value the parser guarantees, and a schema field added without a matching edit reached no
+ * consumer at all. Every other schema in this repository is read this way (config.schema.ts,
+ * spine.schema.ts, flows.schema.ts), and this one is no longer the exception.
+ */
+export type Pack = z.infer<typeof packSchema>;
+
+export type ExtractRule = z.infer<typeof extractRuleSchema>;
+export type Normalizer = z.infer<typeof normalizerSchema>;
+/** How a captured string becomes a target node id. Engine-side, not pack-extensible. */
+export type ResolveStrategy = z.infer<typeof resolveStrategySchema>;
+export type SymbolRule = z.infer<typeof symbolRuleSchema>;
+export type ScopeRule = z.infer<typeof scopeRuleSchema>;
+export type CommentSyntax = z.infer<typeof commentSyntaxSchema>;
+export type PackViews = z.infer<typeof viewsSchema>;
+export type PackAliasSource = z.infer<typeof aliasSourceSchema>;
+export type PackHazards = z.infer<typeof hazardsSchema>;
+export type HazardTransactionRule = z.infer<typeof hazardTransactionRuleSchema>;
+export type HazardDispatchRule = z.infer<typeof hazardDispatchRuleSchema>;
+/** Which of the two shapes above a transaction rule declares. */
+export type HazardExtent = HazardTransactionRule["extent"];
+export type PackNodeId = Pack["node"]["id"];
+export type NodeStrategy = PackNodeId["strategy"];
+export type PackKindRule = Pack["node"]["kindRules"][number];
+/** Who reaches a node of this kind, when it is not an edge the pack's own rules can see. */
+export type KindResolver = NonNullable<PackKindRule["resolvedBy"]>;
+/** Who or what arrives at a node of this kind from outside the code. */
+export type KindArrival = NonNullable<PackKindRule["arrivedBy"]>;
+/**
+ * A manifest this language's package manager writes, described by field names rather than by values
+ * so the engine needs no knowledge of the language it belongs to.
+ */
+export type PackPackageSource = NonNullable<Pack["packages"]>;

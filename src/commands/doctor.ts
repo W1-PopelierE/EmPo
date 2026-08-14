@@ -16,6 +16,7 @@ import {
 } from "../engine/health";
 import { nameLines } from "../engine/names";
 import { configError } from "../errors";
+import { plural } from "../term";
 
 /**
  * `empo doctor`: health check, no changes (docs/06-cli.md). Config validity, graph staleness, and
@@ -246,10 +247,6 @@ export function flowLine(flows: FlowHealth): string {
   }
   const counted = `${unclaimed} of ${plural(files, "non-test file")} claimed by none`;
   return `flows      ${defined} defined, ${counted}`;
-}
-
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 function graphLine(graph: GraphHealth): string {

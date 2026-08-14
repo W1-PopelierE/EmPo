@@ -1,6 +1,7 @@
 import { loadConfig } from "../engine/config";
 import { type CitationDrift, loadSpines, type SpineReport, verifySpines } from "../engine/spines";
 import { gateFailure } from "../errors";
+import { plural } from "../term";
 
 /**
  * `empo verify`: resolve every citation anchor in every spine against current source and report
@@ -113,8 +114,4 @@ function hasDrift(report: SpineReport): boolean {
 
 function total(reports: SpineReport[], field: "soft" | "hard"): number {
   return reports.reduce((count, report) => count + report[field], 0);
-}
-
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }

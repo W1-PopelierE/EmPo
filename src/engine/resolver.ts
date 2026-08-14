@@ -1,6 +1,7 @@
 import { posix } from "node:path";
 import { configError } from "../errors";
-import type { GraphEdge, NameOutcome, NameVerdict, PackViews } from "../schema/types";
+import type { PackViews } from "../schema/pack.schema";
+import type { GraphEdge, NameOutcome, NameVerdict } from "../schema/types";
 import {
   boundNames,
   type Capture,

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { configError, type EmpoError } from "../errors";
 import type { EmpoConfig } from "../schema/config.schema";
 import { adapterLines } from "./agents";
@@ -214,8 +215,11 @@ export function mergeSettings(existing: string | null, entries: HookEntries): Se
   const parsed = parseSettings(existing);
   const { merged, removed } = withHooks(parsed, entries);
 
+  // Compared as parsed documents rather than as printed text: key order is not meaning in JSON, so
+  // a file that says the same thing in a different order is unchanged and must be left byte for byte
+  // as the human wrote it.
   const text =
-    existing !== null && sameJson(parsed, merged)
+    existing !== null && isDeepStrictEqual(parsed, merged)
       ? existing
       : `${JSON.stringify(merged, null, 2)}\n`;
   return { text, removed };
@@ -348,7 +352,7 @@ function replaced(one: Taken, events: Record<string, unknown>): boolean {
     if (!isRecord(group) || !Array.isArray(group.hooks)) return false;
     const matcher = typeof group.matcher === "string" ? group.matcher : undefined;
     if (matcher !== one.matcher) return false;
-    return group.hooks.some((entry) => sameJson(entry, one.entry));
+    return group.hooks.some((entry) => isDeepStrictEqual(entry, one.entry));
   });
 }
 
@@ -358,27 +362,6 @@ function report(one: Taken): RemovedHook {
   return one.matcher === undefined
     ? { event: one.event, command }
     : { event: one.event, matcher: one.matcher, command };
-}
-
-/**
- * Deep equality over parsed JSON. Key order is not meaning in JSON, which is the whole reason the
- * "unchanged" decision is made here and not on the printed text.
- */
-function sameJson(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-    return a.every((value, index) => sameJson(value, b[index]));
-  }
-
-  if (isRecord(a) && isRecord(b)) {
-    const keys = Object.keys(a);
-    if (keys.length !== Object.keys(b).length) return false;
-    return keys.every((key) => Object.hasOwn(b, key) && sameJson(a[key], b[key]));
-  }
-
-  return false;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

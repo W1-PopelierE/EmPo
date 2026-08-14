@@ -18,7 +18,7 @@ import type {
   Hazard,
   NameResolution,
 } from "../schema/types";
-import { columnWidth } from "../term";
+import { columnWidth, plural } from "../term";
 
 /**
  * `empo query`: the blast-radius answer (docs/06-cli.md). Every line it prints is a lookup in the
@@ -726,10 +726,6 @@ function namesRead(graph: Graph): NameResolution[] {
         report.vendor >
       0,
   );
-}
-
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 /**

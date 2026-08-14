@@ -9,7 +9,7 @@ import {
   declaresDeferral,
   findEnclosedDispatches,
 } from "../../src/engine/hazards";
-import type { CommentSyntax, Pack, PackHazards } from "../../src/schema/types";
+import type { CommentSyntax, Pack, PackHazards } from "../../src/schema/pack.schema";
 
 /**
  * A hazard is a queued job dispatched from inside a database transaction without waiting for the

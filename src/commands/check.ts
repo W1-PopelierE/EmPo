@@ -9,6 +9,7 @@ import {
 } from "../engine/guard";
 import { loadSpines } from "../engine/spines";
 import { configError, environmentError, gateFailure } from "../errors";
+import { plural } from "../term";
 
 /**
  * `empo check`: the commit gate (docs/06-cli.md). A staged change that edits a spine's guarded files
@@ -310,8 +311,4 @@ function report(options: CheckOptions, view: CheckFacts): void {
 
 function excerpt(text: string): string {
   return text.length > 60 ? `${text.slice(0, 60)}...` : text;
-}
-
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }

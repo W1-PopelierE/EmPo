@@ -2,9 +2,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EMBEDDED_PACKS, isEmbeddedBuild } from "../embedded";
-import { configError } from "../errors";
-import { packSchema } from "../schema/pack.schema";
-import type { Pack } from "../schema/types";
+import { configError, parseOrThrow } from "../errors";
+import { type Pack, packSchema } from "../schema/pack.schema";
 import { compareStrings } from "./order";
 
 let roots: string[] | null = null;
@@ -94,6 +93,8 @@ export function loadPack(name: string): Pack {
   // embedded pack has no file, so it is named as what it is rather than as a path that is not there.
   const file = embedded === undefined ? join(packDir(name), "pack.json") : `pack "${name}"`;
 
+  // Not `readJson`: an embedded pack was compiled into this build and has no file to read, so the
+  // string is already in hand and only the parse is shared. The message is the same one either way.
   let raw: unknown;
   try {
     raw = JSON.parse(embedded ?? readFileSync(file, "utf8"));
@@ -101,20 +102,11 @@ export function loadPack(name: string): Pack {
     throw configError(`${file} is not valid JSON`, [(error as Error).message]);
   }
 
-  const result = packSchema.safeParse(raw);
-  if (!result.success) {
-    throw configError(
-      `${file} is not a valid pack`,
-      result.error.issues.map((issue) => {
-        const path = issue.path.join(".");
-        return path ? `${path}: ${issue.message}` : issue.message;
-      }),
-    );
+  const pack = parseOrThrow(packSchema, raw, file, "pack");
+
+  if (pack.name !== name) {
+    throw configError(`${file} declares name "${pack.name}" but lives in packs/${name}`);
   }
 
-  if (result.data.name !== name) {
-    throw configError(`${file} declares name "${result.data.name}" but lives in packs/${name}`);
-  }
-
-  return result.data;
+  return pack;
 }

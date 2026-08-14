@@ -1,6 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { configError } from "../errors";
+import { parseOrThrow, readJson } from "../errors";
 import { normalizeRepoPath } from "../schema/config.schema";
 import { flowsFileSchema } from "../schema/flows.schema";
 import type { FlowDefinitions, GraphNode } from "../schema/types";
@@ -17,25 +17,7 @@ export function loadFlows(repoRoot: string, relPath: string): FlowDefinitions {
   const path = join(repoRoot, relPath);
   if (!existsSync(path)) return {};
 
-  let raw: unknown;
-  try {
-    raw = JSON.parse(readFileSync(path, "utf8"));
-  } catch (error) {
-    throw configError(`${path} is not valid JSON`, [(error as Error).message]);
-  }
-
-  const result = flowsFileSchema.safeParse(raw);
-  if (!result.success) {
-    throw configError(
-      `${path} is not a valid flows file`,
-      result.error.issues.map((issue) => {
-        const location = issue.path.join(".");
-        return location ? `${location}: ${issue.message}` : issue.message;
-      }),
-    );
-  }
-
-  return result.data.flows;
+  return parseOrThrow(flowsFileSchema, readJson(path, path), path, "flows file").flows;
 }
 
 /**

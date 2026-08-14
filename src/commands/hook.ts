@@ -11,6 +11,7 @@ import {
 import { guardsPath } from "../engine/guard";
 import { healthReport, quietProbes } from "../engine/health";
 import { loadSpines } from "../engine/spines";
+import { plural } from "../term";
 import { checkFacts, describeFailure, failedSpines, wantedPaths, wantedTerms } from "./check";
 
 /**
@@ -437,8 +438,4 @@ async function readStdin(): Promise<string> {
   } catch {
     return "";
   }
-}
-
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }

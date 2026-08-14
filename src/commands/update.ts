@@ -1,8 +1,8 @@
-import { resolve } from "node:path";
 import { loadConfig } from "../engine/config";
 import { writeAgents } from "../host/agents";
 import { type ClaudeFile, writeClaude } from "../host/claude";
 import { writeCodex } from "../host/codex";
+import { relativeTo } from "../term";
 
 /**
  * `empo update`: regenerate the host instruction files from the shipped discipline plus this
@@ -72,9 +72,4 @@ function printRemoved(files: ClaudeFile[]): void {
   console.log("           does not recognize, or expect this every run. After a empo upgrade that");
   console.log("           changed a command, this is the old spelling and needs nothing.");
   console.log("");
-}
-
-function relativeTo(repoRoot: string, path: string): string {
-  const prefix = `${resolve(repoRoot)}/`;
-  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
 }

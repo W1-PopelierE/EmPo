@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
 import { packageOf, readPackages } from "../../src/engine/packages";
-import type { PackPackageSource } from "../../src/schema/types";
+import type { PackPackageSource } from "../../src/schema/pack.schema";
 
 /**
  * The one fact that separates a third-party import from a workspace one, and it is read off disk, so

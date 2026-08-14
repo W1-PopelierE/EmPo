@@ -1,7 +1,7 @@
 import { basename, dirname } from "node:path";
 import { globSync } from "tinyglobby";
 import { configError } from "../errors";
-import type { Pack } from "../schema/types";
+import type { Pack } from "../schema/pack.schema";
 import { run } from "./git";
 import { compareStrings } from "./order";
 import { installedPacks, loadPack } from "./pack-loader";

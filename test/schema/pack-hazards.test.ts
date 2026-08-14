@@ -9,8 +9,8 @@ import {
 import { maskComments } from "../../src/engine/mask";
 import { fixturesDir, loadPack } from "../../src/engine/pack-loader";
 import { normalizeFqcn } from "../../src/engine/resolver";
+import type { HazardExtent, HazardTransactionRule } from "../../src/schema/pack.schema";
 import { packSchema } from "../../src/schema/pack.schema";
-import type { HazardExtent, HazardTransactionRule } from "../../src/schema/types";
 
 /**
  * The php pack's transaction-hazard markers, read off the pack the real loader returns.

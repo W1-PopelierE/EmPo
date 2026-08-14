@@ -244,13 +244,9 @@ export const downloadAsset: AssetDownloader = async (url, onProgress) => {
     onProgress(received, total);
   }
 
-  const bytes = new Uint8Array(received);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
+  // A Buffer is a Uint8Array, so the declared return type still holds. `received` is passed as the
+  // total so the concat allocates once, and it is counted anyway: onProgress reports it per chunk.
+  return Buffer.concat(chunks, received);
 };
 
 /**
