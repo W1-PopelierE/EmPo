@@ -301,6 +301,18 @@
       "assertsValue": false
     },
     {
+      "id": "Acme\\Providers\\RouteServiceProvider",
+      "file": "app/Providers/RouteServiceProvider.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "RouteServiceProvider",
+      "produces": [],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
       "id": "Acme\\Tests\\Feature\\LivenessTest",
       "file": "tests/Feature/LivenessTest.php",
       "root": ".",
@@ -466,6 +478,157 @@
           "symbol": "http-route",
           "key": "POST api/v1/orders",
           "line": 6
+        }
+      ],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "routes/app.php",
+      "file": "routes/app.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "route-file",
+      "name": "app",
+      "produces": [
+        {
+          "symbol": "http-route",
+          "key": "GET api/ping",
+          "line": 8
+        }
+      ],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "routes/scopes.php",
+      "file": "routes/scopes.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "route-file",
+      "name": "scopes",
+      "produces": [
+        {
+          "symbol": "http-route",
+          "key": "DELETE crates/*",
+          "line": 59
+        },
+        {
+          "symbol": "http-route",
+          "key": "DELETE pallets/*",
+          "line": 60
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET admin/settings/flags",
+          "line": 47
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET after-the-group",
+          "line": 67
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET billing/invoices",
+          "line": 15
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET closed/inside",
+          "line": 65
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET crates",
+          "line": 59
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET crates/*",
+          "line": 59
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET crates/*/edit",
+          "line": 59
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET crates/create",
+          "line": 59
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET imports/batches",
+          "line": 39
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET masked",
+          "line": 73
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET ops/health",
+          "line": 28
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET pallets",
+          "line": 60
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET pallets/*",
+          "line": 60
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET reports/daily",
+          "line": 23
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET shop/crates",
+          "line": 9
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET unprefixed",
+          "line": 54
+        },
+        {
+          "symbol": "http-route",
+          "key": "PATCH crates/*",
+          "line": 59
+        },
+        {
+          "symbol": "http-route",
+          "key": "PATCH pallets/*",
+          "line": 60
+        },
+        {
+          "symbol": "http-route",
+          "key": "POST crates",
+          "line": 59
+        },
+        {
+          "symbol": "http-route",
+          "key": "POST pallets",
+          "line": 60
+        },
+        {
+          "symbol": "http-route",
+          "key": "PUT crates/*",
+          "line": 59
+        },
+        {
+          "symbol": "http-route",
+          "key": "PUT pallets/*",
+          "line": 60
         }
       ],
       "consumes": [],
@@ -1024,6 +1187,16 @@
       "evidence": {
         "file": "routes/api.php",
         "line": 13
+      }
+    },
+    {
+      "from": "routes/scopes.php",
+      "to": "Acme\\Http\\Controllers\\OrderController",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "routes/scopes.php",
+        "line": 3
       }
     },
     {
