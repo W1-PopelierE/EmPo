@@ -45,3 +45,20 @@ in `test/schema/pack-hazards.test.ts` under "the accepted over-report".
 The rule to apply: the queue rules anchored to `Mail::`, `Queue::` and `Notification::` are anchored
 so a namespace-qualified lookalike is refused, and `->notify(` deliberately is not. Grep for
 `the accepted over-report` before raising this again.
+
+## A loop over a pack-supplied separator is bounded by the schema, not by the loop
+
+`joinScoped` in `src/engine/extractor.ts` trims a `scopedBy.join` off both ends of every piece with
+two unguarded `while` loops, and an empty `join` would spin either of them forever: `"x".startsWith("")`
+is true and `slice(0)` returns the same string. A reviewer reading the function alone concludes the
+build can hang with no diagnostic, and reports it as critical. It cannot: `join` is
+`z.string().min(1)` inside `scopedBy`, so a pack declaring an empty separator is refused at load,
+where the message names the pack. Every pack reaches the engine through `loadPack`, which returns
+only what the schema validated, so there is no path that puts an unvalidated `join` in front of that
+loop.
+
+The rule to apply, and it generalizes past this one function: before flagging an unbounded loop or a
+missing guard over a value that came out of a pack, read the field's zod rule in
+`src/schema/pack.schema.ts` first. This contract answers at load deliberately and repeatedly, and a
+guard added downstream for a value the schema already refuses is dead code that reads like a real
+defence. Grep for the field name in `pack.schema.ts` before raising this again.
