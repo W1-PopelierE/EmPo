@@ -286,7 +286,7 @@ export function extractFile(
   const ownersAt = ownerAttributor(symbols, source);
   // The same masked view every rule below reads: a route group inside a commented-out block encloses
   // nothing, and neither does the route inside it.
-  const scopesAt = scopeAttributor(compiled.scopes, source, fileScopes);
+  const scopesAt = scopeAttributor(compiled.scopes, source, codeOnly, fileScopes);
 
   return {
     file: scanned.file,
@@ -429,7 +429,15 @@ function wantsCodeOnly(compiled: CompiledPack): boolean {
     // worse: `declares` reading a string invents a local name that suppresses an edge, while the
     // partition reading one invents a node id and writes it into `graph.json`, then hands that
     // invented node the imports the export whose body held the string actually needed.
-    compiled.symbolRegex !== undefined
+    compiled.symbolRegex !== undefined ||
+    // A `balanced` scope counts its delimiters here rather than in the raw source, because a scope's
+    // reach is the one thing a *typo inside an unrelated string* can silently shorten. Measured: a
+    // Laravel route file wrote `Route::post('bookings/{booking}/print}', …)`, one stray brace in a
+    // URL, and the group prefix stopped applying 60 routes early — every route below it came out
+    // with a key that is short by a segment and looks exactly like a route. The value the scope
+    // contributes is still captured from the view that has its strings, since `'prefix' => 'api'`
+    // is a string literal; only the counting moves, and both views share every offset.
+    compiled.scopes.some((rule) => rule.rule.extent === "balanced")
   );
 }
 
@@ -857,6 +865,7 @@ interface ScopeExtent {
 function scopeAttributor(
   rules: CompiledScopeRule[],
   source: string,
+  codeOnly: string,
   fileScopes: ReadonlyMap<string, string[]>,
 ): ScopeAttributor {
   const extents: ScopeExtent[] = [];
@@ -868,7 +877,10 @@ function scopeAttributor(
         name: rule.rule.name,
         value: match.groups[rule.rule.value] ?? "",
         start: match.index,
-        end: balancedEnd(source, matchEnd, rule.rule.open ?? "", rule.rule.close ?? ""),
+        // Matched over `source`, which still holds the string the value is written in, and counted
+        // over `codeOnly`, where a delimiter inside a string cannot end the extent early. Blanking
+        // preserves length, so the offset the match gives is the same offset in both.
+        end: balancedEnd(codeOnly, matchEnd, rule.rule.open ?? "", rule.rule.close ?? ""),
       });
     }
   }
@@ -892,8 +904,17 @@ function scopeAttributor(
  * all to see: every path in that file is short by a segment and each one is a well-formed route.
  *
  * The pass reads only the scope patterns, over sources `scanRoot` has already read, so it costs a
- * regex sweep and no I/O. Sorted by the naming file and then by offset, so two providers naming one
+ * regex sweep and no I/O. Sorted by the naming file and then by offset, so two constructs naming one
  * route file contribute in an order that does not depend on directory order.
+ *
+ * **The chain is followed, not just its last link.** A file that names another may itself have been
+ * named, and the value it passes on is then the whole chain rather than its own segment: Laravel 11
+ * mounts `routes/v2.php` under `v2` from `bootstrap/app.php`, and `routes/v2.php` mounts
+ * `routes/v2_admin.php` under `admin`, so a route in the admin file answers `/v2/admin/…` and a
+ * resolver stopping at one link would key it `admin/…`. That is the same defect the block exists to
+ * fix, one level further out, and it looks just as much like a route. Resolved outermost first and
+ * memoized; a file that reaches itself contributes nothing rather than looping, because a mounting
+ * cycle is a repository defect and inventing an infinite prefix for it helps nobody.
  *
  * **One root.** The map is keyed by the repo-relative path a match names, but only files this root
  * scanned are ever looked up in it, so a provider in one root naming a route file in another
@@ -904,10 +925,11 @@ export function collectFileScopes(
   compiled: CompiledPack,
   files: readonly { file: string; relPath: string; source: string }[],
 ): Map<string, Map<string, string[]>> {
-  const byFile = new Map<string, Map<string, string[]>>();
   const rules = compiled.scopes.filter((rule) => rule.rule.extent === "file");
-  if (rules.length === 0) return byFile;
+  if (rules.length === 0) return new Map();
 
+  /** Repo-relative path named -> what named it, in the order the naming files were read. */
+  const declarations = new Map<string, { by: string; name: string; value: string }[]>();
   for (const scanned of [...files].sort((a, b) => compareStrings(a.file, b.file))) {
     const syntax = commentSyntaxFor(compiled.pack, scanned.relPath);
     const source = maskComments(scanned.source, syntax);
@@ -925,12 +947,49 @@ export function collectFileScopes(
       }
     }
     for (const entry of found.sort((a, b) => a.index - b.index)) {
-      const scopes = byFile.get(entry.named) ?? new Map<string, string[]>();
-      scopes.set(entry.name, [...(scopes.get(entry.name) ?? []), entry.value]);
-      byFile.set(entry.named, scopes);
+      const list = declarations.get(entry.named) ?? [];
+      list.push({ by: scanned.file, name: entry.name, value: entry.value });
+      declarations.set(entry.named, list);
     }
   }
-  return byFile;
+
+  const resolved = new Map<string, Map<string, string[]> | null>();
+  /** null where the chain reaches a cycle: this file's prefix cannot be said, so none is claimed. */
+  const resolve = (file: string, walking: ReadonlySet<string>): Map<string, string[]> | null => {
+    const memoized = resolved.get(file);
+    if (memoized !== undefined) return memoized;
+    if (walking.has(file)) return null;
+
+    const scopes = new Map<string, string[]>();
+    for (const declaration of declarations.get(file) ?? []) {
+      const inherited = resolve(declaration.by, new Set([...walking, file]));
+      // Propagated rather than swallowed. A file that mounts a file that mounts it back has no
+      // outermost segment to start from, and every finite answer for it is arbitrary: which segment
+      // gets dropped depends on which file the resolver happened to reach first. Answering with
+      // nothing is the one reading that does not invent a URL nobody serves.
+      if (inherited === null) return remember(file, null);
+      scopes.set(declaration.name, [
+        ...(scopes.get(declaration.name) ?? []),
+        ...(inherited.get(declaration.name) ?? []),
+        declaration.value,
+      ]);
+    }
+    // Safe to memoize whatever the walk depth, unlike a truncating guard: a chain that reached a
+    // cycle returned null above, so anything arriving here is the file's whole answer and not this
+    // walk's view of it.
+    return remember(file, scopes);
+  };
+  const remember = (file: string, scopes: Map<string, string[]> | null) => {
+    resolved.set(file, scopes);
+    return scopes;
+  };
+
+  const answer = new Map<string, Map<string, string[]>>();
+  for (const file of declarations.keys()) {
+    const scopes = resolve(file, new Set());
+    if (scopes !== null) answer.set(file, scopes);
+  }
+  return answer;
 }
 
 function symbolKeys(rule: SymbolRule, order: string[], parts: Record<string, string>): string[] {

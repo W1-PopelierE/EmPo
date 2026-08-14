@@ -1,6 +1,6 @@
 {
   "name": "php",
-  "version": "1.10.0",
+  "version": "1.11.0",
 
   "match": {
     "extensions": [".php"],
@@ -167,7 +167,7 @@
     },
     {
       "symbol": "http-route",
-      "pattern": "Route::resource\\(\\s*['\"]([^'\".]+)['\"]",
+      "pattern": "Route::resource\\(\\s*['\"]([^'\".]+)['\"](?![^;]*->(?:except|only)\\()",
       "map": { "path": 1 },
       "keys": [
         "GET {path}",
@@ -184,7 +184,23 @@
     },
     {
       "symbol": "http-route",
-      "pattern": "Route::apiResource\\(\\s*['\"]([^'\".]+)['\"]",
+      "pattern": "Route::resource\\(\\s*['\"]([^'\".]+)['\"][^;]*?->except\\(\\s*\\[\\s*['\"]show['\"]\\s*,?\\s*\\]\\s*\\)",
+      "map": { "path": 1 },
+      "keys": [
+        "GET {path}",
+        "GET {path}/create",
+        "GET {path}/*/edit",
+        "POST {path}",
+        "PUT {path}/*",
+        "PATCH {path}/*",
+        "DELETE {path}/*"
+      ],
+      "normalize": { "path": ["strip-leading-slash"] },
+      "scopedBy": { "name": "route-prefix", "part": "path", "join": "/" }
+    },
+    {
+      "symbol": "http-route",
+      "pattern": "Route::apiResource\\(\\s*['\"]([^'\".]+)['\"](?![^;]*->(?:except|only)\\()",
       "map": { "path": 1 },
       "keys": [
         "GET {path}",

@@ -1265,15 +1265,35 @@ naming a scope no rule in the pack declares contributes nothing for the life of 
 reads at the far end as a bridge that found no match rather than as a pack that named a scope that
 does not exist.
 
+A `file` scope follows the whole chain and not its last link. A file that names another may itself
+have been named, and what it passes on is then everything it carries: Laravel 11 mounts
+`routes/v2.php` under `v2` from `bootstrap/app.php`, `routes/v2.php` mounts `routes/v2_admin.php`
+under `admin`, and a route in the admin file answers `/v2/admin/…`. A resolver stopping at one link
+keys it `admin/…`, which is the same defect this block exists to fix, one level further out, and
+just as well-formed. Where the chain closes on itself the file is given no scope at all rather than
+some finite reading of a loop: a cycle has no outermost segment to start from, so which segment a
+finite answer drops depends only on which file the resolver reached first, and answering with
+nothing is the one reading that invents no URL.
+
 **What it cannot do, and the boundary is a root.** A `file` scope resolves its reference inside one
 root, because the pass that reads it walks that root's scanned files. A provider in root A naming a
 route file in root B is not seen, the routes in B keep their unprefixed keys, and nothing says so.
 That is the same boundary `module-path` already draws for an import, but it is worth stating
 separately here because the provider shape invites the crossing: a monorepo that keeps its
 application code and its route files in two roots is not exotic. Both extents also inherit
-everything section 3 says about masking. Comments are blanked, so a commented-out group opens no
-scope, and string literals are not, so a `Route::prefix(` inside a heredoc or a fixture opens one
-that is not real and prefixes every route written below it.
+everything section 3 says about masking: comments are blanked, so a commented-out group opens no
+scope, and string literals are not, so a `Route::prefix(` written inside a heredoc or a fixture
+opens one that is not real and prefixes every route below it.
+
+Where a `balanced` extent parts company with section 3 is in the counting. The pattern is matched
+over the view that still has its strings, because the value a scope contributes is written in one —
+`'prefix' => 'api'` is a string literal and there is nothing to capture without it — but the
+delimiters are counted over the string-blanked view. That asymmetry is not tidiness. A brace inside
+a string is the one thing that can silently shorten a scope, and shortening it is worse than
+lengthening it: the routes that fall out of the extent keep well-formed keys that are short by a
+segment, so nothing anywhere looks wrong. It was measured, on a route file that wrote
+`Route::post('bookings/{booking}/print}', …)`, one stray brace in a URL, which closed the enclosing
+group sixty routes early.
 
 And the whole block is enclosure the pack can *see*. A prefix assembled at runtime, read from
 config, or applied by middleware the routes never name is invisible here exactly as a dispatch
@@ -1751,24 +1771,43 @@ can be checked against the framework itself: `php artisan route:list --json` is 
 application really serves, so the pack's `produces` keys can be diffed against the truth instead of
 against a fixture somebody wrote to agree with them.
 
-On a 5084-file monolith registering 3748 routes statically, the pack before this work produced 1429
-keys of which 711 were real: 13% of the routes, and half of what it did say was a URL nobody could
-call, because every path in the ten route files the provider mounts under a prefix was short by that
-prefix. After, it produces 3612 keys of which 3541 are real — 94% of the statically registered
-routes, at 98% precision.
+Two applications, deliberately unalike. The first is a 5084-file Laravel 10 monolith registering 3748
+routes statically from fourteen route files, ten of them mounted under a prefix by a
+`RouteServiceProvider`. The second is a Laravel 11 Inertia application whose routing is configured in
+`bootstrap/app.php` and whose route files mount each other, one level deep.
 
-The gap that remains is worth naming, because two thirds of it is the contract rather than a rule
-nobody has written yet. The application binds its own `ResourceRegistrar` into the container, so
-every resource it registers carries an extra route that exists only once the container is built.
-That is 1578 URLs no static reader can see, in any tool, and it is the plainest example this
-repository has of why every answer here is a floor: the code that registers them says nothing, and
-the line that makes them exist is a `bind()` in a service provider. The rest is two shapes the pack
-deliberately declines rather than guesses at. A resource written with a dot,
+| | keys produced | of which real | precision | recall |
+|---|---|---|---|---|
+| monolith, before | 1429 | 711 | 49.8% | 19.0% |
+| monolith, after | 3602 | 3602 | 100% | 96.1% |
+| Inertia app, before | 94 | 4 | 4.3% | 2.4% |
+| Inertia app, after | 159 | 159 | 100% | 94.6% |
+
+Three defects were found by this measurement and by nothing in the test suite, which is the argument
+for measuring a route rule against the framework at all. The array-form scope's lazy quantifier let a
+group setting no prefix reach past its own closing bracket and adopt the prefix of a group sixty
+lines below it, so routes at the top of a file came out under `admin/settings/`; the pattern is now
+tempered against crossing `Route::` or `function`. The `file` extent resolved one link and not the
+chain, so the Laravel 11 application's `routes/v2_admin.php`, mounted under `admin` by a file itself
+mounted under `v2`, keyed `admin/…`. And a `balanced` extent counted its delimiters in the raw
+source, where a single stray brace in a string — `Route::post('bookings/{booking}/print}', …)`, a
+typo in a URL — closed a group sixty routes early and every route below it came out short by a
+segment. Delimiters are now counted on the string-blanked view while the value is still read from the
+one that has its strings.
+
+What remains is the contract rather than an unwritten rule. The monolith binds its own
+`ResourceRegistrar` into the container, so every resource it registers carries an extra route that
+exists only once the container is built: 1578 URLs no static reader can see, in any tool, and the
+plainest example this repository has of why every answer here is a floor. The code that registers
+them says nothing, and the line that makes them exist is a `bind()` in a service provider.
+
+Both remaining gaps in the rules themselves are declines rather than guesses, which is why precision
+is 100% on both applications and recall is not. A resource written with a dot,
 `Route::resource('orders.lines', …)`, is a nested resource whose URL Laravel builds by singularizing
-the parent, which no regex holds, so the pattern excludes a dotted name and the pack produces
-nothing for it instead of producing seven keys that are wrong. A resource narrowed by `->only([…])`
-or `->except([…])` still produces all seven, which is the one place these rules over-produce, and it
-is 71 of 3612 keys.
+the parent, which no regex holds, so the pattern excludes a dotted name and produces nothing rather
+than seven wrong keys. A resource narrowed by `->only([…])`, or by an `->except([…])` naming anything
+other than `show`, is refused by a lookahead for the same reason: the seven URLs are no longer what
+it registers, and which ones survive is in the argument list.
 
 ### What the typescript pack forced, and what it did not
 

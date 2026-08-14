@@ -1353,6 +1353,70 @@ describe("symbol scopes", () => {
     test("leaves a file nobody names unprefixed", () => {
       expect(scopedKeys(unnamed)).toEqual(["GET health"]);
     });
+
+    /** The keys `target` produces, with the root's file scopes collected over exactly `files`. */
+    function keysWithin(
+      files: readonly { file: string; relPath: string; source: string }[],
+      target: { file: string; relPath: string; source: string },
+    ): string[] {
+      const compiled = compilePack(filePack);
+      const scopes = collectFileScopes(compiled, files);
+      const extracted = extractFile(
+        compiled,
+        { root: ".", lang: "php", ...target },
+        scopes.get(target.file) ?? new Map(),
+      );
+      if (extracted === null) throw new Error(`expected ${target.relPath} to yield a node`);
+      return extracted.produces.map((ref) => ref.key);
+    }
+
+    function mounts(path: string, prefix: string, mounted: string, route?: string) {
+      return {
+        file: path,
+        relPath: path,
+        source: `<?php\n\nRoute::prefix('${prefix}')->group(base_path('${mounted}'));\n${
+          route === undefined ? "" : `Route::get('${route}', 'index');\n`
+        }`,
+      };
+    }
+
+    test("composes the whole chain outermost first on the file at its far end", () => {
+      const outer = mounts("bootstrap/app.php", "v2", "routes/v2.php");
+      const middle = mounts("routes/v2.php", "admin", "routes/v2_admin.php");
+      const inner = {
+        file: "routes/v2_admin.php",
+        relPath: "routes/v2_admin.php",
+        source: "<?php\n\nRoute::get('flags', 'index');\n",
+      };
+
+      expect(keysWithin([outer, middle, inner], inner)).toEqual(["GET v2/admin/flags"]);
+    });
+
+    test("claims no prefix at all for a file on a mounting cycle", () => {
+      const a = mounts("routes/a.php", "aaa", "routes/b.php", "one");
+      const b = mounts("routes/b.php", "bbb", "routes/a.php", "two");
+
+      // A cycle has no outermost segment to start from, so every finite answer is arbitrary: which
+      // segment gets dropped depends only on which file the resolver reached first. Both files
+      // therefore get nothing, which is the one reading that invents no URL. Asserted on both, since
+      // the defect this replaced gave the two ends of the cycle different answers.
+      expect(keysWithin([a, b], a)).toEqual(["GET one"]);
+      expect(keysWithin([a, b], b)).toEqual(["GET two"]);
+    });
+
+    test("answers the same for a file two files name, whatever order they arrive in", () => {
+      const first = mounts("routes/first.php", "one", "routes/shared.php");
+      const second = mounts("routes/second.php", "two", "routes/shared.php");
+      const shared = {
+        file: "routes/shared.php",
+        relPath: "routes/shared.php",
+        source: "<?php\n\nRoute::get('items', 'index');\n",
+      };
+
+      expect(keysWithin([first, second, shared], shared)).toEqual(
+        keysWithin([shared, second, first], shared),
+      );
+    });
   });
 });
 

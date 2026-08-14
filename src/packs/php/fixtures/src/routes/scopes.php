@@ -71,3 +71,12 @@ Route::get('after-the-group', fn () => null);
 // gives the live route under it a prefix nothing in the running app ever sets.
 // Route::prefix('dead')->group(function () {
 Route::get('masked', fn () => null);
+
+// A resource narrowed to all but `show`. The general resource rule refuses it through a lookahead,
+// so the seven URLs below are the whole of what it registers: no `GET pallets/*`, which is the one
+// the narrowing removed and which the unnarrowed rule would have claimed.
+Route::resource('parcels', OrderController::class)->except(['show']);
+
+// A narrowing this pack does not read. Producing the seven anyway would put URLs in the graph that
+// return 404, so it produces nothing and the resource is simply absent, which is the floor.
+Route::resource('crates-limited', OrderController::class)->only(['index']);

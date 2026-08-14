@@ -503,6 +503,24 @@
       "assertsValue": false
     },
     {
+      "id": "routes/app_admin.php",
+      "file": "routes/app_admin.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "route-file",
+      "name": "app_admin",
+      "produces": [
+        {
+          "symbol": "http-route",
+          "key": "GET api/admin/flags",
+          "line": 8
+        }
+      ],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
       "id": "routes/scopes.php",
       "file": "routes/scopes.php",
       "root": ".",
@@ -519,6 +537,11 @@
           "symbol": "http-route",
           "key": "DELETE pallets/*",
           "line": 60
+        },
+        {
+          "symbol": "http-route",
+          "key": "DELETE parcels/*",
+          "line": 78
         },
         {
           "symbol": "http-route",
@@ -587,6 +610,21 @@
         },
         {
           "symbol": "http-route",
+          "key": "GET parcels",
+          "line": 78
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET parcels/*/edit",
+          "line": 78
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET parcels/create",
+          "line": 78
+        },
+        {
+          "symbol": "http-route",
           "key": "GET reports/daily",
           "line": 23
         },
@@ -612,6 +650,11 @@
         },
         {
           "symbol": "http-route",
+          "key": "PATCH parcels/*",
+          "line": 78
+        },
+        {
+          "symbol": "http-route",
           "key": "POST crates",
           "line": 59
         },
@@ -622,6 +665,11 @@
         },
         {
           "symbol": "http-route",
+          "key": "POST parcels",
+          "line": 78
+        },
+        {
+          "symbol": "http-route",
           "key": "PUT crates/*",
           "line": 59
         },
@@ -629,6 +677,11 @@
           "symbol": "http-route",
           "key": "PUT pallets/*",
           "line": 60
+        },
+        {
+          "symbol": "http-route",
+          "key": "PUT parcels/*",
+          "line": 78
         }
       ],
       "consumes": [],
