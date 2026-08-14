@@ -11,7 +11,7 @@ specifies its schema. It is written only by `empo index`, never by hand, never b
   "builtAgainst": "9cd9b6278…",         // git sha graph was built from
   "builtAtCommitSubject": "…",          // for human sanity when reading the file
   "roots": [ { "path": "apps/api", "lang": "php" }, … ],
-  "packs": { "php": "1.9.0", "typescript": "2.0.1" },
+  "packs": { "php": "1.11.0", "typescript": "2.0.1" },
   "stats": { "files": 3699, "nodes": 3241, "edges": 18734, "bridgedEdges": 212 },
 
   "nodes":  [ Node, … ],

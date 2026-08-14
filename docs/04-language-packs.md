@@ -114,7 +114,9 @@ exactly the honesty this tradeoff requires.
       "pattern": "Route::(get|post|put|patch|delete)\\(\\s*['\"]([^'\"]+)['\"]",
       "map": { "method": 1, "path": 2 },      // part name -> capture group
       "key": "{method} {path}",               // how the parts become one key
-      "normalize": { "method": ["upper"], "path": ["strip-leading-slash"] } }
+      "normalize": { "method": ["upper"], "path": ["strip-leading-slash"] },
+      // optional: a scope declared in 5b contributes to one part of this key
+      "scopedBy": { "name": "route-prefix", "part": "path", "join": "/" } }
   ],
   "consumes": [
     { "symbol": "http-route",
@@ -122,6 +124,23 @@ exactly the honesty this tradeoff requires.
       "map": { "method": 1, "path": 2 },
       "key": "{method} {path}",
       "normalize": { "method": ["upper"], "path": ["strip-leading-slash"] } }
+  ],
+
+  // 5b. optional: what encloses a symbol and contributes to one of its parts. A rule above names one
+  //     with "scopedBy": { "name": "route-prefix", "part": "path", "join": "/" }; php declares the
+  //     only such block that ships
+  "scopes": [
+    // the group form: the prefix holds for everything written inside the braces it opens
+    { "name": "route-prefix", "pattern": "Route::prefix\\(\\s*['\"]([^'\"]+)['\"]",
+      "value": 1, "extent": "balanced", "open": "{", "close": "}" },
+    // the provider form: the prefix holds for everything the file it names produces. The run
+    // between the two calls is tempered against crossing `Route::`, because an untempered
+    // `[\s\S]*?` reaches past the construct that opened it and adopts the next one's argument;
+    // that was a real defect, and the shipped pack bounds every such run (see "What the route
+    // rules are worth, measured")
+    { "name": "route-prefix",
+      "pattern": "Route::prefix\\(\\s*['\"]([^'\"]+)['\"](?:(?!Route::)[\\s\\S])*?group\\(\\s*base_path\\(\\s*['\"]([^'\"]+)['\"]",
+      "value": 1, "extent": "file", "file": 2 }
   ],
 
   // 6. how tests look, so the engine can compute coverage
@@ -1165,8 +1184,134 @@ per line), its groups feed `map`/`key`/`normalize` exactly as a source pattern's
 produced ref anchors at line 1 because a produced symbol's line is never surfaced: a bridge edge is
 evidenced at the consumer's call site.
 
+A rule declares `key` or `keys`, never both. `keys` is a list of templates over the same parts, and
+it exists for the construct that registers a family of symbols in one line: a Laravel
+`Route::resource('orders', OrderController::class)` registers seven actions, which the pack spells
+as eight templates. The two numbers differ for one reason: Laravel counts `update` as a single route
+answering both `PUT` and `PATCH`, while a key here is one method and one path, so that one action is
+two keys. Written as eight rules differing only in their template it is eight copies of one pattern
+that nobody keeps in sync — a fix to the pattern lands in seven of them and the eighth goes on
+reading the old spelling. Every ref a `keys` rule yields shares the match's line and its owners,
+because they are one line of code, and citing seven of them somewhere else would be citing somewhere
+they are not written.
+
+What the eight templates cannot spell is the parameter Laravel derives by singularizing the resource
+name: `orders` becomes `{order}` by a rule no regex holds. The php pack writes `*` in that segment
+instead, which is the spelling `engine/bridger.ts`'s `collapseParams` lands every parameter on
+anyway, so a produced `orders/*` and a consumed `orders/${id}` meet there exactly as a produced
+`orders/{order}` would. On a bridge that has not enabled `collapseParams` neither spelling ever
+matches, since a parameter written two ways in two languages is not one string; `*` is therefore no
+worse there, and honest about what it knows, which is that a value goes in that segment and not what
+it is called.
+
 This is the single highest-leverage part of the pack. It is what lets `empo query` on a controller
 report the mobile screen that calls it, or on a Vue page report the controller that renders it.
+
+### 5b. `scopes`: what encloses a symbol
+
+A symbol's key is assembled from what one line of source says, and for a route that is a lie the
+framework tells. `Route::get('orders')` written in `routes/api.php` reads as `GET orders`, while the
+application serves `/api/orders`, because the prefix is written somewhere else entirely: in the
+`Route::prefix('api')->group(...)` the call sits inside, or in the `RouteServiceProvider` line that
+loaded the file. The consumer, a fetch call in a frontend pack, writes the path the application
+really serves, so the two keys never meet and the bridge that section 5 calls the highest-leverage
+part of the pack silently produces nothing for every prefixed route in the repository. That is the
+worst failure shape this document has: not a wrong edge but a missing one, in a family that looked
+like it was working because the unprefixed routes still joined.
+
+`scopes` is an optional top-level block, a list of rules that say what an enclosing construct
+contributes and how far it reaches. A rule declares a `name`, the handle a `scopedBy` refers to; a
+`pattern`; a `value`, the 1-based capture group holding the string this scope contributes; and an
+`extent`. **Several rules may share one `name`**, and that is the ordinary case rather than an
+allowance: one construct in one language is usually spelled two or three ways, and a prefix is a
+prefix whichever spelling declared it. Naming the two Laravel spellings `route-prefix` twice is
+what lets the rules that read a route name one thing and get both.
+
+On the other side, a `produces` or `consumes` rule may carry **`scopedBy`**, three fields and all
+three required when the field is present: `name` picks the scope, `part` names which part of `map`
+the value is joined onto, and `join` is the string that joins them. `join` has **no default**, which
+is the same refusal `indexNames` makes one section up. A scope is not always a path: a namespace
+joins on the language's own separator, a route name joins on a dot, a queue name on a colon. A
+default of `/` would let a pack stay silent and the engine guess at a language, and guessing at a
+language in the engine is the one thing this contract exists to prevent.
+
+**`balanced` is textual enclosure and nothing more.** The extent runs from the match to the
+delimiter that balances the first `open` after it, counted by the same walk section 7 already uses
+for a transaction (`balancedEnd` in `engine/hazards.ts`), and every symbol whose own match falls
+inside that extent takes the value. Reusing the walk is deliberate: two ways of asking "where does
+this construct end" would be a defect invisible from either pack. What a scope does not reuse is the
+view those delimiters are counted over, and the end of this section says why: an unmatched delimiter
+inside a string literal ends a transaction's extent early, and a scope's it cannot, because a scope
+counts on the string-blanked view. Scopes nest, and nested values compose from the outside in, so a
+group inside a group reads as the outer prefix then the inner one, which is the order a reader of
+the file would assemble them in.
+
+**`file` is enclosure by reference, and it is the half a textual rule cannot reach.** The match
+names a *different* file, in the capture group `file` points at, spelled the way the language spells
+it, which is relative to the root and not to the repository; everything that file produces takes the
+value. A `RouteServiceProvider` writes the prefix and the filename on one line and the routes
+themselves are a directory away, so no walk over the provider's own text could ever find them. This runs as a pass over the root's scanned files before the symbol rules
+read any of them, because the value has to exist before the file it covers is keyed.
+
+The part's own `normalize` list applies to a scope value exactly as it applies to a captured one,
+and it applies before anything is joined. Otherwise `strip-leading-slash` would run on the assembled
+string and leave a `/api` prefix's slash sitting in the middle of the key, which is the shape of bug
+the normalizers exist to end rather than to relocate. Joining then trims the `join` string off both
+seams, so `api/` and `/orders` read as `api/orders` and not as `api//orders`. That is the one piece
+of tidying the engine does on a pack's behalf, and it earns its place because the two halves are
+written by different hands in different files and neither can see how the other spelled its edges.
+
+Five shapes are **refused at load**, for the reason every other refusal in this contract is: each
+one produces a silence a user would have to go hunting for, and the message can name the pack.
+A `balanced` rule with no `open`/`close` pair has no way to find its end, and a walk with nothing to
+count would enclose the whole file and stamp its value onto every symbol in it. A `file` rule with
+no `file` group names no file and covers nothing, forever. A `value` or a `file` naming a capture
+group the pattern does not have yields an empty string, and an empty prefix is exactly the
+un-prefixed key this block exists to correct, arrived at through a rule that looks like it works. A
+`scopedBy` naming a `part` that is not in `map` has nowhere to put its value, and a `scopedBy`
+naming a scope no rule in the pack declares contributes nothing for the life of the pack, which
+reads at the far end as a bridge that found no match rather than as a pack that named a scope that
+does not exist.
+
+A `file` scope follows the whole chain and not its last link. A file that names another may itself
+have been named, and what it passes on is then everything it carries: Laravel 11 mounts
+`routes/v2.php` under `v2` from `bootstrap/app.php`, `routes/v2.php` mounts `routes/v2_admin.php`
+under `admin`, and a route in the admin file answers `/v2/admin/…`. A resolver stopping at one link
+keys it `admin/…`, which is the same defect this block exists to fix, one level further out, and
+just as well-formed. Where the chain closes on itself the file is given no scope at all rather than
+some finite reading of a loop: a cycle has no outermost segment to start from, so which segment a
+finite answer drops depends only on which file the resolver reached first, and answering with
+nothing is the one reading that invents no URL.
+
+**What it cannot do, and the boundary is a root.** The reference is spelled root-relative, because
+that is how the language spells it — Laravel's `base_path('routes/api.php')` is relative to the
+application and the application is the root — so the pass resolves it against the naming file's own
+root: the same line read in a root of `apps/api` names `apps/api/routes/api.php`, which is the
+repo-relative spelling the rest of the engine keys files by. A root of `.` leaves nothing to put
+back, which is why every fixture reads the same either way. What the pass will not do is leave the
+root it read the reference in: only files that root scanned are ever looked up, so a provider in
+root A naming a route file in root B is not seen, the routes in B keep their unprefixed keys, and
+nothing says so. That is the same boundary `module-path` already draws for an import, but it is
+worth stating separately here because the provider shape invites the crossing: a monorepo that keeps
+its application code and its route files in two roots is not exotic. Both extents also inherit
+everything section 3 says about masking: comments are blanked, so a commented-out group opens no
+scope, and string literals are not, so a `Route::prefix(` written inside a heredoc or a fixture
+opens one that is not real and prefixes every route below it.
+
+Where a `balanced` extent parts company with section 3 is in the counting. The pattern is matched
+over the view that still has its strings, because the value a scope contributes is written in one —
+`'prefix' => 'api'` is a string literal and there is nothing to capture without it — but the
+delimiters are counted over the string-blanked view. That asymmetry is not tidiness. A brace inside
+a string is the one thing that can silently shorten a scope, and shortening it is worse than
+lengthening it: the routes that fall out of the extent keep well-formed keys that are short by a
+segment, so nothing anywhere looks wrong. It was measured, on a route file that wrote
+`Route::post('bookings/{booking}/print}', …)`, one stray brace in a URL, which closed the enclosing
+group sixty routes early.
+
+And the whole block is enclosure the pack can *see*. A prefix assembled at runtime, read from
+config, or applied by middleware the routes never name is invisible here exactly as a dispatch
+reached through a helper is invisible to section 7. A key that comes out unprefixed has not been
+proved unprefixed; it has been proved to sit inside no construct a pack rule matched.
 
 ### 6. `tests`: coverage
 
@@ -1595,7 +1740,14 @@ Two, deliberately different, to keep the interface honest:
   `view('x')`, `View::make` and `Route::view`'s second argument — `produces`
   http-routes, `consumes` both http-routes and the Inertia page
   names the typescript pack produces). It is the one pack that declares a `views` block, which those
-  four rules are the only reader of, the one pack that declares a `hazards` block, covering
+  four rules are the only reader of, the one pack that declares a `scopes` block — three rules sharing
+  the name `route-prefix`, two `balanced` ones reading a `Route::prefix('api')->group(function () {…})`
+  and a `Route::group(['prefix' => 'api'], …)`, and the `file` one reading the `RouteServiceProvider`
+  line that loads `routes/api.php` under a prefix, so its `produces` rule keys `GET api/orders`
+  where it used to key `GET orders` — the one pack whose `produces` declares `keys`, expanding a
+  `Route::resource` into the eight keys its seven actions need and a `Route::apiResource` into the
+  six its five need — `update` is one action answering both `PUT` and `PATCH`, and that is two
+  keys — the one pack that declares a `hazards` block, covering
   all three Laravel
   transaction forms — the closure, the arrow function and the manual begin/commit pair — seven
   spellings that hand work to a queue — the three `dispatch` forms, the
@@ -1624,6 +1776,84 @@ Two, deliberately different, to keep the interface honest:
 Python and Go are post-v1 and should each be a pack-only pull request. If either requires an
 engine change, that change is a signal the contract is still leaking and should be generalized,
 not special-cased.
+
+### What the route rules are worth, measured
+
+The `scopes` block and the `keys` expansion were both written against a real Laravel application,
+and the point of measuring them there is that a route rule is the one part of a pack whose answer
+can be checked against the framework itself: `php artisan route:list --json` is the list of URLs the
+application really serves, so the pack's `produces` keys can be diffed against the truth instead of
+against a fixture somebody wrote to agree with them.
+
+Two applications, deliberately unalike. The first is a 5084-file Laravel 10 monolith registering 3748
+routes statically from fourteen route files, ten of them mounted under a prefix by a
+`RouteServiceProvider`. The second is a Laravel 11 Inertia application whose routing is configured in
+`bootstrap/app.php` and whose route files mount each other, one level deep.
+
+| | keys produced | of which real | precision | recall |
+|---|---|---|---|---|
+| monolith, before | 1429 | 711 | 49.8% | 19.0% |
+| monolith, after | 3602 | 3602 | 100% | 96.1% |
+| Inertia app, before | 94 | 4 | 4.3% | 2.4% |
+| Inertia app, after | 159 | 159 | 100% | 94.6% |
+
+Three defects were found by this measurement and by nothing in the test suite, which is the argument
+for measuring a route rule against the framework at all. The array-form scope's lazy quantifier let a
+group setting no prefix reach past its own closing bracket and adopt the prefix of a group sixty
+lines below it, so routes at the top of a file came out under `admin/settings/`; the pattern is now
+tempered against crossing `Route::` or `function`. The `file` extent resolved one link and not the
+chain, so the Laravel 11 application's `routes/v2_admin.php`, mounted under `admin` by a file itself
+mounted under `v2`, keyed `admin/…`. And a `balanced` extent counted its delimiters in the raw
+source, where a single stray brace in a string — `Route::post('bookings/{booking}/print}', …)`, a
+typo in a URL — closed a group sixty routes early and every route below it came out short by a
+segment. Delimiters are now counted on the string-blanked view while the value is still read from the
+one that has its strings.
+
+What remains is the contract rather than an unwritten rule. The monolith binds its own
+`ResourceRegistrar` into the container, so every resource it registers carries an extra route that
+exists only once the container is built: 1578 URLs no static reader can see, in any tool, and the
+plainest example this repository has of why every answer here is a floor. The code that registers
+them says nothing, and the line that makes them exist is a `bind()` in a service provider.
+
+The remaining gaps in the rules themselves are declines rather than guesses, which is why precision
+is 100% on both applications and recall is not. A resource written with a dot,
+`Route::resource('orders.lines', …)`, is a nested resource whose URL Laravel builds by singularizing
+the parent, which no regex holds, so the pattern excludes a dotted name and produces nothing rather
+than eight wrong keys. A resource narrowed by `->only([…])`, or by an `->except([…])` naming anything
+other than `show`, is refused by a lookahead for the same reason: the seven actions are no longer
+what it registers, and which ones survive is in the argument list. The one narrowing that is read is
+`->except(['show'])`, which drops exactly one action off a shape a regex can still spell whole, and
+it has a rule of its own declaring the seven keys that remain.
+
+A route file mounted more than once claims no prefix at all, and that is the third decline. Two
+providers naming one route file are two mounts of it: the routes really do answer under `api/orders`
+and under `admin/orders`, and the pass has one value per scope name to hand back. Concatenating the
+two keys `api/admin/orders`, a well-formed route nobody serves, and picking one silently drops every
+URL the other one registers, with nothing at the far end to say which half went missing. It is the
+same reading as the mounting cycle above it — a file whose prefix cannot be *said* is given none —
+and it costs recall on a repository that mounts a shared route file twice on purpose.
+
+Laravel 11's default mount is not read either, and it is worth naming because it is the current
+major's stock spelling rather than an exotic one. The only `file`-extent scope requires
+`Route::prefix('api')->group(base_path('routes/api.php'))`: a `prefix` call, a `group` call, and a
+quoted path inside a `base_path`. Laravel 11's generated `bootstrap/app.php` writes
+`->withRouting(web: __DIR__.'/../routes/web.php', api: __DIR__.'/../routes/api.php')` and applies the
+`api` prefix itself, from the argument name and not from anything written as a prefix. That matches
+neither the call shape nor the `base_path` argument, so every route in a stock Laravel 11
+`routes/api.php` keys short by `api`. The Inertia application measured above configures its routing
+in `bootstrap/app.php` too, and its mounts are written in the form the rule does read, which is why
+the measurement above shows none of this and is not evidence against it. It
+falls under the general caveat that a key which comes out unprefixed has not been proved unprefixed,
+but a default shipped by the framework deserves its name written down rather than left to a caveat.
+
+One rule can over-report, and the precision figures above are a measurement of two applications
+rather than a proof that it cannot. The general `Route::resource` rule refuses a narrowed resource
+with a negative lookahead bounded by `[^;]*`, and a `produces` pattern reads the view that still has
+its string contents, so the bound is textual: a semicolon written inside a string anywhere in the
+chain stops the lookahead's scan before it reaches the narrowing.
+`Route::resource('orders', OrderController::class)->middleware('role:admin;editor')->only(['index']);`
+therefore matches, and emits all eight keys for a resource that registers one route. Neither measured
+application writes one, which is why precision came out at 100% and not why it must.
 
 ### What the typescript pack forced, and what it did not
 

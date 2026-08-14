@@ -42,7 +42,13 @@ export function maskComments(
   // source and no sign that its request had been dropped.
   if (line.length === 0 && block.length === 0 && !(maskStrings && quotes.length > 0)) return source;
 
-  const out = [...source];
+  // Split, not spread. A spread iterates code points, so an astral character is one element for the
+  // two UTF-16 units every offset in this file counts in, and `blank` writes with those offsets: the
+  // emoji in a string literal would be overwritten as one space and the character after it eaten,
+  // leaving the masked view a unit shorter than the source. Nothing here may change length, because
+  // a caller reads the two views at one offset — engine/extractor.ts matches a scope over the view
+  // that keeps its strings and counts the extent's delimiters over the view that does not.
+  const out = source.split("");
   let index = 0;
 
   while (index < source.length) {

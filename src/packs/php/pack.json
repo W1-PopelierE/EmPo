@@ -1,6 +1,6 @@
 {
   "name": "php",
-  "version": "1.9.0",
+  "version": "1.11.0",
 
   "match": {
     "extensions": [".php"],
@@ -130,13 +130,88 @@
     "extensions": [".blade.php", ".php"]
   },
 
+  "scopes": [
+    {
+      "name": "route-prefix",
+      "pattern": "Route::(?:[A-Za-z]+\\([^()]*\\)\\s*->\\s*)*prefix\\(\\s*['\"]([^'\"]*)['\"]\\s*\\)(?:\\s*->\\s*[A-Za-z]+\\([^()]*\\))*\\s*->\\s*group\\(\\s*(?:static\\s+)?function",
+      "value": 1,
+      "extent": "balanced",
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "name": "route-prefix",
+      "pattern": "Route::group\\(\\s*\\[(?:(?!Route::|function)[\\s\\S])*?['\"]prefix['\"]\\s*=>\\s*['\"]([^'\"]*)['\"](?:(?!Route::|function)[\\s\\S])*?\\]\\s*,\\s*(?:static\\s+)?function",
+      "value": 1,
+      "extent": "balanced",
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "name": "route-prefix",
+      "pattern": "Route::(?:[A-Za-z]+\\([^()]*\\)\\s*->\\s*)*prefix\\(\\s*['\"]([^'\"]*)['\"]\\s*\\)(?:\\s*->\\s*[A-Za-z]+\\([^()]*\\))*\\s*->\\s*group\\(\\s*base_path\\(\\s*['\"]([^'\"]+)['\"]",
+      "value": 1,
+      "extent": "file",
+      "file": 2
+    }
+  ],
+
   "produces": [
     {
       "symbol": "http-route",
       "pattern": "Route::(get|post|put|patch|delete)\\(\\s*['\"]([^'\"]+)['\"]",
       "map": { "method": 1, "path": 2 },
       "key": "{method} {path}",
-      "normalize": { "method": ["upper"], "path": ["strip-leading-slash"] }
+      "normalize": { "method": ["upper"], "path": ["strip-leading-slash"] },
+      "scopedBy": { "name": "route-prefix", "part": "path", "join": "/" }
+    },
+    {
+      "symbol": "http-route",
+      "pattern": "Route::resource\\(\\s*['\"]([^'\".]+)['\"](?![^;]*->(?:except|only)\\()",
+      "map": { "path": 1 },
+      "keys": [
+        "GET {path}",
+        "GET {path}/create",
+        "GET {path}/*",
+        "GET {path}/*/edit",
+        "POST {path}",
+        "PUT {path}/*",
+        "PATCH {path}/*",
+        "DELETE {path}/*"
+      ],
+      "normalize": { "path": ["strip-leading-slash"] },
+      "scopedBy": { "name": "route-prefix", "part": "path", "join": "/" }
+    },
+    {
+      "symbol": "http-route",
+      "pattern": "Route::resource\\(\\s*['\"]([^'\".]+)['\"][^;]*?->except\\(\\s*\\[\\s*['\"]show['\"]\\s*,?\\s*\\]\\s*\\)",
+      "map": { "path": 1 },
+      "keys": [
+        "GET {path}",
+        "GET {path}/create",
+        "GET {path}/*/edit",
+        "POST {path}",
+        "PUT {path}/*",
+        "PATCH {path}/*",
+        "DELETE {path}/*"
+      ],
+      "normalize": { "path": ["strip-leading-slash"] },
+      "scopedBy": { "name": "route-prefix", "part": "path", "join": "/" }
+    },
+    {
+      "symbol": "http-route",
+      "pattern": "Route::apiResource\\(\\s*['\"]([^'\".]+)['\"](?![^;]*->(?:except|only)\\()",
+      "map": { "path": 1 },
+      "keys": [
+        "GET {path}",
+        "GET {path}/*",
+        "POST {path}",
+        "PUT {path}/*",
+        "PATCH {path}/*",
+        "DELETE {path}/*"
+      ],
+      "normalize": { "path": ["strip-leading-slash"] },
+      "scopedBy": { "name": "route-prefix", "part": "path", "join": "/" }
     }
   ],
 

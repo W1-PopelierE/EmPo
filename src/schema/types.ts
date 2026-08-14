@@ -302,7 +302,49 @@ export interface SymbolRule {
   pathPattern?: string;
   map: Record<string, number>; // part name -> capture group
   key?: string; // template over parts, e.g. "{method} {path}". Default: parts joined by space.
+  /**
+   * Several keys off one match, for a construct that registers more than one symbol. A Laravel
+   * `Route::resource('orders', ...)` is one line registering seven actions, spelled here as eight
+   * keys: `update` is one route answering both PUT and PATCH, and a key is one method and one path.
+   * Exactly one of key / keys is set.
+   */
+  keys?: string[];
   normalize?: Record<string, Normalizer[]>;
+  /**
+   * The enclosing scopes that contribute to one part of this symbol, outermost first. A route
+   * registered inside a prefixed group carries that prefix in the URL it really answers, and
+   * nothing on its own line says so. See `ScopeRule`.
+   */
+  scopedBy?: { name: string; part: string; join: string };
+}
+
+/**
+ * A named value that some *enclosing* construct contributes to a symbol declared under it, for the
+ * case where the line that declares the symbol does not carry the whole of its identity. A Laravel
+ * route group's `prefix` is the archetype: `Route::get('orders')` inside `Route::prefix('api')`
+ * answers `/api/orders`, and read on its own the line says `orders`.
+ *
+ * Two forms, because a language spells "under this" two ways:
+ *
+ * - `balanced` is textual containment. The extent runs from the match to the delimiter that closes
+ *   it, counted with the same walk `engine/hazards.ts` uses for a transaction, and every symbol
+ *   whose match sits inside it is scoped. Scopes nest, and nested values compose outermost first.
+ * - `file` is containment by reference: the match names another file, and everything that file
+ *   produces is scoped. A Laravel `RouteServiceProvider` writes exactly this, and it is the reason
+ *   a route file's paths are not the URLs it serves.
+ */
+export interface ScopeRule {
+  /** What a `scopedBy` names to ask for this scope. Several rules may share one name. */
+  name: string;
+  pattern: string;
+  /** The capture group holding the value this scope contributes. */
+  value: number;
+  extent: "balanced" | "file";
+  /** `balanced` only: the delimiter pair to count. */
+  open?: string;
+  close?: string;
+  /** `file` only: the capture group naming the repo-relative file this scope covers. */
+  file?: number;
 }
 
 export interface PackNodeId {
@@ -448,6 +490,12 @@ export interface Pack {
   edges: Partial<Record<Exclude<EdgeKind, "bridge">, ExtractRule[]>>;
   produces: SymbolRule[];
   consumes: SymbolRule[];
+  /**
+   * What an enclosing construct contributes to a symbol declared under it. Optional; a pack that
+   * declares none behaves exactly as every pack did before the field existed, and a `scopedBy` that
+   * names a scope no rule declares is refused at load rather than silently contributing nothing.
+   */
+  scopes?: ScopeRule[];
   tests: {
     paths: string[];
     assertionTerms: string[];
