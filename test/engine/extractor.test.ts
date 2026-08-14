@@ -1357,7 +1357,7 @@ describe("symbol scopes", () => {
     /** The keys `target` produces, with the root's file scopes collected over exactly `files`. */
     function keysWithin(
       files: readonly { file: string; relPath: string; source: string }[],
-      target: { file: string; relPath: string; source: string },
+      target: { file: string; relPath: string; source: string; root?: string },
     ): string[] {
       const compiled = compilePack(filePack);
       const scopes = collectFileScopes(compiled, files);
@@ -1392,6 +1392,43 @@ describe("symbol scopes", () => {
       expect(keysWithin([outer, middle, inner], inner)).toEqual(["GET v2/admin/flags"]);
     });
 
+    test("puts the naming file's own root back on, for a root that is not the repository root", () => {
+      // What a match names is spelled the way the language spells it, which is relative to the root:
+      // `base_path('routes/api.php')` under a root of `apps/api` is `apps/api/routes/api.php` on the
+      // lookup side, where a `ScannedFile.file` is repo-relative. Every other test here runs at a
+      // root of ".", where the two spellings coincide and the mismatch cannot be seen at all.
+      const rooted = {
+        file: "apps/api/app/Providers/RouteServiceProvider.php",
+        relPath: "app/Providers/RouteServiceProvider.php",
+        source: "<?php\n\nRoute::prefix('api')->group(base_path('routes/api.php'));\n",
+        root: "apps/api",
+      };
+      const routes = {
+        file: "apps/api/routes/api.php",
+        relPath: "routes/api.php",
+        source: "<?php\n\nRoute::get('orders', 'index');\n",
+        root: "apps/api",
+      };
+
+      expect(keysWithin([rooted, routes], routes)).toEqual(["GET api/orders"]);
+    });
+
+    test("claims no prefix at all for a route file two providers mount", () => {
+      // Two providers mounting one file register two families of URLs, `api/orders` and
+      // `admin/orders`, and this pass has one value per scope name to give. Concatenating them keys
+      // `api/admin/orders`, a well-formed route nobody serves, and picking one silently drops the
+      // other. Declining is the one reading that invents nothing, as for the cycle below.
+      const api = mounts("app/Providers/ApiServiceProvider.php", "api", "routes/orders.php");
+      const admin = mounts("app/Providers/AdminServiceProvider.php", "admin", "routes/orders.php");
+      const orders = {
+        file: "routes/orders.php",
+        relPath: "routes/orders.php",
+        source: "<?php\n\nRoute::get('orders', 'index');\n",
+      };
+
+      expect(keysWithin([api, admin, orders], orders)).toEqual(["GET orders"]);
+    });
+
     test("claims no prefix at all for a file on a mounting cycle", () => {
       const a = mounts("routes/a.php", "aaa", "routes/b.php", "one");
       const b = mounts("routes/b.php", "bbb", "routes/a.php", "two");
@@ -1404,18 +1441,20 @@ describe("symbol scopes", () => {
       expect(keysWithin([a, b], b)).toEqual(["GET two"]);
     });
 
-    test("answers the same for a file two files name, whatever order they arrive in", () => {
-      const first = mounts("routes/first.php", "one", "routes/shared.php");
-      const second = mounts("routes/second.php", "two", "routes/shared.php");
-      const shared = {
-        file: "routes/shared.php",
-        relPath: "routes/shared.php",
+    test("answers the same for a file at the end of a chain, whatever order the files arrive in", () => {
+      // A chain is where arrival order can still change an answer, now that a file two files name
+      // claims nothing at all: the resolver reaches the middle link before or after the file that
+      // names it depending on where it starts, and the prefix it passes on must not depend on that.
+      const outer = mounts("bootstrap/app.php", "one", "routes/middle.php");
+      const middle = mounts("routes/middle.php", "two", "routes/inner.php");
+      const inner = {
+        file: "routes/inner.php",
+        relPath: "routes/inner.php",
         source: "<?php\n\nRoute::get('items', 'index');\n",
       };
 
-      expect(keysWithin([first, second, shared], shared)).toEqual(
-        keysWithin([shared, second, first], shared),
-      );
+      expect(keysWithin([outer, middle, inner], inner)).toEqual(["GET one/two/items"]);
+      expect(keysWithin([inner, middle, outer], inner)).toEqual(["GET one/two/items"]);
     });
   });
 });

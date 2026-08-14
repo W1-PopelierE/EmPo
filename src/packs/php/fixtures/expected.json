@@ -541,7 +541,7 @@
         {
           "symbol": "http-route",
           "key": "DELETE parcels/*",
-          "line": 78
+          "line": 88
         },
         {
           "symbol": "http-route",
@@ -591,12 +591,17 @@
         {
           "symbol": "http-route",
           "key": "GET masked",
-          "line": 73
+          "line": 83
         },
         {
           "symbol": "http-route",
           "key": "GET ops/health",
           "line": 28
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET outside-typo",
+          "line": 77
         },
         {
           "symbol": "http-route",
@@ -611,17 +616,17 @@
         {
           "symbol": "http-route",
           "key": "GET parcels",
-          "line": 78
+          "line": 88
         },
         {
           "symbol": "http-route",
           "key": "GET parcels/*/edit",
-          "line": 78
+          "line": 88
         },
         {
           "symbol": "http-route",
           "key": "GET parcels/create",
-          "line": 78
+          "line": 88
         },
         {
           "symbol": "http-route",
@@ -632,6 +637,11 @@
           "symbol": "http-route",
           "key": "GET shop/crates",
           "line": 9
+        },
+        {
+          "symbol": "http-route",
+          "key": "GET typo/escapes",
+          "line": 75
         },
         {
           "symbol": "http-route",
@@ -651,7 +661,7 @@
         {
           "symbol": "http-route",
           "key": "PATCH parcels/*",
-          "line": 78
+          "line": 88
         },
         {
           "symbol": "http-route",
@@ -666,7 +676,12 @@
         {
           "symbol": "http-route",
           "key": "POST parcels",
-          "line": 78
+          "line": 88
+        },
+        {
+          "symbol": "http-route",
+          "key": "POST typo/bookings/{booking}/print}",
+          "line": 74
         },
         {
           "symbol": "http-route",
@@ -681,7 +696,7 @@
         {
           "symbol": "http-route",
           "key": "PUT parcels/*",
-          "line": 78
+          "line": 88
         }
       ],
       "consumes": [],

@@ -820,4 +820,51 @@ describe("packSchema", () => {
     expect(success).toBe(false);
     expect(issues).toContain('produces.0.keys.1: names part "host", which is not in map');
   });
+
+  test("accepts a symbol rule whose keys templates all name parts the map defines", () => {
+    const rule = {
+      symbol: "http-route",
+      pattern: twoGroups,
+      map: { method: 1, path: 2 },
+      keys: ["GET {path}", "POST {path}", "{method} {path}"],
+    };
+
+    const { success, issues } = parse(pack({ produces: [rule] }));
+
+    expect(issues).toBe("");
+    expect(success).toBe(true);
+  });
+
+  test("accepts a file scope whose file group lands inside the pattern", () => {
+    const scope = {
+      name: "url-prefix",
+      pattern: `${prefixPattern}->group\\(\\s*base_path\\(\\s*'([^']*)'`,
+      value: 1,
+      extent: "file",
+      file: 2,
+    };
+
+    const { success, issues } = parse(pack({ scopes: [scope] }));
+
+    expect(issues).toBe("");
+    expect(success).toBe(true);
+  });
+
+  test("reports a bad part under key, not under keys, for a rule that declares both", () => {
+    // The path is the `key` field rather than `keys.2`, because the rule is already refused for
+    // declaring both and the position it points at is not the one the author would look up.
+    const rule = {
+      symbol: "http-route",
+      pattern: twoGroups,
+      map: { method: 1, path: 2 },
+      key: "{method} {path}",
+      keys: ["GET {path}", "POST {path}", "PATCH {host}"],
+    };
+
+    const { success, issues } = parse(pack({ produces: [rule] }));
+
+    expect(success).toBe(false);
+    expect(issues).toContain("produces.0.keys: a symbol rule declares key or keys, not both");
+    expect(issues).toContain('produces.0.key: names part "host", which is not in map');
+  });
 });

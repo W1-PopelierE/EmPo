@@ -304,7 +304,9 @@ export interface SymbolRule {
   key?: string; // template over parts, e.g. "{method} {path}". Default: parts joined by space.
   /**
    * Several keys off one match, for a construct that registers more than one symbol. A Laravel
-   * `Route::resource('orders', ...)` is seven URLs and one line. Exactly one of key / keys is set.
+   * `Route::resource('orders', ...)` is one line registering seven actions, spelled here as eight
+   * keys: `update` is one route answering both PUT and PATCH, and a key is one method and one path.
+   * Exactly one of key / keys is set.
    */
   keys?: string[];
   normalize?: Record<string, Normalizer[]>;

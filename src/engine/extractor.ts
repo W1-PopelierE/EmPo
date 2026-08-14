@@ -773,8 +773,9 @@ function extractSymbols(
 /**
  * The refs one match yields: one per key template, or one from the default join where the rule
  * declares no template at all. They share a line and an owner set, because they are one line of
- * code: `Route::resource('orders', OrderController::class)` is seven URLs registered at one place,
- * and citing six of them somewhere else would be citing somewhere they are not written.
+ * code: `Route::resource('orders', OrderController::class)` is eight keys registered at one place,
+ * seven Laravel actions of which `update` answers both PUT and PATCH, and citing seven of them
+ * somewhere else would be citing somewhere they are not written.
  */
 function refsFrom(
   compiled: CompiledSymbolRule,
@@ -916,10 +917,17 @@ function scopeAttributor(
  * memoized; a file that reaches itself contributes nothing rather than looping, because a mounting
  * cycle is a repository defect and inventing an infinite prefix for it helps nobody.
  *
- * **One root.** The map is keyed by the repo-relative path a match names, but only files this root
- * scanned are ever looked up in it, so a provider in one root naming a route file in another
- * contributes nothing. That is a real ceiling and not a rounding error for a repository that splits
- * its backend across roots; see docs/04-language-packs.md.
+ * **One root.** A match names a file the way the language spells it, which is relative to the root,
+ * so the naming file's own root is put back on to make the repo-relative key `build.ts` looks up
+ * with. Only files this root scanned are ever looked up, so a provider in one root naming a route
+ * file in another contributes nothing. That is a real ceiling and not a rounding error for a
+ * repository that splits its backend across roots; see docs/04-language-packs.md.
+ *
+ * **A file named twice claims nothing**, on the same reasoning as the cycle below it. Two providers
+ * mounting one route file register two families of URLs, `api/orders` and `admin/orders`, and this
+ * pass has one value per scope name to give: concatenating them keys `api/admin/orders`, which is a
+ * well-formed route nobody serves, and picking one silently drops the other. Declining is the only
+ * reading that invents nothing.
  */
 export function collectFileScopes(
   compiled: CompiledPack,
@@ -933,13 +941,20 @@ export function collectFileScopes(
   for (const scanned of [...files].sort((a, b) => compareStrings(a.file, b.file))) {
     const syntax = commentSyntaxFor(compiled.pack, scanned.relPath);
     const source = maskComments(scanned.source, syntax);
+    // What a match names is spelled the way the language spells it, which is relative to the root:
+    // Laravel's `base_path('routes/api.php')` is relative to the application, and the application is
+    // the root. The lookup on the other side is `build.ts`'s `fileScopes.get(file.file)`, and a
+    // `ScannedFile.file` is repo-relative (engine/scanner.ts), so the root has to go back on before
+    // the two spellings can meet. A root of "." leaves this empty and the two coincide, which is why
+    // every fixture, all of which run at ".", read the same before and after.
+    const rootPrefix = scanned.file.slice(0, scanned.file.length - scanned.relPath.length);
     const found: { named: string; name: string; value: string; index: number }[] = [];
     for (const rule of rules) {
       for (const match of matchAll(rule.regex, source)) {
         const named = match.groups[rule.rule.file ?? 0];
         if (named === undefined || named === "") continue;
         found.push({
-          named: normalizeRepoPath(named),
+          named: rootPrefix + normalizeRepoPath(named),
           name: rule.rule.name,
           value: match.groups[rule.rule.value] ?? "",
           index: match.index,
@@ -960,8 +975,14 @@ export function collectFileScopes(
     if (memoized !== undefined) return memoized;
     if (walking.has(file)) return null;
 
+    const mounts = declarations.get(file) ?? [];
+    // Two constructs naming one file are two mounts of it, not two segments of one prefix: the
+    // routes really answer under both, and this pass has one value per scope name to hand back. See
+    // the docstring; the same "invent nothing" reading as the cycle below.
+    if (mounts.length > 1) return remember(file, null);
+
     const scopes = new Map<string, string[]>();
-    for (const declaration of declarations.get(file) ?? []) {
+    for (const declaration of mounts) {
       const inherited = resolve(declaration.by, new Set([...walking, file]));
       // Propagated rather than swallowed. A file that mounts a file that mounts it back has no
       // outermost segment to start from, and every finite answer for it is arbitrary: which segment

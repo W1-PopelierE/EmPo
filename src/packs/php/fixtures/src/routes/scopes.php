@@ -66,6 +66,16 @@ Route::prefix('closed')->group(function () {
 });
 Route::get('after-the-group', fn () => null);
 
+// The stray delimiter, and the reason a balanced extent counts on the string-blanked view. The
+// first URL below carries one unmatched brace, a typo nobody notices because the route still works.
+// Counted in the raw source that brace closes the group here, so `escapes` would lose the prefix
+// and `outside-typo` would wrongly gain it: both keys stay well-formed and both are wrong.
+Route::prefix('typo')->group(function () {
+    Route::post('bookings/{booking}/print}', fn () => null);
+    Route::get('escapes', fn () => null);
+});
+Route::get('outside-typo', fn () => null);
+
 // The comment mask applies to scopes as well as to edges. The group on the line below is spelled
 // exactly, opening brace and all, so a scan that reads this file before the comments are blanked
 // gives the live route under it a prefix nothing in the running app ever sets.

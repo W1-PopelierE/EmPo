@@ -256,6 +256,22 @@ describe("maskComments blanking string contents", () => {
     expect(maskComments(source, typescript, true)).not.toContain("CartBadge");
   });
 
+  test("keeps both views the same length as the source when a string holds an astral character", () => {
+    // The engine reads one offset against both views (src/engine/extractor.ts): a scope is matched
+    // over the view that keeps its strings and its extent counted over the view that does not, so
+    // the two must agree on every offset. An emoji is two UTF-16 units and one code point, and a
+    // buffer built by iterating code points is then shorter than the offsets written into it, which
+    // shifts everything after this string by one and eats the character behind it.
+    const source = 'const label = "ship 🚀";\nconst b = 2;\n';
+
+    const blanked = maskComments(source, typescript, true);
+
+    expect(maskComments(source, typescript)).toHaveLength(source.length);
+    expect(blanked).toHaveLength(source.length);
+    // Seven blanks for "ship 🚀": five characters and the two units the emoji occupies.
+    expect(blanked).toBe('const label = "       ";\nconst b = 2;\n');
+  });
+
   test("changes nothing for a caller that does not ask", () => {
     const source = 'const map = { observer: "Acme\\Observers\\OrderObserver" };\n';
 
