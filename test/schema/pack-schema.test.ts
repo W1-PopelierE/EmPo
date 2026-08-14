@@ -646,4 +646,178 @@ describe("packSchema", () => {
 
     expect(success).toBe(true);
   });
+
+  /**
+   * The scopes block and the `scopedBy` that reaches it. Every failure here is invisible in the
+   * answer: a scope that contributes nothing still leaves a well-formed key, it is just not the URL.
+   * So each one is refused where the name is still in front of the person who wrote it.
+   */
+  const prefixPattern = "Route::prefix\\(\\s*'([^']*)'\\s*\\)";
+
+  test("rejects a balanced scope that names no delimiter pair to count", () => {
+    // Without the pair there is nothing to walk, so the scope reaches nothing and every route under
+    // it ships the key it had before anyone declared a group.
+    const scope = { name: "url-prefix", pattern: prefixPattern, value: 1, extent: "balanced" };
+
+    const { success, issues } = parse(pack({ scopes: [scope] }));
+
+    expect(success).toBe(false);
+    expect(issues).toContain(
+      'scopes.0.extent: extent "balanced" needs both open and close, the delimiter pair to count',
+    );
+  });
+
+  test("rejects a file scope that names no group holding the file it covers", () => {
+    // Worse than the balanced case: with no file named there is nothing to key the scope by, and a
+    // rule that covered everything would invent route prefixes across a whole repository.
+    const scope = { name: "url-prefix", pattern: prefixPattern, value: 1, extent: "file" };
+
+    const { success, issues } = parse(pack({ scopes: [scope] }));
+
+    expect(success).toBe(false);
+    expect(issues).toContain(
+      'scopes.0.extent: extent "file" needs file, the group naming the file this scope covers',
+    );
+  });
+
+  test("rejects a scope whose value names a capture group the pattern does not have", () => {
+    const scope = {
+      name: "url-prefix",
+      pattern: prefixPattern,
+      value: 2,
+      extent: "balanced",
+      open: "{",
+      close: "}",
+    };
+
+    const { success, issues } = parse(pack({ scopes: [scope] }));
+
+    expect(success).toBe(false);
+    expect(issues).toContain("scopes.0.value: maps to capture group 2, but the pattern has 1");
+  });
+
+  test("rejects a file scope whose file names a capture group the pattern does not have", () => {
+    const scope = {
+      name: "url-prefix",
+      pattern: `${prefixPattern}->group\\(\\s*base_path\\(\\s*'([^']*)'`,
+      value: 1,
+      extent: "file",
+      file: 3,
+    };
+
+    const { success, issues } = parse(pack({ scopes: [scope] }));
+
+    expect(success).toBe(false);
+    expect(issues).toContain("scopes.0.file: names capture group 3, but the pattern has 2");
+  });
+
+  /** A scope a rule below can legitimately name, so only the field under test is ever wrong. */
+  const declaredScope = {
+    name: "url-prefix",
+    pattern: prefixPattern,
+    value: 1,
+    extent: "balanced",
+    open: "{",
+    close: "}",
+  };
+
+  test("rejects a scopedBy that contributes to a part the map never defines", () => {
+    const rule = {
+      symbol: "http-route",
+      pattern: twoGroups,
+      map: { method: 1, path: 2 },
+      scopedBy: { name: "url-prefix", part: "host", join: "/" },
+    };
+
+    const { success, issues } = parse(pack({ scopes: [declaredScope], produces: [rule] }));
+
+    expect(success).toBe(false);
+    expect(issues).toContain('produces.0.scopedBy.part: scopes part "host", which is not in map');
+  });
+
+  test("rejects a scopedBy naming a scope no rule in the pack declares", () => {
+    // A typo in the name is the whole of it, and the cost is a key short by exactly the prefix
+    // somebody added the field to carry.
+    const rule = {
+      symbol: "http-route",
+      pattern: twoGroups,
+      map: { method: 1, path: 2 },
+      scopedBy: { name: "uri-prefix", part: "path", join: "/" },
+    };
+
+    const { success, issues } = parse(pack({ scopes: [declaredScope], consumes: [rule] }));
+
+    expect(success).toBe(false);
+    expect(issues).toContain(
+      'consumes.0.scopedBy.name: names scope "uri-prefix", which no rule in this pack\'s scopes block declares',
+    );
+    // The pack does declare scopes, so the message carries no tail about there being none.
+    expect(issues).not.toContain("the pack declares no scopes at all");
+  });
+
+  test("says so plainly when the pack declares no scopes at all", () => {
+    // The likelier mistake of the two, and the one where "which rule did I mean" is the wrong
+    // question: there is no scopes block to have meant a rule in.
+    const rule = {
+      symbol: "http-route",
+      pattern: twoGroups,
+      map: { method: 1, path: 2 },
+      scopedBy: { name: "url-prefix", part: "path", join: "/" },
+    };
+
+    const { success, issues } = parse(pack({ produces: [rule] }));
+
+    expect(success).toBe(false);
+    expect(issues).toContain(
+      'produces.0.scopedBy.name: names scope "url-prefix", which no rule in this pack\'s scopes block declares (the pack declares no scopes at all)',
+    );
+  });
+
+  test("accepts a scopedBy whose name and part both land", () => {
+    const rule = {
+      symbol: "http-route",
+      pattern: twoGroups,
+      map: { method: 1, path: 2 },
+      key: "{method} {path}",
+      scopedBy: { name: "url-prefix", part: "path", join: "/" },
+    };
+
+    const { success, issues } = parse(pack({ scopes: [declaredScope], produces: [rule] }));
+
+    expect(issues).toBe("");
+    expect(success).toBe(true);
+  });
+
+  test("rejects a symbol rule that declares both key and keys", () => {
+    // Which one is the key? Both is a defect that names itself at load rather than one template
+    // silently winning over the other.
+    const rule = {
+      symbol: "http-route",
+      pattern: twoGroups,
+      map: { method: 1, path: 2 },
+      key: "{method} {path}",
+      keys: ["GET {path}", "POST {path}"],
+    };
+
+    const { success, issues } = parse(pack({ produces: [rule] }));
+
+    expect(success).toBe(false);
+    expect(issues).toContain("produces.0.keys: a symbol rule declares key or keys, not both");
+  });
+
+  test("rejects one keys template naming a part the map never defines, at that template's path", () => {
+    // The position matters: a rule declaring seven templates is exactly the shape this field exists
+    // for, and "somewhere in keys" would send the author to read all of them.
+    const rule = {
+      symbol: "http-route",
+      pattern: twoGroups,
+      map: { method: 1, path: 2 },
+      keys: ["GET {path}", "POST {host}"],
+    };
+
+    const { success, issues } = parse(pack({ produces: [rule] }));
+
+    expect(success).toBe(false);
+    expect(issues).toContain('produces.0.keys.1: names part "host", which is not in map');
+  });
 });

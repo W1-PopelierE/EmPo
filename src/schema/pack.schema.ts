@@ -132,6 +132,62 @@ export const extractRuleSchema = z
 const RESOLVES_BY_NAME: z.infer<typeof resolveStrategySchema>[] = ["short-name", "observer"];
 
 /**
+ * A named value an enclosing construct contributes to the symbols declared under it
+ * (`types.ts`, `ScopeRule`). The two extent forms carry different companions, and each is checked
+ * here for the same reason a hazard's is: `balanced` without its delimiter pair would scope
+ * nothing, and `file` without the group naming the file would scope every file at once. The second
+ * failure invents route prefixes across a whole repository, which is worse than missing one, so
+ * both fail at load where the message can name the pack.
+ */
+const scopeRuleSchema = z
+  .object({
+    name: z.string().min(1),
+    pattern: regex,
+    value: z.number().int().positive(),
+    extent: z.enum(["balanced", "file"]),
+    open: z.string().min(1).optional(),
+    close: z.string().min(1).optional(),
+    file: z.number().int().positive().optional(),
+  })
+  .superRefine((rule, ctx) => {
+    const groups = groupCount(rule.pattern);
+    if (rule.value > groups) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["value"],
+        message: `maps to capture group ${rule.value}, but the pattern has ${groups}`,
+      });
+    }
+
+    if (rule.extent === "balanced") {
+      if (rule.open === undefined || rule.close === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["extent"],
+          message: 'extent "balanced" needs both open and close, the delimiter pair to count',
+        });
+      }
+      return;
+    }
+
+    if (rule.file === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["extent"],
+        message: 'extent "file" needs file, the group naming the file this scope covers',
+      });
+      return;
+    }
+    if (rule.file > groups) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["file"],
+        message: `names capture group ${rule.file}, but the pattern has ${groups}`,
+      });
+    }
+  });
+
+/**
  * A `map` naming a capture group the pattern does not have used to yield a silently empty key, and
  * an empty key matches nothing forever. It is a pack defect, so it fails at load time, where the
  * message can name the pack, rather than as a missing bridge edge a user has to go hunting for.
@@ -151,9 +207,35 @@ export const symbolRuleSchema = z
     pathPattern: regex.optional(),
     map: z.record(z.string().min(1), z.number().int().positive()),
     key: z.string().optional(),
+    /**
+     * One match, several symbols. A construct that registers a family of them in a line writes it
+     * here rather than as N copies of one rule differing only in their key template, which is a
+     * shape nobody keeps in sync: a fix to the pattern lands in six of the seven.
+     */
+    keys: z.array(z.string()).min(1).optional(),
     normalize: z.record(z.string().min(1), z.array(normalizerSchema)).optional(),
+    /**
+     * What an enclosing construct contributes to one part of this symbol. `join` is required and
+     * not defaulted to "/": a scope is not always a path (a namespace joins on the language's
+     * separator, a route name on a dot), and a default would be the engine guessing at a language.
+     */
+    scopedBy: z
+      .object({
+        name: z.string().min(1),
+        part: z.string().min(1),
+        join: z.string().min(1),
+      })
+      .optional(),
   })
   .superRefine((rule, ctx) => {
+    if (rule.scopedBy !== undefined && !Object.hasOwn(rule.map, rule.scopedBy.part)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["scopedBy", "part"],
+        message: `scopes part "${rule.scopedBy.part}", which is not in map`,
+      });
+    }
+
     // Exactly one source. Both would be ambiguous about what the groups count against, and neither
     // leaves nothing to match, so either is a pack defect that should name itself at load.
     if ((rule.pattern === undefined) === (rule.pathPattern === undefined)) {
@@ -177,11 +259,20 @@ export const symbolRuleSchema = z
       }
     }
 
-    for (const part of templateParts(rule.key)) {
-      if (!Object.hasOwn(rule.map, part)) {
+    if (rule.key !== undefined && rule.keys !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["keys"],
+        message: "a symbol rule declares key or keys, not both",
+      });
+    }
+
+    for (const [position, template] of [rule.key, ...(rule.keys ?? [])].entries()) {
+      for (const part of templateParts(template)) {
+        if (Object.hasOwn(rule.map, part)) continue;
         ctx.addIssue({
           code: "custom",
-          path: ["key"],
+          path: rule.key === undefined ? ["keys", position - 1] : ["key"],
           message: `names part "${part}", which is not in map`,
         });
       }
@@ -526,6 +617,11 @@ export const packSchema = z
       .default({}),
     produces: z.array(symbolRuleSchema).default([]),
     consumes: z.array(symbolRuleSchema).default([]),
+    /**
+     * Optional, like `hazards` and for the same reason: a pack declaring none says nothing encloses
+     * a symbol in this language, which is what every pack said before the block existed.
+     */
+    scopes: z.array(scopeRuleSchema).optional(),
     tests: z
       .object({
         paths: z.array(z.string()).default([]),
@@ -683,6 +779,26 @@ export const packSchema = z
             message: 'the "view" strategy needs a views block naming the roots to resolve against',
           });
         }
+      }
+    }
+
+    // A `scopedBy` naming a scope no rule declares contributes nothing, forever, and the symbol it
+    // was written for then ships a key that is short by exactly the prefix somebody added the field
+    // to carry. That failure is invisible in the answer: `GET orders` is a well-formed key, it just
+    // is not the URL. A typo in the name is the whole of it, so it is refused where the name is
+    // still in front of the person who wrote it.
+    const declared = new Set((pack.scopes ?? []).map((scope) => scope.name));
+    for (const family of ["produces", "consumes"] as const) {
+      for (const [position, rule] of pack[family].entries()) {
+        const scoped = rule.scopedBy;
+        if (scoped === undefined || declared.has(scoped.name)) continue;
+        ctx.addIssue({
+          code: "custom",
+          path: [family, position, "scopedBy", "name"],
+          message:
+            `names scope "${scoped.name}", which no rule in this pack's scopes block declares` +
+            (declared.size === 0 ? " (the pack declares no scopes at all)" : ""),
+        });
       }
     }
 

@@ -237,7 +237,11 @@ function transactionExtents(compiled: CompiledHazards, source: string): Extent[]
 
 /**
  * The callback form, whether it balances braces around a closure body or parens around an arrow
- * function's call. From the end of the opener match, find the first `open` delimiter, then walk
+ * function's call. Exported because a scope's `balanced` extent (engine/extractor.ts) is the same
+ * question asked about a different opener: what does this construct enclose. The walk knows nothing
+ * of transactions, so the two callers share it rather than each keeping a copy that can drift.
+ *
+ * From the end of the opener match, find the first `open` delimiter, then walk
  * counting `open` and `close` until the depth returns to zero. The offset just past that balancing
  * `close` ends the extent, so the closing delimiter itself is inside it, which costs nothing: no
  * dispatch pattern starts at a bare delimiter.
@@ -250,7 +254,7 @@ function transactionExtents(compiled: CompiledHazards, source: string): Extent[]
  * module docstring). A stray closing delimiter in a string ends the extent early and hides a real
  * hazard; a stray opening one extends it and can invent one.
  */
-function balancedEnd(source: string, from: number, open: string, close: string): number {
+export function balancedEnd(source: string, from: number, open: string, close: string): number {
   const opened = source.indexOf(open, from);
   if (opened === -1) return source.length;
 

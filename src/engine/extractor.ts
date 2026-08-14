@@ -1,16 +1,19 @@
 import { posix } from "node:path";
 import picomatch from "picomatch";
 import { configError } from "../errors";
+import { normalizeRepoPath } from "../schema/config.schema";
 import type {
   CommentSyntax,
   EdgeKind,
   Normalizer,
   Pack,
   ResolveStrategy,
+  ScopeRule,
   SymbolRef,
   SymbolRule,
 } from "../schema/types";
 import {
+  balancedEnd,
   type CompiledHazards,
   compileHazards,
   type DispatchSite,
@@ -123,6 +126,11 @@ interface CompiledSymbolRule {
   overPath: boolean;
 }
 
+interface CompiledScopeRule {
+  rule: ScopeRule;
+  regex: RegExp;
+}
+
 interface CompiledKindRule {
   kind: string;
   matchesPath?: (path: string) => boolean;
@@ -141,6 +149,8 @@ export interface CompiledPack {
   edgeRules: CompiledEdgeRule[];
   produces: CompiledSymbolRule[];
   consumes: CompiledSymbolRule[];
+  /** Empty where the pack declares no scopes block, which is what every pack said before it existed. */
+  scopes: CompiledScopeRule[];
   /** The pack's `declares` patterns. Empty where the pack declares none. */
   declares: RegExp[];
   testPaths: ((relPath: string) => boolean)[];
@@ -182,6 +192,9 @@ export function compilePack(pack: Pack): CompiledPack {
     edgeRules,
     produces: pack.produces.map(compileSymbolRule),
     consumes: pack.consumes.map(compileSymbolRule),
+    // Global and multiline for the same reason every other source pattern here is: a file holds
+    // many groups, and a pattern without `g` would find the first and stop.
+    scopes: (pack.scopes ?? []).map((rule) => ({ rule, regex: new RegExp(rule.pattern, "gm") })),
     declares: (pack.declares ?? []).map((pattern) => new RegExp(pattern, "gm")),
     testPaths: pack.tests.paths.map(compileTestPath),
     hazards: compileHazards(pack),
@@ -228,8 +241,18 @@ export function compileTestPath(entry: string): (relPath: string) => boolean {
   return (relPath) => relPath.startsWith(prefix);
 }
 
-/** Returns null when the file yields no node, in which case its captures are dropped too. */
-export function extractFile(compiled: CompiledPack, scanned: ScannedFile): ExtractedFile | null {
+/**
+ * Returns null when the file yields no node, in which case its captures are dropped too.
+ *
+ * `fileScopes` is what some *other* file said about this one (`collectFileScopes`), scope name to
+ * the values it contributes, outermost first. Absent is the ordinary case and means the same as
+ * empty: nothing outside this file claims to enclose it.
+ */
+export function extractFile(
+  compiled: CompiledPack,
+  scanned: ScannedFile,
+  fileScopes: ReadonlyMap<string, string[]> = new Map(),
+): ExtractedFile | null {
   // Every rule reads the masked source, never the raw one. A commented-out route is not a route,
   // and a class name inside a block comment is not a coupling (engine/mask.ts). The syntax is
   // chosen by extension, because a pack of one language can hold two: a Vue SFC's html template
@@ -261,6 +284,9 @@ export function extractFile(compiled: CompiledPack, scanned: ScannedFile): Extra
   // Built once, over the same masked view every rule below reads, so a name written inside a
   // commented-out line is not evidence that an export needs an import.
   const ownersAt = ownerAttributor(symbols, source);
+  // The same masked view every rule below reads: a route group inside a commented-out block encloses
+  // nothing, and neither does the route inside it.
+  const scopesAt = scopeAttributor(compiled.scopes, source, fileScopes);
 
   return {
     file: scanned.file,
@@ -271,8 +297,22 @@ export function extractFile(compiled: CompiledPack, scanned: ScannedFile): Extra
     kind: kindOf(compiled, source, codeOnly, scanned.relPath),
     isTest,
     assertsValue: isTest && assertsValue(compiled.pack, source),
-    produces: extractSymbols(compiled.produces, source, scanned.relPath, starts, ownersAt),
-    consumes: extractSymbols(compiled.consumes, source, scanned.relPath, starts, ownersAt),
+    produces: extractSymbols(
+      compiled.produces,
+      source,
+      scanned.relPath,
+      starts,
+      ownersAt,
+      scopesAt,
+    ),
+    consumes: extractSymbols(
+      compiled.consumes,
+      source,
+      scanned.relPath,
+      starts,
+      ownersAt,
+      scopesAt,
+    ),
     captures: extractCaptures(
       compiled.edgeRules,
       source,
@@ -681,6 +721,7 @@ function extractSymbols(
   relPath: string,
   starts: number[],
   ownersAt: (line: number, statement: string) => string[] | undefined,
+  scopesAt: ScopeAttributor,
 ): SymbolRef[] {
   const refs: SymbolRef[] = [];
   for (const compiled of rules) {
@@ -696,12 +737,24 @@ function extractSymbols(
       // there, and handing over the matched path text would hand it to whichever export a directory
       // name happens to spell.
       const match = compiled.regex.exec(relPath);
-      if (match !== null) refs.push(refFrom(compiled, [...match], 1, ownersAt(0, "")));
+      // Offset 0: a path rule matched the file, not a place in it, so the only scopes that can
+      // reach it are the file's own. A `balanced` extent opening at offset 0 would enclose it too,
+      // and honestly: it encloses the whole file.
+      if (match !== null)
+        refs.push(...refsFrom(compiled, [...match], 1, ownersAt(0, ""), scopesAt(0)));
       continue;
     }
     for (const match of matchAll(compiled.regex, source)) {
       const line = lineAt(starts, match.index);
-      refs.push(refFrom(compiled, match.groups, line, ownersAt(line, match.groups[0] ?? "")));
+      refs.push(
+        ...refsFrom(
+          compiled,
+          match.groups,
+          line,
+          ownersAt(line, match.groups[0] ?? ""),
+          scopesAt(match.index),
+        ),
+      );
     }
   }
   return refs.sort(
@@ -709,32 +762,183 @@ function extractSymbols(
   );
 }
 
-function refFrom(
+/**
+ * The refs one match yields: one per key template, or one from the default join where the rule
+ * declares no template at all. They share a line and an owner set, because they are one line of
+ * code: `Route::resource('orders', OrderController::class)` is seven URLs registered at one place,
+ * and citing six of them somewhere else would be citing somewhere they are not written.
+ */
+function refsFrom(
   compiled: CompiledSymbolRule,
   groups: (string | undefined)[],
   line: number,
   owners: string[] | undefined,
-): SymbolRef {
+  scopeValues: (name: string) => string[],
+): SymbolRef[] {
   const parts: Record<string, string> = {};
   for (const part of compiled.parts) {
     const group = compiled.rule.map[part] ?? 0;
     parts[part] = applyNormalizers(groups[group] ?? "", compiled.rule.normalize?.[part] ?? []);
   }
-  return {
+
+  const scoped = compiled.rule.scopedBy;
+  if (scoped !== undefined) {
+    // The part's own normalizers run over every scope value too. A scope contributes to that part,
+    // so it is the same kind of string and owes the same shape: a `strip-leading-slash` on `path`
+    // that ran on the route and not on the prefix would leave `/api` joined to `orders` as
+    // `/api/orders`, half-normalized, and never equal to the key the other side of the bridge
+    // assembles from a leading-slash-stripped whole.
+    const normalize = compiled.rule.normalize?.[scoped.part] ?? [];
+    const pieces = [
+      ...scopeValues(scoped.name).map((value) => applyNormalizers(value, normalize)),
+      parts[scoped.part] ?? "",
+    ];
+    parts[scoped.part] = joinScoped(pieces, scoped.join);
+  }
+
+  return symbolKeys(compiled.rule, compiled.parts, parts).map((key) => ({
     symbol: compiled.rule.symbol,
-    key: symbolKey(compiled.rule, compiled.parts, parts),
+    key,
     line,
     // Spread rather than assigned, for the same reason a capture's is: a pack yielding one node per
     // file writes no key at all rather than a key holding undefined.
     ...(owners === undefined ? {} : { owners }),
-  };
+  }));
 }
 
-function symbolKey(rule: SymbolRule, order: string[], parts: Record<string, string>): string {
-  if (rule.key !== undefined) {
-    return rule.key.replace(/\{([A-Za-z0-9_]+)\}/g, (_, part: string) => parts[part] ?? "");
+/**
+ * Outermost scope value first, the symbol's own last, joined on the separator the pack named.
+ *
+ * The separator is trimmed off both ends of every piece before they are joined, so a pack does not
+ * have to write a regex that anticipates whether the author of the code left a slash on. A Laravel
+ * author writes `Route::prefix('api')` and `Route::prefix('/api/')` interchangeably and Laravel
+ * reads them the same; a key that read them as `api/orders` and `/api//orders` would put two
+ * spellings of one route in the bridge table and match neither against the one the frontend calls.
+ *
+ * An empty piece is dropped rather than joined. `Route::prefix('')` is a group that adds no segment,
+ * and a piece kept would make it add a separator.
+ */
+function joinScoped(pieces: string[], join: string): string {
+  const trimmed: string[] = [];
+  for (const piece of pieces) {
+    let value = piece;
+    while (value.startsWith(join)) value = value.slice(join.length);
+    while (value.endsWith(join)) value = value.slice(0, -join.length);
+    if (value !== "") trimmed.push(value);
   }
-  return order.map((part) => parts[part] ?? "").join(" ");
+  return trimmed.join(join);
+}
+
+/** The scope values in force at one offset in one file, by scope name, outermost first. */
+type ScopeAttributor = (offset: number) => (name: string) => string[];
+
+/** A `balanced` scope's reach in one file, with the value it contributes to anything inside it. */
+interface ScopeExtent {
+  name: string;
+  value: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * Every `balanced` scope this file opens, and the answer for one offset inside it.
+ *
+ * Unlike `hazards.ts`'s `innermostEnclosing`, which wants the one transaction a dispatch sits in,
+ * a scope wants **all** of them: `Route::prefix('admin')` around `Route::prefix('settings')` around
+ * a route is the URL `/admin/settings/...`, and reporting only the tighter one would produce a key
+ * that is wrong in a way that still looks like a route. Outermost first, which is prefix order:
+ * a scope that opens earlier encloses one that opens later, and where two open at the same offset
+ * the wider is the outer.
+ *
+ * The file scopes come first, ahead of every textual one, because they enclose the file that holds
+ * them all. They arrive already resolved from `collectFileScopes`, since the construct that names
+ * this file is written in a different one.
+ */
+function scopeAttributor(
+  rules: CompiledScopeRule[],
+  source: string,
+  fileScopes: ReadonlyMap<string, string[]>,
+): ScopeAttributor {
+  const extents: ScopeExtent[] = [];
+  for (const rule of rules) {
+    if (rule.rule.extent !== "balanced") continue;
+    for (const match of matchAll(rule.regex, source)) {
+      const matchEnd = match.index + (match.groups[0]?.length ?? 0);
+      extents.push({
+        name: rule.rule.name,
+        value: match.groups[rule.rule.value] ?? "",
+        start: match.index,
+        end: balancedEnd(source, matchEnd, rule.rule.open ?? "", rule.rule.close ?? ""),
+      });
+    }
+  }
+  extents.sort((a, b) => a.start - b.start || b.end - a.end);
+
+  return (offset) => (name) => [
+    ...(fileScopes.get(name) ?? []),
+    ...extents
+      .filter((extent) => extent.name === name && offset >= extent.start && offset < extent.end)
+      .map((extent) => extent.value),
+  ];
+}
+
+/**
+ * The `file` scopes a root declares: what each construct that names another file contributes to
+ * everything that file produces.
+ *
+ * This is the one thing about a symbol that its own file cannot answer, so it is read before
+ * extraction rather than during it. A Laravel `RouteServiceProvider` says `Route::prefix('api')
+ * ->group(base_path('routes/api.php'))`, and read from inside `routes/api.php` there is nothing at
+ * all to see: every path in that file is short by a segment and each one is a well-formed route.
+ *
+ * The pass reads only the scope patterns, over sources `scanRoot` has already read, so it costs a
+ * regex sweep and no I/O. Sorted by the naming file and then by offset, so two providers naming one
+ * route file contribute in an order that does not depend on directory order.
+ *
+ * **One root.** The map is keyed by the repo-relative path a match names, but only files this root
+ * scanned are ever looked up in it, so a provider in one root naming a route file in another
+ * contributes nothing. That is a real ceiling and not a rounding error for a repository that splits
+ * its backend across roots; see docs/04-language-packs.md.
+ */
+export function collectFileScopes(
+  compiled: CompiledPack,
+  files: readonly { file: string; relPath: string; source: string }[],
+): Map<string, Map<string, string[]>> {
+  const byFile = new Map<string, Map<string, string[]>>();
+  const rules = compiled.scopes.filter((rule) => rule.rule.extent === "file");
+  if (rules.length === 0) return byFile;
+
+  for (const scanned of [...files].sort((a, b) => compareStrings(a.file, b.file))) {
+    const syntax = commentSyntaxFor(compiled.pack, scanned.relPath);
+    const source = maskComments(scanned.source, syntax);
+    const found: { named: string; name: string; value: string; index: number }[] = [];
+    for (const rule of rules) {
+      for (const match of matchAll(rule.regex, source)) {
+        const named = match.groups[rule.rule.file ?? 0];
+        if (named === undefined || named === "") continue;
+        found.push({
+          named: normalizeRepoPath(named),
+          name: rule.rule.name,
+          value: match.groups[rule.rule.value] ?? "",
+          index: match.index,
+        });
+      }
+    }
+    for (const entry of found.sort((a, b) => a.index - b.index)) {
+      const scopes = byFile.get(entry.named) ?? new Map<string, string[]>();
+      scopes.set(entry.name, [...(scopes.get(entry.name) ?? []), entry.value]);
+      byFile.set(entry.named, scopes);
+    }
+  }
+  return byFile;
+}
+
+function symbolKeys(rule: SymbolRule, order: string[], parts: Record<string, string>): string[] {
+  const templates = rule.keys ?? (rule.key === undefined ? [] : [rule.key]);
+  if (templates.length === 0) return [order.map((part) => parts[part] ?? "").join(" ")];
+  return templates.map((template) =>
+    template.replace(/\{([A-Za-z0-9_]+)\}/g, (_, part: string) => parts[part] ?? ""),
+  );
 }
 
 /**

@@ -6,7 +6,13 @@ import type {
   NameResolution,
   Pack,
 } from "../schema/types";
-import { compilePack, type ExtractedFile, extractFile, symbolNodes } from "./extractor";
+import {
+  collectFileScopes,
+  compilePack,
+  type ExtractedFile,
+  extractFile,
+  symbolNodes,
+} from "./extractor";
 import { tallyNames } from "./names";
 import { byEdgeOrder, byNodeId, compareStrings } from "./order";
 import { readPackages } from "./packages";
@@ -80,9 +86,16 @@ export function buildRoot(options: BuildRootOptions): RootGraph {
     ignore: options.ignore,
   });
 
+  // Read before any file is extracted, because it is the one thing a file cannot answer about
+  // itself: what some other file says encloses it. A Laravel route file's paths are short by the
+  // prefix its RouteServiceProvider mounts it under, and nothing inside the route file says so
+  // (engine/extractor.ts, `collectFileScopes`). Empty for every pack that declares no `file` scope,
+  // which is every pack that declares no scopes at all.
+  const fileScopes = collectFileScopes(compiled, scanned);
+
   const extracted: ExtractedFile[] = [];
   for (const file of scanned) {
-    const result = extractFile(compiled, file);
+    const result = extractFile(compiled, file, fileScopes.get(file.file));
     if (result !== null) extracted.push(result);
   }
 

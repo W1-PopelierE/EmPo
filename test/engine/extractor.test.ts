@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { compilePack, type ExtractedFile, extractFile } from "../../src/engine/extractor";
+import {
+  collectFileScopes,
+  compilePack,
+  type ExtractedFile,
+  extractFile,
+} from "../../src/engine/extractor";
 import type { ScannedFile } from "../../src/engine/scanner";
 import { EmpoError } from "../../src/errors";
 import type { Pack, SymbolRule } from "../../src/schema/types";
@@ -1099,5 +1104,292 @@ describe("capture owners", () => {
     expect(extracted.captures[0]?.owners).toBeUndefined();
     expect(extracted.consumes[0]?.owners).toBeUndefined();
     expect("owners" in (extracted.captures[0] ?? {})).toBe(false);
+  });
+});
+
+/**
+ * What an enclosing construct contributes to a symbol declared under it. A route registered inside
+ * a prefixed group answers a URL nothing on its own line spells, so what needs pinning is that the
+ * prefix reaches the key, that it reaches only what the construct really encloses, and that a pack
+ * declaring no scopes at all is left exactly as it was.
+ */
+describe("symbol scopes", () => {
+  // A php-shaped syntax, so the masked view is the one every rule reads. basePack declares no
+  // comments block at all, and the commented-out-group test below needs one to be a test of
+  // anything.
+  const phpSyntax: NonNullable<Pack["comments"]> = {
+    line: ["//"],
+    block: [["/*", "*/"]],
+    stringQuotes: ["'", '"'],
+  };
+
+  const groupScope: NonNullable<Pack["scopes"]>[number] = {
+    name: "url-prefix",
+    pattern: "Route::prefix\\(\\s*'([^']*)'\\s*\\)",
+    value: 1,
+    extent: "balanced",
+    open: "{",
+    close: "}",
+  };
+
+  const routeRule: SymbolRule = {
+    symbol: "http-route",
+    pattern: "Route::(get|post)\\(\\s*'([^']*)'",
+    map: { method: 1, path: 2 },
+    key: "{method} {path}",
+    normalize: { method: ["upper"] },
+    scopedBy: { name: "url-prefix", part: "path", join: "/" },
+  };
+
+  const scopePack: Pack = {
+    ...fallbackPack,
+    comments: phpSyntax,
+    scopes: [groupScope],
+    produces: [routeRule],
+  };
+
+  /** The produced keys of one routes file, in the order extractFile sorted them. */
+  function keys(pack: Pack, source: string, relPath = "routes/api.php"): string[] {
+    return extract(pack, file(relPath, source)).produces.map((ref) => ref.key);
+  }
+
+  test("prefixes a key with the scope enclosing it, and leaves a route outside it alone", () => {
+    const source = [
+      "<?php", // 1
+      "Route::prefix('api')->group(function () {", // 2
+      "    Route::get('orders', 'index');", // 3
+      "});", // 4
+      "Route::get('health', 'health');", // 5
+    ].join("\n");
+
+    // The whole point of the field: line 3 and line 5 are spelled identically as far as the route
+    // rule can see, and only one of them answers /api/orders.
+    expect(keys(scopePack, source)).toEqual(["GET api/orders", "GET health"]);
+  });
+
+  test("composes nested scopes from the outside in", () => {
+    // Outermost first is prefix order, and it is the only order that produces a URL: reversed, this
+    // reads v1/api/orders, which is still a well-formed route and is not the one Laravel serves.
+    const source = [
+      "<?php",
+      "Route::prefix('api')->group(function () {",
+      "    Route::prefix('v1')->group(function () {",
+      "        Route::get('orders', 'index');",
+      "    });",
+      "});",
+    ].join("\n");
+
+    expect(keys(scopePack, source)).toEqual(["GET api/v1/orders"]);
+  });
+
+  test("reads a scope value with a leading or trailing separator as the same key as one without", () => {
+    // A Laravel author writes prefix('api') and prefix('/api/') interchangeably and Laravel reads
+    // them the same. Two spellings of one route in the bridge table match neither side.
+    const bare = [
+      "<?php",
+      "Route::prefix('api')->group(function () {",
+      "    Route::get('orders', 'index');",
+      "});",
+    ].join("\n");
+    const padded = [
+      "<?php",
+      "Route::prefix('/api/')->group(function () {",
+      "    Route::get('orders', 'index');",
+      "});",
+    ].join("\n");
+
+    expect(keys(scopePack, padded)).toEqual(keys(scopePack, bare));
+    expect(keys(scopePack, padded)).toEqual(["GET api/orders"]);
+  });
+
+  test("adds no separator for a scope whose value is empty", () => {
+    // `Route::prefix('')` is a group that adds no segment. A piece kept would make it add a slash,
+    // and `/orders` is not the key the other side of the bridge assembles.
+    const source = [
+      "<?php",
+      "Route::prefix('')->group(function () {",
+      "    Route::get('orders', 'index');",
+      "});",
+    ].join("\n");
+
+    expect(keys(scopePack, source)).toEqual(["GET orders"]);
+  });
+
+  test("runs the part's own normalizers over the scope value too", () => {
+    // A scope contributes to a part, so it is the same kind of string and owes the same shape. The
+    // join is a dot here on purpose: with a slash, joinScoped's own trimming would hide whether
+    // `strip-leading-slash` ever ran, and half-normalized is exactly the failure this pins.
+    const namePack: Pack = {
+      ...fallbackPack,
+      comments: phpSyntax,
+      scopes: [
+        {
+          name: "name-prefix",
+          pattern: "Route::name\\(\\s*'([^']*)'\\s*\\)",
+          value: 1,
+          extent: "balanced",
+          open: "{",
+          close: "}",
+        },
+      ],
+      produces: [
+        {
+          symbol: "route-name",
+          pattern: "->name\\(\\s*'([^']*)'\\s*\\)",
+          map: { name: 1 },
+          key: "{name}",
+          normalize: { name: ["strip-leading-slash"] },
+          scopedBy: { name: "name-prefix", part: "name", join: "." },
+        },
+      ],
+    };
+    const source = [
+      "<?php",
+      "Route::name('/admin')->group(function () {",
+      "    Route::get('orders')->name('orders.index');",
+      "});",
+    ].join("\n");
+
+    // Unnormalized the scope value would arrive as "/admin" and the key would read
+    // "/admin.orders.index", which is nothing the other side ever assembles.
+    expect(keys(namePack, source)).toEqual(["admin.orders.index"]);
+  });
+
+  test("scopes nothing from a group written inside a comment", () => {
+    // Every rule reads the masked view. A commented-out group encloses nothing, and a masker that
+    // let this through would find no closing brace either, so the scope would run to the end of the
+    // file and prefix every route below it.
+    const source = [
+      "<?php",
+      "// Route::prefix('api')->group(function () {",
+      "Route::get('orders', 'index');",
+    ].join("\n");
+
+    expect(keys(scopePack, source)).toEqual(["GET orders"]);
+  });
+
+  test("leaves a pack that declares no scopes block exactly as it was", () => {
+    // The regression net for every pack that shipped before the field existed. The group is right
+    // there in the source and must contribute nothing, because no rule asked it to.
+    const unscopedPack: Pack = {
+      ...fallbackPack,
+      comments: phpSyntax,
+      produces: [
+        {
+          symbol: "http-route",
+          pattern: "Route::(get|post)\\(\\s*'([^']*)'",
+          map: { method: 1, path: 2 },
+          key: "{method} {path}",
+          normalize: { method: ["upper"] },
+        },
+      ],
+    };
+    const source = [
+      "<?php",
+      "Route::prefix('api')->group(function () {",
+      "    Route::get('orders', 'index');",
+      "});",
+    ].join("\n");
+
+    expect(unscopedPack.scopes).toBeUndefined();
+    expect(keys(unscopedPack, source)).toEqual(["GET orders"]);
+  });
+
+  /**
+   * Containment by reference rather than by text. A `RouteServiceProvider` says which file it wraps
+   * and what it contributes, and read from inside that file there is nothing at all to see: every
+   * path in it is short by a segment and each one is a well-formed route.
+   */
+  describe("file scopes", () => {
+    const filePack: Pack = {
+      ...fallbackPack,
+      comments: phpSyntax,
+      scopes: [
+        {
+          name: "url-prefix",
+          pattern:
+            "Route::prefix\\(\\s*'([^']*)'\\s*\\)\\s*->group\\(\\s*base_path\\(\\s*'([^']*)'\\s*\\)",
+          value: 1,
+          extent: "file",
+          file: 2,
+        },
+      ],
+      produces: [routeRule],
+    };
+
+    const provider = {
+      file: "app/Providers/RouteServiceProvider.php",
+      relPath: "app/Providers/RouteServiceProvider.php",
+      source: "<?php\n\nRoute::prefix('api')->group(base_path('routes/api.php'));\n",
+    };
+    const named = {
+      file: "routes/api.php",
+      relPath: "routes/api.php",
+      source: "<?php\n\nRoute::get('orders', 'index');\n",
+    };
+    const unnamed = {
+      file: "routes/web.php",
+      relPath: "routes/web.php",
+      source: "<?php\n\nRoute::get('health', 'health');\n",
+    };
+
+    /** The keys one scanned file produces once the root's file scopes have been collected. */
+    function scopedKeys(target: { file: string; relPath: string; source: string }): string[] {
+      const compiled = compilePack(filePack);
+      const scopes = collectFileScopes(compiled, [provider, named, unnamed]);
+      const extracted = extractFile(
+        compiled,
+        { root: ".", lang: "php", ...target },
+        scopes.get(target.file) ?? new Map(),
+      );
+      if (extracted === null) throw new Error(`expected ${target.relPath} to yield a node`);
+      return extracted.produces.map((ref) => ref.key);
+    }
+
+    test("prefixes the produces of the file another file names", () => {
+      expect(scopedKeys(named)).toEqual(["GET api/orders"]);
+    });
+
+    test("leaves a file nobody names unprefixed", () => {
+      expect(scopedKeys(unnamed)).toEqual(["GET health"]);
+    });
+  });
+});
+
+/**
+ * One match, several symbols. A construct that registers a family of routes in one line is still one
+ * line of code, so what needs pinning is that the refs share the place they were written and the
+ * exports they belong to, rather than being cited wherever the engine felt like.
+ */
+describe("symbol rules declaring several keys", () => {
+  const resourcePack: Pack = {
+    ...withNode(basePack, {
+      ...basePack.node,
+      id: { strategy: "symbol", symbolPattern: SYMBOL_PATTERN, indexNames: ["index"] },
+    }),
+    produces: [
+      {
+        symbol: "http-route",
+        pattern: "resource\\(\\s*'([^']*)'",
+        map: { path: 1 },
+        keys: ["GET {path}", "POST {path}", "DELETE {path}"],
+      },
+    ],
+  };
+
+  test("yields one ref per key template, all on the matched line and with the same owners", () => {
+    const source = [
+      "export function routes() {", // 1
+      "  resource('orders');", // 2
+      "}", // 3
+    ].join("\n");
+
+    const extracted = extract(resourcePack, file("src/routes.ts", source));
+
+    expect(extracted.produces).toEqual([
+      { symbol: "http-route", key: "DELETE orders", line: 2, owners: ["src/routes.ts#routes"] },
+      { symbol: "http-route", key: "GET orders", line: 2, owners: ["src/routes.ts#routes"] },
+      { symbol: "http-route", key: "POST orders", line: 2, owners: ["src/routes.ts#routes"] },
+    ]);
   });
 });
