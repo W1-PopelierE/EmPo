@@ -549,7 +549,16 @@ against a pull request nobody had named.
 
 **The brief also prints every dispatch a changed file makes from inside a loop**, under the heading
 `dispatches inside a loop  (step 2: what this change can put on the queue)`, one row per site naming
-the `file:line`, the job it dispatches and the line the loop opened on. The sites come from the
+the `file:line`, the job it dispatches and the line the loop opened on. Under each row, where the
+resolver matched the job to a node, a `target` line names that node and its file, and an `also
+reached from` line names every other consumer of the job that a scheduler entry reaches, cited on
+that entry's own scheduled line. Both are lookups and neither is new evidence: the job's consumers
+are ordinary edges and a scheduled command is joined to the entry that schedules it. What they add
+is having the two in one place, because what a dispatch does with a failure is written in the
+handler and never at the call site, and a queue that a nightly loop fills and a five-minute entry
+refills is a loop no single one of those three facts states. Only scheduled consumers are listed: the
+row's whole value is the cadence at the far end, so a controller dispatching the same job on a click
+has nothing to say here. The sites come from the
 `loops` rules a language pack declares beside its hazard markers
 ([04-language-packs](04-language-packs.md)) and ride on the graph as an axis of their own. **It is a
 fact in the brief and never a finding**, and every non-empty list says so in a sentence underneath:

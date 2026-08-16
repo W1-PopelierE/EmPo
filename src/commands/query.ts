@@ -10,14 +10,7 @@ import {
 import { nameLines } from "../engine/names";
 import { compareStrings } from "../engine/order";
 import { configError } from "../errors";
-import type {
-  EdgeKind,
-  Graph,
-  GraphEdge,
-  GraphNode,
-  Hazard,
-  NameResolution,
-} from "../schema/types";
+import type { Graph, GraphEdge, GraphNode, Hazard, NameResolution } from "../schema/types";
 import { columnWidth, plural } from "../term";
 
 /**
@@ -119,7 +112,7 @@ export interface BlastRadius {
    * graph records which rule family matched, not whether the php that matched said `@extends` or
    * `view(`, and a column that claimed the second would be inventing a fact the build never kept.
    */
-  consumers: { id: string; fanin: number; kind: string; edge: EdgeKind; evidence: string }[];
+  consumers: { id: string; fanin: number; kind: string; edge: string; evidence: string }[];
   bridges: BridgeReach[];
   /**
    * How many bridge edges the whole graph holds, so an empty `bridges` can say which of the two
@@ -306,6 +299,10 @@ export function blastRadius(graph: Graph, set: GraphNode[]): BlastRadius {
     })
     .sort((a, b) => compareStrings(a.flow, b.flow));
 
+  /** 1 where a join names a node the caller asked about, which is what sorts it to the top. */
+  const namesQueried = (join: { from: string; to: string }): number =>
+    ids.has(join.from) || ids.has(join.to) ? 1 : 0;
+
   return {
     nodes: set,
     faninDirect: direct.length,
@@ -317,7 +314,11 @@ export function blastRadius(graph: Graph, set: GraphNode[]): BlastRadius {
         id: edge.from,
         fanin: graph.fanin[edge.from] ?? 0,
         kind: graph.nodes.find((candidate) => candidate.id === edge.from)?.kind ?? "",
-        edge: edge.kind,
+        // The graph's edge kind is still `bridge`, which is the on-disk name and stays one. What a
+        // reader sees is the word the rest of the output uses: a join is what the section below
+        // calls it, and a consumer row calling the same edge something else is the tool
+        // contradicting itself inside one block.
+        edge: edge.kind === "bridge" ? "join" : edge.kind,
         evidence: `${edge.evidence.file}:${edge.evidence.line}`,
       }))
       .sort((a, b) => b.fanin - a.fanin || compareStrings(a.id, b.id)),
@@ -327,6 +328,16 @@ export function blastRadius(graph: Graph, set: GraphNode[]): BlastRadius {
     // whole of the defect was that the far end went unnamed. Widening this to either end would
     // change nothing at all: the second half of the predicate can never be the one that admits an
     // edge. It reads as the safer spelling and is only the redundant one.
+    //
+    // What it does admit is every OTHER join a consumer in the radius makes, and that is not a
+    // filtering mistake: a controller that consumes the changed class and renders a Vue page has
+    // put that page downstream of the change, and dropping the row would lose the cross-language
+    // reach this section exists for. It is a RANKING problem, and only at a hub. One Laravel Kernel
+    // schedules eighty commands, so asking about one of them yields eighty rows of which
+    // seventy-nine are about the Kernel's other mornings, and under a print cap the one row naming
+    // the queried command lands inside "and 75 more". So the rows that name a queried node sort
+    // first and the siblings keep their place behind them: nothing is hidden, and the cap now cuts
+    // where a reader would have cut.
     bridges: graph.edges
       .filter((edge) => edge.kind === "bridge" && radius.has(edge.from))
       .map((edge) => ({
@@ -334,7 +345,8 @@ export function blastRadius(graph: Graph, set: GraphNode[]): BlastRadius {
         to: edge.to,
         symbol: edge.symbol,
         evidence: `${edge.evidence.file}:${edge.evidence.line}`,
-      })),
+      }))
+      .sort((a, b) => namesQueried(b) - namesQueried(a)),
     bridgeEdgesInGraph: graph.edges.filter((edge) => edge.kind === "bridge").length,
   };
 }

@@ -1303,12 +1303,63 @@ function printFanout(graph: Graph, facts: FileFacts[]): void {
       `  ${`${site.file}:${site.line}`.padEnd(width)}  dispatches ${site.job}` +
         `  loop opened at line ${site.loopLine}`,
     );
+    if (site.target === null) continue;
+    // The job as a coordinate and not as a bare word. `job` is the spelling at the dispatch site and
+    // `target` is the node the resolver matched it to, and printing only the first stops the reader
+    // exactly one hop short of the code that will run: what a dispatch does with a failure is
+    // written in the handler, never at the call.
+    const handler = graph.nodes.find((node) => node.id === site.target);
+    console.log(`    target ${site.target}${handler === undefined ? "" : `  ${handler.file}`}`);
+    for (const other of scheduledSiblings(graph, site)) {
+      console.log(`    also reached from ${other.id}  scheduled at ${other.evidence}`);
+    }
   }
   // Said every time the list is non-empty, because a coordinate with no sentence under it reads as
   // an accusation, and this axis has nothing to accuse anybody of.
   console.log("  How often the loop runs is a property of the data, not of the source, so this");
   console.log("  says nothing about volume. If this diff widened what the loop iterates, that is");
   console.log("  the question to ask out loud.");
+}
+
+/**
+ * The other consumers of a dispatched job that a scheduler entry reaches, and the scheduled line.
+ *
+ * This is the fan-out axis meeting the join axis, and neither half is new: the graph already holds
+ * every consumer of the job, and a scheduled command is already joined to the entry that schedules
+ * it. Printed apart they are two facts a reader has to think to combine. Printed together they are
+ * the sentence "the queue you just widened is also fed on a timer", which is the question that turns
+ * a volume change into a loop and cannot be asked of the dispatch site alone.
+ *
+ * Only scheduled consumers, and not every consumer of the job: a widely used job has thirty, and a
+ * controller that dispatches one on a click has no cadence to compare against. The whole value of
+ * the row is the cadence at the far end, so a consumer nothing schedules has nothing to say here.
+ */
+function scheduledSiblings(
+  graph: Graph,
+  site: { file: string; target: string | null },
+): { id: string; evidence: string }[] {
+  const joins = graph.edges.filter((edge) => edge.kind === "bridge");
+  const seen = new Set<string>();
+  return graph.edges
+    .filter(
+      (edge) =>
+        edge.to === site.target && edge.kind !== "bridge" && edge.evidence.file !== site.file,
+    )
+    .flatMap((edge) =>
+      joins
+        .filter((join) => join.to === edge.from)
+        .map((join) => ({
+          id: edge.from,
+          evidence: `${join.evidence.file}:${join.evidence.line}`,
+        })),
+    )
+    .filter((row) => {
+      const key = `${row.id} ${row.evidence}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => compareStrings(a.id, b.id) || compareStrings(a.evidence, b.evidence));
 }
 
 /**

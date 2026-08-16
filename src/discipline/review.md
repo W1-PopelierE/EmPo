@@ -82,7 +82,11 @@ because a wrong result ships silently there.
 and nothing answers the second, so it is yours to ask. A `join scheduled-command` row means the
 changed file is reached from a scheduler entry, and the citation is the scheduled line itself, where
 the cadence is written; open it and read the cadence, because the graph does not carry it. The
-`dispatches inside a loop` section names every dispatch a changed file makes per iteration.
+`dispatches inside a loop` section names every dispatch a changed file makes per iteration, the job
+it lands on as a file you can open, and any other scheduler entry that feeds that same job. Open the
+handler: what it does with a failure is written there and never at the dispatch. If a second entry
+feeds the queue on a timer, ask what happens to the work this one dispatches when it fails, because
+a queue filled from two directions is where a volume change stops being a volume change.
 
 Neither is a finding, and neither is evidence of one. What they are is the place to ask what bounds
 the loop: how many rows does the query above it return, and did this diff widen it. A dispatch in a
