@@ -13,8 +13,9 @@ rules over the pack's files, and emits normalized nodes and edges into the share
 contains no language-specific logic. All of it lives in packs.
 
 Extraction is **regex rules over source** and not an AST parse: imports, inline FQCNs, class-name
-strings, template references, observer registrations. That approach generalizes cleanly across
-languages, which an AST parser does not, since every language would bring its own.
+strings, template references, observer registrations, the class a class extends. That approach
+generalizes cleanly across languages, which an AST parser does not, since every language would bring
+its own.
 Regex-over-source is imperfect (it
 cannot follow a class name assembled at runtime) but it is fast, language-portable, needs no
 per-language toolchain, and its blind spots are known and documented rather than hidden. EmPo
@@ -79,7 +80,9 @@ exactly the honesty this tradeoff requires.
     "string":  [ { "pattern": "['\"](Acme\\\\[A-Za-z0-9_\\\\]+)['\"]", "resolve": "fqcn-string" } ],
     "template":[ { "pattern": "<x-([a-z0-9][A-Za-z0-9._-]*)", "resolve": "short-name",
                    "normalize": ["last-dot-segment", "pascal-case"] } ],
-    "hook":    [ { "pattern": "([A-Za-z0-9_]+)::observe\\(([A-Za-z0-9_]+)::class", "resolve": "observer" } ]
+    "hook":    [ { "pattern": "([A-Za-z0-9_]+)::observe\\(([A-Za-z0-9_]+)::class", "resolve": "observer" } ],
+    "inherit": [ { "pattern": "^[ \\t]*(?:final\\s+|abstract\\s+|readonly\\s+)*class\\s+[A-Za-z0-9_]+\\s+extends\\s+([A-Za-z0-9_]+)",
+                   "resolve": "short-name" } ]
   },
 
   // 4b. optional: how this language spells a declaration, first group the name declared. Read by
@@ -183,7 +186,15 @@ exactly the honesty this tradeoff requires.
       { "pattern": "(?:->|::)\\s*(?:each|eachById|map|chunk|chunkById|chunkMap)(?=\\(\\s*(?:[0-9]+\\s*,\\s*)?(?:static\\s+)?fn\\b)",
         "extent": "balanced", "open": "(", "close": ")" }
     ],
+    // the third extent family, and the only one whose openers name a KIND of error rather than a
+    // construct: a catch of something the ecosystem calls temporary. Same "{" lookahead, same reason
+    "transient": [
+      { "pattern": "(?<![A-Za-z0-9_$])catch\\s*\\([^)]*(?:RateLimit|Throttl|TooManyRequests|Timeout|Transient|Temporar)[^)]*\\)\\s*(?=\\{)",
+        "extent": "balanced", "open": "{", "close": "}" }
+    ],
     "dispatches": [ { "pattern": "([A-Za-z0-9_\\\\]+)::dispatch\\(", "job": 1 } ],
+    // a site family, not an extent: what it means depends entirely on the catch it sits in
+    "permanentFailures": [ { "pattern": "(\\$[A-Za-z0-9_]+->fail)\\s*\\(", "job": 1 } ],
     "deferAtSite": ["->afterCommit\\("],           // this one dispatch waits for the commit
     "deferAtDeclaration": ["\\$afterCommit\\s*=\\s*true"]  // every dispatch of that job waits
   },
@@ -564,7 +575,7 @@ in template prose ("the customer's balance") is common and is the one thing it c
 
 ### 4. `edges`: intra-language coupling
 
-Five edge families, each a list of `{ pattern, resolve }` rules. `resolve` names the strategy that
+Six edge families, each a list of `{ pattern, resolve }` rules. `resolve` names the strategy that
 turns a captured string into a target node id:
 
 | `resolve` | Turns a capture into |
@@ -577,9 +588,52 @@ turns a captured string into a target node id:
 | `short-name` | a class-id node by looking one short name up in the index of names, exact spelling first and a case fold only where that finds none, and a fold only where the reading file's own import corroborates it |
 
 A TypeScript pack uses `import` with `resolve: module-path` and has no `hook` family. The php pack
-that ships uses all five, `template` included since it gained the Blade component tag, and the
+that ships uses all six, `template` included since it gained the Blade component tag and `inherit`
+since it gained the two `extends` rules, and the
 typescript pack now populates `template` too, from a JSX tag and from the same tag in a Vue SFC. The
 engine does not care which families a pack populates.
+
+**`inherit` is the family a pack declares for the reference its `import` rules structurally cannot
+see**, and php is the case it was written for. A class extending a sibling in its own namespace
+writes no `use` statement, because php resolves the bare name against the current namespace, so no
+import rule can be written that would find it — the statement is not there to be matched. The php
+pack declares two rules over a `class` declaration, each allowing `final`, `abstract` and `readonly`
+in front of the keyword. The first reads `class Foo extends Bare` and resolves by `short-name`,
+because a bare parent name says nothing about where the parent lives and has to be looked up in the
+index of short names exactly as a Blade tag is; it requires the captured name to be followed by
+`implements`, an opening brace or the end of the line, so what it captures is a whole parent name and
+never the head of one. The second reads
+`class Foo extends \Fully\Qualified\Base`, capturing the qualified name without its leading
+separator, and resolves by `fqcn`.
+
+That the second rule uses the `fqcn` strategy is also the reason the family is not simply more
+`fqcn` rules: **the strategy and the family answer two different questions.** `resolve` says how a
+capture becomes a node id, and the family says what kind of reference the capture was, which is what
+the graph's `kind` column and `empo query`'s edge list are read for. An inheritance is not an
+inline mention of a class the file happens to call; it is the declaration that half the subclass's
+behaviour lives elsewhere, and a reader deciding what a change can break wants those told apart. A
+pack for a language that spells inheritance some other way declares its own rules here and the engine
+learns nothing new, which is the same contract every other family has.
+
+**The `short-name` refusals of section 4's name resolution apply to the first rule without
+exception, and one of them is worth stating for class names specifically.** A bare parent name that
+two nodes in the repository carry resolves to neither: no edge is emitted, in either direction, and
+the reference is counted `ambiguous` in this family's `names` record rather than guessed at. A parent
+name in no node at all is `unknown`, and in a framework codebase that is the normal and correct
+answer for most of the misses rather than a gap: `extends Model` and `extends Command` name Eloquent
+and Laravel base classes that live in `vendor/`, which this repository's graph holds no node for, and
+refusing them is the same refusal a vendor component tag gets. Measured on a real Laravel repository
+the family read 3379 names and resolved **2564**, with **139** ambiguous and **676** in no node.
+
+**Declaring this family changes the numbers of every php repository already indexed, which is why it
+is a pack version bump — the php pack moved from 1.12.0 to 1.13.0 for these two rules — and not a
+free win.** Inheritance is dense in framework code — jobs, commands,
+controllers, models and test cases all declare a parent — so the family lands on many pairs the
+other five never touched. On that repository one abstract job with nineteen subclasses had a graph
+fan-in of **3**, the three subclasses that sat a namespace deeper and therefore had to import it, and
+a fan-in of **20** after the rules were declared; the repository as a whole went from **17725** edges
+to **20292**. A fan-in, a god list or a blast radius written down before the bump does not survive
+the next `empo index`, and it does not survive it because the graph had been missing those edges.
 
 A rule may carry **`normalize`**, a list of the same string operations `produces`/`consumes` use,
 applied to every capture group before `resolve` reads it. It exists because a call site and a
@@ -1446,10 +1500,10 @@ test that asserts a value from a test that only asserts HTTP 200. The spine laye
 cents), but the pack sets the language-wide default.
 
 **A test reaches code along every edge family, not just `import`.** Coverage walks out of a test
-node along every edge that is not a cross-root bridge (`engine/coverage.ts`), so `fqcn`, `string`
-and `hook` edges carry a test to its subject exactly as `import` edges do. That is deliberate and it
-is the more useful reading: a test naming a class in a string couples to it as hard as one
-importing it, and a pack cannot narrow coverage to one family.
+node along every edge that is not a cross-root bridge (`engine/coverage.ts`), so `fqcn`, `string`,
+`template`, `hook` and `inherit` edges carry a test to its subject exactly as `import` edges do. That
+is deliberate and it is the more useful reading: a test naming a class in a string couples to it as
+hard as one importing it, and a pack cannot narrow coverage to one family.
 
 A `tests.paths` entry is a directory prefix (`tests/`) or a glob (`**/*.test.ts`), decided by whether
 it holds a glob character. Both conventions are real and a pack should not have to pick: PHP puts its
@@ -1668,7 +1722,7 @@ differently ([06-cli](06-cli.md)), which is the same rule the graph already appl
 matches no node ([05-graph-model](05-graph-model.md)): an empty result is a fact worth seeing and an
 absent one is not the same fact.
 
-Five fields, and every string in all five is a marker the engine walks rather than a language the
+Seven fields, and every string in all seven is a marker the engine walks rather than a language the
 engine knows:
 
 - **`transactions`** is a list of `{ pattern, extent }`, where `extent` says how to find where the
@@ -1697,10 +1751,26 @@ engine knows:
   by the same `compileExtentRules` and walked by the same `enclosedBy` as the field above it,
   because "what does this construct enclose" is one question whatever opened it. What it asks is a
   different question, and the paragraphs after this list are about keeping the two apart.
+- **`transient`** is that same `{ pattern, extent }` shape a third time, and the third pairing of
+  the same walk. Its openers name a **kind of error** rather than a construct: a `catch` of something
+  the ecosystem spells as temporary. That is a heuristic and the pack states it as a list a reader
+  can check — the php pack names `RateLimit`, `Throttl`, `TooManyRequests`, `Timeout`, `Transient`
+  and `Temporar` — so a codebase that calls its own retryable error something else gets nothing here
+  and can see exactly why. The brace is a lookahead for the reason every loop rule's is, and the
+  regression it buys off is the same one: a pattern that ate the body's brace would balance the next
+  unrelated block and report every `fail()` below it as a rate-limit fail.
 - **`dispatches`** is a list of `{ pattern, job }`, where `job` is the 1-based capture group holding
   the dispatched job's name. It is a group number and not a convention, because a language spells the
   dispatch two or three ways and the name does not sit in the same place in all of them. Two rules
   that both describe one call site produce one hazard and not two.
+- **`permanentFailures`** is the same `{ pattern, job }` shape, and the first site family that is
+  not a dispatch: what records a failure as final, which in Laravel is `fail()` on a queued job. It
+  is matched inside `transient` exactly as a dispatch is matched inside a transaction, and on its own
+  it means nothing at all — a job with no other arrangement *should* fail on a rate limit. Inside a
+  catch of an error the caller was told would pass, it says the two halves disagree. Whether that is
+  a defect turns on what else the handler did, and no rule here can see an arrangement made in
+  another file, so the axis prints the coordinate and stops, the same bargain `loops` makes about
+  cardinality.
 - **`deferAtSite`** are patterns matched against the dispatch's own **statement**, which is the text
   from the dispatch to the first `;` after it that is not inside a string literal, or to the end of
   its line when the rest of the file holds no such `;`. The statement and not the line, because the
@@ -1947,7 +2017,8 @@ whoever follows the citation, and citations are the whole contract.
 
 Two, deliberately different, to keep the interface honest:
 
-- **php** (`strategy: fqcn`, all five edge families, Laravel extractors for routes, observers,
+- **php** (`strategy: fqcn`, all six edge families, `inherit` included since it gained the two
+  `class … extends` rules, Laravel extractors for routes, observers,
   Blade component tags and the four rules that render a view by name — the directives whose first
   argument is a template (`@extends`, `@include`, `@includeIf`, `@component`, `@each`), a global
   `view('x')`, `View::make` and `Route::view`'s second argument — `produces`
@@ -1977,7 +2048,9 @@ Two, deliberately different, to keep the interface honest:
   landing on a `component` or a `screen`, three `declares` patterns so those two rules refuse a tag
   naming something the rendering file declares itself, a `packages` block naming `package.json`,
   `name` and npm's four dependency maps so they refuse a tag naming something the file imports from a
-  package, no `hook` family at all, http-route
+  package, neither a `hook` nor an `inherit` family at all — `extends` in TypeScript is carried by an
+  `import` the language makes it write, which is the whole reason php needs a family for it —
+  http-route
   `consumes` rules for
   fetch and axios, and one `produces` rule that reads an Inertia page name off the file's path rather
   than out of its source).

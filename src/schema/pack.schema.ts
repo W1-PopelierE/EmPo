@@ -438,7 +438,32 @@ const hazardsSchema = z.object({
    * asked out loud while somebody is reading the diff that widened it.
    */
   loops: z.array(hazardTransactionRuleSchema).default([]),
+  /**
+   * What handles a failure the caller should expect to pass: a `catch` of an exception whose type
+   * says the condition is temporary. The third extent family, walked by the same code as the other
+   * two, and the only one whose openers name a *kind* of error rather than a construct.
+   *
+   * That is a heuristic and it is written down as one. A pack lists the type names its ecosystem
+   * uses for a retryable condition — rate limits, throttling, timeouts, "too many requests" — and a
+   * codebase that spells its own transient error something else gets nothing here. The rule is
+   * declarative so a repository can read the list in the pack and see exactly what was looked for,
+   * which is the answer a silent axis cannot give.
+   */
+  transient: z.array(hazardTransactionRuleSchema).default([]),
   dispatches: z.array(hazardDispatchRuleSchema).default([]),
+  /**
+   * What records a failure as final: `fail()` on a queued job and whatever else an ecosystem spells
+   * "this work will not be attempted again". A site family and not an extent, matched inside
+   * `transient` exactly as a dispatch is matched inside a transaction.
+   *
+   * On its own it says nothing. Inside a catch of a transient error it says the two halves disagree:
+   * the caller was told the condition passes, and the handler wrote down that it does not. Whether
+   * that is a defect depends on what else the handler does — a job that has already arranged its own
+   * retry and *also* fails is filling a dead-letter store it will never read — and EmPo cannot see
+   * the arrangement, so it prints the coordinate and leaves the conclusion to the reviewer, the same
+   * bargain the loop axis makes about cardinality.
+   */
+  permanentFailures: z.array(hazardDispatchRuleSchema).default([]),
   /** Matched at the dispatch site: this one dispatch waits for the commit. */
   deferAtSite: z.array(regex).default([]),
   /** Matched in the dispatched job's own file: every dispatch of that job waits. */
@@ -710,6 +735,19 @@ export const packSchema = z
         string: z.array(extractRuleSchema).optional(),
         template: z.array(extractRuleSchema).optional(),
         hook: z.array(extractRuleSchema).optional(),
+        /**
+         * A class naming the class it derives from. Its own family because the column that prints
+         * it exists to tell reference kinds apart, and an inheritance is the one reference a reader
+         * cannot route around: every other family names something the file calls, and this one
+         * names where half the file's behaviour is actually written.
+         *
+         * It is also the family a language with namespaces loses silently. A php class extending a
+         * sibling in its own namespace writes no `use` statement, because the language resolves the
+         * bare name against the current namespace, so the `import` rules never see it. On a real
+         * Laravel repository one abstract job had nineteen subclasses and a graph fan-in of three:
+         * the three that lived a namespace deeper and therefore had to import it.
+         */
+        inherit: z.array(extractRuleSchema).optional(),
       })
       .default({}),
     produces: z.array(symbolRuleSchema).default([]),

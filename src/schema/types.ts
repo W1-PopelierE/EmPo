@@ -8,7 +8,7 @@
  * statement of the same shape drifts from the parser without TypeScript seeing it.
  */
 
-export type EdgeKind = "import" | "fqcn" | "string" | "template" | "hook" | "bridge";
+export type EdgeKind = "import" | "fqcn" | "string" | "template" | "hook" | "inherit" | "bridge";
 
 export interface SymbolRef {
   symbol: string; // "http-route", "event", ...
@@ -129,6 +129,26 @@ export interface Fanout {
   job: string; // the job as written at the dispatch site
   target: string | null; // resolved node id, null when unresolvable
   loopLine: number; // the line that opened the enclosing loop
+}
+
+/**
+ * One call that records a failure as final, inside a catch of an error whose type says the
+ * condition passes. Kept out of `Hazard` for the reason `Fanout` is: the enclosure alone does not
+ * make it wrong, and a reader who found it in the hazards list would go looking for a defect that
+ * may not be there. A job with no other arrangement SHOULD fail on a rate limit, and this axis
+ * cannot see whether one was made.
+ *
+ * What it is, is the far side of a fan-out. A loop that dispatches per row asks how many rows there
+ * are; this asks what the queue does with the ones that come back rate-limited, and the answer is
+ * written in a file the diff that widened the loop never touches. That is why the record carries
+ * the file: `empo review` reaches it through the dispatch target of a fan-out site, not only
+ * through the changed files.
+ */
+export interface PermanentFailure {
+  file: string; // repo-relative, the file holding the catch
+  line: number; // the call that records the failure as final
+  call: string; // the call as written
+  transientLine: number; // the line of the catch enclosing it
 }
 
 /**
@@ -266,4 +286,10 @@ export interface Graph {
    * live under one pack key and a pack that declares `hazards` at all is a pack that was asked.
    */
   fanout: Fanout[];
+  /**
+   * Calls that write a failure off as final inside a catch of an error the pack calls transient,
+   * empty when no pack in this repo declares a `transient` block. Rides on `hazardsScanned` for the
+   * reason `fanout` does.
+   */
+  permanentFailures: PermanentFailure[];
 }

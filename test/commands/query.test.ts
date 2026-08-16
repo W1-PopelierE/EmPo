@@ -100,6 +100,7 @@ function ambiguousGraph(): Graph {
     hazardsScanned: [],
     names: [],
     fanout: [],
+    permanentFailures: [],
   };
 }
 
@@ -151,6 +152,7 @@ function symbolGraph(): Graph {
     hazardsScanned: [],
     names: [],
     fanout: [],
+    permanentFailures: [],
   };
 }
 
@@ -251,6 +253,7 @@ function renderedComponentGraph(): Graph {
     hazardsScanned: [],
     names: [],
     fanout: [],
+    permanentFailures: [],
   };
 }
 
@@ -306,6 +309,7 @@ function frameworkGraph(): Graph {
     hazardsScanned: [],
     names: [],
     fanout: [],
+    permanentFailures: [],
   };
 }
 
@@ -360,6 +364,7 @@ function renderedLayoutGraph(): Graph {
     hazardsScanned: [],
     names: [],
     fanout: [],
+    permanentFailures: [],
   };
 }
 
@@ -404,6 +409,7 @@ function manyGodsGraph(count: number): Graph {
     hazardsScanned: [],
     names: [],
     fanout: [],
+    permanentFailures: [],
   };
 }
 
@@ -452,6 +458,7 @@ function hazardGraph(rows: Hazard[], scanned: string[] = ["php"], langs = ["php"
     hazardsScanned: scanned,
     names: [],
     fanout: [],
+    permanentFailures: [],
   };
 }
 

@@ -349,6 +349,7 @@ function graphOf(
     hazardsScanned: [],
     names: [],
     fanout: [],
+    permanentFailures: [],
   };
 }
 

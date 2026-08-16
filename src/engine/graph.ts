@@ -3,7 +3,15 @@ import { join } from "node:path";
 import { configError, EmpoError, readJson } from "../errors";
 import type { EmpoBridge, EmpoConfig } from "../schema/config.schema";
 import type { Pack } from "../schema/pack.schema";
-import type { Fanout, Graph, GraphEdge, GraphNode, Hazard, NameResolution } from "../schema/types";
+import type {
+  Fanout,
+  Graph,
+  GraphEdge,
+  GraphNode,
+  Hazard,
+  NameResolution,
+  PermanentFailure,
+} from "../schema/types";
 import { type BridgeReport, bridgeRoots } from "./bridger";
 import {
   buildRoot,
@@ -12,6 +20,7 @@ import {
   dedupeFanout,
   dedupeHazards,
   dedupeNodes,
+  dedupePermanentFailures,
 } from "./build";
 import { computeCoverage } from "./coverage";
 import { assignFlows, loadFlows } from "./flows";
@@ -100,7 +109,7 @@ export const LOCK_PATH = ".empo/generated/packs.lock.json";
  * ask, and the bump is what tells every other one, `empo doctor` included, that the graph in front
  * of it predates the axis rather than reporting a repository clean of something nobody looked for.
  */
-export const GRAPH_SCHEMA = 9;
+export const GRAPH_SCHEMA = 10;
 
 export function graphPath(repoRoot: string): string {
   return join(repoRoot, GRAPH_PATH);
@@ -128,6 +137,7 @@ export function buildGraph(options: BuildGraphOptions): BuiltGraph {
   const edges: GraphEdge[] = [];
   const hazards: Hazard[] = [];
   const fanout: Fanout[] = [];
+  const permanentFailures: PermanentFailure[] = [];
   const duplicates: DuplicateNode[] = [];
   const names: NameResolution[] = [];
   const files = new Set<string>();
@@ -150,6 +160,7 @@ export function buildGraph(options: BuildGraphOptions): BuiltGraph {
     edges.push(...built.edges);
     hazards.push(...built.hazards);
     fanout.push(...built.fanout);
+    permanentFailures.push(...built.permanentFailures);
     duplicates.push(...built.duplicates);
     names.push(...built.names);
     for (const file of built.files) files.add(file);
@@ -221,6 +232,9 @@ export function buildGraph(options: BuildGraphOptions): BuiltGraph {
       // for the reason the hazards are: two overlapping roots re-scan one file, and one dispatch
       // site read twice is not two of them.
       fanout: dedupeFanout(fanout),
+      // Appended after `fanout` for the same reason `fanout` was appended after `names`: the field
+      // order is asserted, and a key inserted above an existing one moves every offset below it.
+      permanentFailures: dedupePermanentFailures(permanentFailures),
     },
   };
 }

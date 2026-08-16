@@ -6,6 +6,7 @@ import type {
   Hazard,
   NameOutcome,
   NameResolution,
+  PermanentFailure,
 } from "../schema/types";
 import {
   collectFileScopes,
@@ -47,6 +48,12 @@ export interface RootGraph {
    * two are told apart by `hazardsScanned`, which both blocks ride on (schema/types.ts).
    */
   fanout: Fanout[];
+  /**
+   * The final-failure calls this root wrote inside a catch of a transient error. Empty when the
+   * pack declares no `transient` block, and empty in the same way when it declares one and every
+   * catch does the retryable thing: `hazardsScanned` is what tells the two apart.
+   */
+  permanentFailures: PermanentFailure[];
   /**
    * Every repo-relative path this root scanned, not a count. Two roots may overlap, and a count
    * summed per root would report more files than the repository holds while nodes and edges are
@@ -136,6 +143,11 @@ export function buildRoot(options: BuildRootOptions): RootGraph {
     edges: dedupeEdges(edges).sort(byEdgeOrder),
     hazards: resolveHazards(extracted, index),
     fanout: resolveFanout(extracted, index),
+    permanentFailures: dedupePermanentFailures(
+      extracted.flatMap((file) =>
+        file.permanentFailures.map((found) => ({ ...found, file: file.file })),
+      ),
+    ),
     files: scanned.map((file) => file.file),
     duplicates: deduped.duplicates,
     // Tallied before the edges are deduplicated, and deliberately: an edge deduplicated away was a
@@ -383,6 +395,28 @@ export function dedupeHazards(hazards: Hazard[]): Hazard[] {
  * roots scan one file twice and two dispatch rules can match one call, and either way it is one line
  * of source shown twice. Shared by buildRoot and by graph.ts across roots.
  */
+/**
+ * One row per final-failure call, sorted, deduplicated exactly as the other two axes are: two
+ * overlapping roots scan one file twice, and two site rules can describe one call.
+ *
+ * No job resolution, unlike the other two. A `fail()` names no target; it is a statement about the
+ * file it is written in, and the file is already the key.
+ */
+export function dedupePermanentFailures(found: PermanentFailure[]): PermanentFailure[] {
+  const byKey = new Map<string, PermanentFailure>();
+  for (const site of found) {
+    const key = `${site.file}\u0000${site.line}\u0000${site.call}` + `\u0000${site.transientLine}`;
+    if (!byKey.has(key)) byKey.set(key, site);
+  }
+  return [...byKey.values()].sort(
+    (a, b) =>
+      compareStrings(a.file, b.file) ||
+      a.line - b.line ||
+      compareStrings(a.call, b.call) ||
+      a.transientLine - b.transientLine,
+  );
+}
+
 export function dedupeFanout(fanout: Fanout[]): Fanout[] {
   const byKey = new Map<string, Fanout>();
   for (const site of fanout) {

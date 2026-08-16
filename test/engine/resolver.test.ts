@@ -36,6 +36,7 @@ function node(id: string, name: string, filePath: string, captures: Capture[] = 
     symbols: [],
     dispatches: [],
     loopDispatches: [],
+    permanentFailures: [],
     defersCommit: false,
   };
 }

@@ -84,11 +84,14 @@ changed file is reached from a scheduler entry, and the citation is the schedule
 the cadence is written; open it and read the cadence, because the graph does not carry it. The
 `dispatches inside a loop` section names every dispatch a changed file makes per iteration, the job
 it lands on as a file you can open, and any other scheduler entry that feeds that same job. Open the
-handler: what it does with a failure is written there and never at the dispatch. If a second entry
-feeds the queue on a timer, ask what happens to the work this one dispatches when it fails, because
-a queue filled from two directions is where a volume change stops being a volume change.
+handler: what it does with a failure is written there and never at the dispatch. An `on failure` line
+means that handler records a failure as final inside a catch of an error something called temporary,
+so go and read what else that catch does — a handler that already arranged its own retry and also
+marks the job failed is filling a store nothing drains. And where a second entry feeds the same queue
+on a timer, ask what happens to the work this one dispatches when it fails, because a queue filled
+from two directions is where a volume change stops being a volume change.
 
-Neither is a finding, and neither is evidence of one. What they are is the place to ask what bounds
+None of these is a finding, and none is evidence of one. What they are is the place to ask what bounds
 the loop: how many rows does the query above it return, and did this diff widen it. A dispatch in a
 loop is how a batch is written, and it becomes a defect only against a cardinality that lives in the
 data and not in the source, which is why empo states the coordinate and stops. If you conclude the

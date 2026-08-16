@@ -56,7 +56,9 @@ interface CompiledStrings {
 export interface CompiledHazards {
   transactions: CompiledTransactionRule[];
   loops: CompiledTransactionRule[];
+  transient: CompiledTransactionRule[];
   dispatches: CompiledDispatchRule[];
+  permanentFailures: CompiledDispatchRule[];
   deferAtSite: RegExp[];
   deferAtDeclaration: RegExp[];
   strings: CompiledStrings;
@@ -94,6 +96,16 @@ export interface LoopedDispatch {
   loopLine: number;
 }
 
+/** One call that writes a failure off as final, inside a catch of an error that is not. */
+export interface PermanentFailure {
+  /** The call as written, from the rule's capture group. */
+  call: string;
+  /** 1-based line of the call. */
+  line: number;
+  /** 1-based line of the `catch` that encloses it. */
+  transientLine: number;
+}
+
 /**
  * Compiles one pack's hazard rules once. Every regex is built here and never per call, the same
  * contract engine/extractor.ts `compilePack` keeps.
@@ -116,7 +128,12 @@ export function compileHazards(pack: Pack): CompiledHazards | null {
   return {
     transactions: compileExtentRules(hazards.transactions),
     loops: compileExtentRules(hazards.loops),
+    transient: compileExtentRules(hazards.transient),
     dispatches: hazards.dispatches.map((rule) => ({
+      regex: new RegExp(rule.pattern, "gm"),
+      job: rule.job,
+    })),
+    permanentFailures: hazards.permanentFailures.map((rule) => ({
       regex: new RegExp(rule.pattern, "gm"),
       job: rule.job,
     })),
@@ -184,7 +201,7 @@ function compileTransactionRule(rule: HazardTransactionRule): CompiledTransactio
  * banned repo-wide (engine/order.ts).
  */
 export function findEnclosedDispatches(compiled: CompiledHazards, source: string): DispatchSite[] {
-  return enclosedBy(compiled, source, compiled.transactions).map((found) => ({
+  return enclosedBy(compiled.dispatches, source, compiled.transactions).map((found) => ({
     job: found.job,
     line: found.line,
     transactionLine: found.enclosingLine,
@@ -201,10 +218,29 @@ export function findEnclosedDispatches(compiled: CompiledHazards, source: string
  * (schema/types.ts, `Graph.hazardsScanned`).
  */
 export function findLoopedDispatches(compiled: CompiledHazards, source: string): LoopedDispatch[] {
-  return enclosedBy(compiled, source, compiled.loops).map((found) => ({
+  return enclosedBy(compiled.dispatches, source, compiled.loops).map((found) => ({
     job: found.job,
     line: found.line,
     loopLine: found.enclosingLine,
+  }));
+}
+
+/**
+ * Every call that records a failure as final, sitting inside a catch of an error the pack says is
+ * transient. The third pairing of the same walk, and the first whose sites are not dispatches.
+ *
+ * Empty for a pack that declares neither block, and empty in the same way for a file that catches a
+ * rate limit and does the retryable thing with it. Those two are told apart one layer up, by
+ * `Graph.hazardsScanned`, for the reason the other two axes are.
+ */
+export function findPermanentFailures(
+  compiled: CompiledHazards,
+  source: string,
+): PermanentFailure[] {
+  return enclosedBy(compiled.permanentFailures, source, compiled.transient).map((found) => ({
+    call: found.job,
+    line: found.line,
+    transientLine: found.enclosingLine,
   }));
 }
 
@@ -219,7 +255,7 @@ interface EnclosedDispatch {
 }
 
 function enclosedBy(
-  compiled: CompiledHazards,
+  sites: CompiledDispatchRule[],
   source: string,
   rules: CompiledTransactionRule[],
 ): EnclosedDispatch[] {
@@ -230,7 +266,7 @@ function enclosedBy(
   const seen = new Set<string>();
   const found: EnclosedDispatch[] = [];
 
-  for (const rule of compiled.dispatches) {
+  for (const rule of sites) {
     for (const match of matchAll(rule.regex, source)) {
       const enclosing = innermostEnclosing(extents, match.index);
       if (enclosing === null) continue;

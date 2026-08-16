@@ -30,6 +30,7 @@ function graphWithRoots(roots: { path: string; lang: string }[]): Graph {
     hazardsScanned: [],
     names: [],
     fanout: [],
+    permanentFailures: [],
   };
 }
 

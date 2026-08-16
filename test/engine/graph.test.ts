@@ -88,6 +88,7 @@ function graphBuiltAgainst(sha: string): Graph {
     hazardsScanned: [],
     names: [],
     fanout: [],
+    permanentFailures: [],
   };
 }
 
@@ -584,7 +585,13 @@ describe("hazards on the built graph", () => {
     // is what keeps every key above it at the offset the previous schema left it at.
     expect(keys[0]).toBe("schema");
     expect(keys.indexOf("hazards")).toBeGreaterThan(keys.indexOf("coverage"));
-    expect(keys.slice(-4)).toEqual(["hazards", "hazardsScanned", "names", "fanout"]);
+    expect(keys.slice(-5)).toEqual([
+      "hazards",
+      "hazardsScanned",
+      "names",
+      "fanout",
+      "permanentFailures",
+    ]);
   });
 
   test("a repository whose pack looked and found nothing says so, in the graph", () => {

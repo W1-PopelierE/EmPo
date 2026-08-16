@@ -250,7 +250,7 @@ describe("indexCommand", () => {
     // the export spans none, which is a diff narrowed to nothing. 9 is that case a third time:
     // `fanout` is added, and a graph without the key was built by a run that never looked for a
     // dispatch inside a loop, where the empty list says the rules looked and found none.
-    expect(graph.schema).toBe(9);
+    expect(graph.schema).toBe(10);
     expect(graph.roots).toEqual([
       { path: "apps/api", lang: "php" },
       { path: "apps/mobile", lang: "typescript" },

@@ -71,9 +71,11 @@ monorepo it misses the two that cause the expensive bugs. EmPo models all three.
 This is the well-understood case. Each language pack declares how imports look in its language,
 the builder runs those rules over that language's files, and produces edges. A PHP pack also
 declares the non-import couplings that language has (an observer registered in a provider couples
-two files that never import each other; a class-name string in `call_user_func` is a real edge).
-The php pack declares five such edge kinds: import, inline FQCN, class-name string, template
-reference, and hook registration.
+two files that never import each other; a class-name string in `call_user_func` is a real edge; a
+class extending a sibling in its own namespace writes no `use` statement at all, so the import rules
+never see the strongest coupling in the file).
+The php pack declares six such edge kinds: import, inline FQCN, class-name string, template
+reference, hook registration, and inheritance.
 
 ### Level 2: inter-language (the differentiator)
 

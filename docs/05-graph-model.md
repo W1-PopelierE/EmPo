@@ -22,7 +22,9 @@ specifies its schema. It is written only by `empo index`, never by hand, never b
   "hazards": [ Hazard, … ],                    // a second axis: dispatches inside a transaction
   "hazardsScanned": [ "php" ],                 // the langs whose pack looked, as of this build
   "names": [ NameResolution, … ],              // what the name-resolving rules did with what they read
-  "fanout": [ Fanout, … ]                      // a third axis: dispatches inside a loop, last key
+  "fanout": [ Fanout, … ],                     // a third axis: dispatches inside a loop
+  "permanentFailures": [ PermanentFailure, … ] // a fourth: a final failure inside a catch of a
+                                               // transient error, last key
 }
 ```
 
@@ -147,7 +149,7 @@ than being recomputed per flow.
 {
   "from": "Acme\\Http\\Controllers\\OrderController",
   "to":   "Acme\\Libraries\\Price\\PriceCalculator",
-  "kind": "import",              // import | fqcn | string | template | hook | bridge
+  "kind": "import",              // import | fqcn | string | template | hook | inherit | bridge
   "symbol": null,               // set only for bridge edges: the symbol kind that joined them
   "evidence": { "file": "apps/api/…/OrderController.php", "line": 42 }
 }
@@ -162,6 +164,7 @@ Edge kinds and where they come from:
 | `string` | pack `edges.string` rules (class name in a quoted string) | 1 |
 | `template` | pack `edges.template` rules (a name inside a Blade/Twig/JSX tag or include) | 1 |
 | `hook` | pack `edges.hook` rules (observer/listener registered in a provider) | 1 |
+| `inherit` | pack `edges.inherit` rules (a class naming the class it derives from) | 1 |
 | `bridge` | symbol-table match between a produced and a consumed key, per a config `bridge` or a pack `joins` kind | 2 symbol join |
 
 Every edge carries `evidence` (file and line) so `empo query` can cite where a coupling was found,
@@ -281,6 +284,49 @@ quoted string in a file that can hold a tag anyway, and every edge to a duplicat
 dropped in silence, carry their numbers in [04-language-packs](04-language-packs.md) section 4, and
 the second is why nobody should assume this family yields much on a repository it has not been run
 against.
+
+An `inherit` edge runs from the file declaring a class to the class it derives from, and it exists
+because that is the one coupling a language with namespaces loses in silence. The php pack fills the
+family from two rules over a `class` declaration, `final`, `abstract` and `readonly` in front of it
+allowed: `class Foo extends Bare`, whose captured name is bare and resolves by `short-name`, and
+`class Foo extends \Fully\Qualified\Base`, whose capture is the qualified name without its leading
+separator and resolves by `fqcn`, the same strategy a `use` statement resolves through. The first of
+those is the reason the family was written. A php class extending a sibling in its own namespace
+writes no `use` statement, because the language resolves a bare name against the current namespace,
+so the `import` rules see nothing at all where the strongest coupling in the file is written: half of
+what the subclass does is written in the parent, and the graph said the two files had never heard of
+each other. Measured on a real Laravel repository, one abstract job had nineteen subclasses and a
+fan-in of **3** — exactly the three that lived a namespace deeper and therefore had to import it —
+and a fan-in of **20** afterwards.
+
+**It is its own family rather than a second `fqcn` rule, and the distinction is the capture and not
+the taxonomy.** `fqcn` reads a name that already says where it lives, and the strategy of the same
+name turns it into a node id with no index and no ambiguity to resolve. `extends Bare` says nothing
+about where the parent lives; it is a bare name that has to be looked up in the index of short names
+like a Blade tag, so the two rules of this family do not even share a resolve strategy with each
+other. Keeping them apart in the graph is what lets the `kind` column go on doing its job, which is
+to tell a reader what sort of reference was found: every other family names something the file calls
+or renders, and this one names where the rest of the file's behaviour is written, which is a
+different answer to "how would this break me".
+
+**The `short-name` blind spot applies here in full, and on class names it bites differently than on
+component tags.** A bare parent name carried by two nodes resolves to neither — no edge is emitted
+in either direction, and the reference is counted `ambiguous` in this family's `names` record like
+any other refused short name (the section on name resolution below). A parent in no node at all is
+`unknown`, and on php that is the ordinary and correct case rather than a loss: a class written
+`extends Model` or `extends Command` names an Eloquent or Laravel base class that lives in
+`vendor/` and is no part of this repository's graph, so a refusal is the right answer and not a gap
+to be closed. On the same Laravel repository the family read 3379 names and resolved **2564**, with
+**139** ambiguous and **676** in no node.
+
+**This raises the fan-in of php repositories that were already indexed, and that is not a neutral
+addition.** Inheritance is dense in a framework codebase — every job, every command, every controller
+and every model declares a parent — so the family lands on pairs the other five never touched. The
+same repository went from **17725** edges to **20292**, and the edges in that difference are ones the
+graph should always have carried. Every
+number a reader may have written down about a php repository, a fan-in, a god list, a blast radius,
+a coverage denominator, changes at the next `empo index`, and it changes because the graph was
+missing edges rather than because it is now inventing them.
 
 There is exactly one edge per `(from, to, kind)`, and the earliest evidence wins. A second reference
 between the same pair through the same kind is the same coupling, so it is dropped rather than
@@ -846,6 +892,22 @@ tell has moved under it — a key that keeps its name and counts something else 
 starts meaning exports where it meant files (7). A field whose absence is itself an answer belongs
 in the same class only because that absence has to survive the reader's default, which is exactly
 what this one is.
+
+**A fourth axis, `permanentFailures`, arrives on the same terms and takes `schema` from 9 to 10.**
+One record per call that writes a failure off as final, inside a catch of an error the pack's
+`transient` rules say is temporary, carrying the file, the call, its line and the line of the catch.
+It is not a hazard and is kept out of `hazards` for the reason `fanout` is: on its own it is not
+wrong, and a reader who found it in the hazards list would go looking for a defect that may not be
+there.
+
+What makes it worth its own key is where it is read from. Every other axis is printed about a file
+the diff touched; this one is reached through a fan-out site's dispatch target, so `empo review` can
+say what the job a widened loop feeds does with a failure — a fact about a file the diff never
+touched and the author had no reason to open. It carries the file rather than a node id for exactly
+that: the lookup goes from a resolved target to the files it and its parents live in, and files are
+what both ends of that lookup have in common. It rides on `hazardsScanned` rather than carrying a
+second scanned list, since `transient` and `permanentFailures` live under the same pack key as the
+other four.
 
 Fan-out sites are deduplicated across roots exactly as the hazards are, since two overlapping roots
 re-scan one file and one dispatch site read twice is not two of them, and they are sorted by

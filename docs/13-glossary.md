@@ -40,7 +40,7 @@ governing rule is that no finding reaches a human unverified. See [07-review-dis
 claim resting on it fiction. Detected by `empo verify`; warned at session start.
 
 **Edge.** A directed coupling between two nodes in the graph, with a kind (import, fqcn, string,
-template, hook, bridge) and `file:line` evidence. See [05-graph-model](05-graph-model.md).
+template, hook, inherit, bridge) and `file:line` evidence. See [05-graph-model](05-graph-model.md).
 
 **Fan-in.** How many distinct nodes reference a node: how many things depend on it. The headline
 blast-radius number. High fan-in nodes are "gods." Nodes and not edges, because one file can

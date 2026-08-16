@@ -363,7 +363,7 @@ which made the engine guard a value the parser guarantees and let a schema field
 matching edit here reach no consumer at all. What follows is the shape, not the source of it.
 
 ```ts
-export type EdgeKind = "import" | "fqcn" | "string" | "template" | "hook" | "bridge";
+export type EdgeKind = "import" | "fqcn" | "string" | "template" | "hook" | "inherit" | "bridge";
 export type NodeStrategy = "fqcn" | "module-path" | "symbol";
 
 /** How a captured string becomes a target node id. Engine-side, not pack-extensible. */

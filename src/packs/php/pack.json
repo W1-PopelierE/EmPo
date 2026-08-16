@@ -1,6 +1,6 @@
 {
   "name": "php",
-  "version": "1.12.0",
+  "version": "1.14.0",
 
   "match": {
     "extensions": [".php"],
@@ -121,6 +121,16 @@
       {
         "pattern": "([A-Za-z0-9_]+)::observe\\(\\s*([A-Za-z0-9_]+)::class",
         "resolve": "observer"
+      }
+    ],
+    "inherit": [
+      {
+        "pattern": "^[ \\t]*(?:final\\s+|abstract\\s+|readonly\\s+)*class\\s+[A-Za-z0-9_]+\\s+extends\\s+([A-Za-z0-9_]+)\\s*(?:implements\\b|\\{|$)",
+        "resolve": "short-name"
+      },
+      {
+        "pattern": "^[ \\t]*(?:final\\s+|abstract\\s+|readonly\\s+)*class\\s+[A-Za-z0-9_]+\\s+extends\\s+\\\\((?:[A-Za-z0-9_]+\\\\)*[A-Za-z0-9_]+)",
+        "resolve": "fqcn"
       }
     ]
   },
@@ -359,6 +369,21 @@
         "extent": "balanced",
         "open": "(",
         "close": ")"
+      }
+    ],
+
+    "transient": [
+      {
+        "pattern": "(?<![A-Za-z0-9_$])catch\\s*\\([^)]*(?:RateLimit|Throttl|TooManyRequests|Timeout|Transient|Temporar)[^)]*\\)\\s*(?=\\{)",
+        "extent": "balanced",
+        "open": "{",
+        "close": "}"
+      }
+    ],
+    "permanentFailures": [
+      {
+        "pattern": "(\\$[A-Za-z0-9_]+->fail)\\s*\\(",
+        "job": 1
       }
     ],
 

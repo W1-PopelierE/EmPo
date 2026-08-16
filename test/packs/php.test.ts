@@ -2,7 +2,11 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { runPackFixtures } from "../../src/commands/pack";
 import { compilePack, extractFile } from "../../src/engine/extractor";
-import { compileHazards, findLoopedDispatches } from "../../src/engine/hazards";
+import {
+  compileHazards,
+  findLoopedDispatches,
+  findPermanentFailures,
+} from "../../src/engine/hazards";
 import { fixturesDir } from "../../src/engine/pack-loader";
 
 /**
@@ -15,7 +19,7 @@ describe("php pack", () => {
 
   test("loads with its declared identity", () => {
     expect(pack.name).toBe("php");
-    expect(pack.version).toBe("1.12.0");
+    expect(pack.version).toBe("1.14.0");
   });
 
   test("reproduces the expected nodes", () => {
@@ -624,6 +628,116 @@ describe("php pack", () => {
    * coordinates for a reader to check, so a miss costs a glance at a diff and a runaway extent costs
    * the reader's trust in every row under it.
    */
+  describe("what the transient rules call a temporary failure", () => {
+    const failuresIn = (body: string): { call: string; line: number; transientLine: number }[] => {
+      const hazards = compileHazards(pack);
+      if (hazards === null) throw new Error("the php pack declares no hazards block");
+      return findPermanentFailures(hazards, `<?php\n${body}\n`);
+    };
+
+    test("reads each spelling a Laravel codebase uses for a retryable condition", () => {
+      for (const type of [
+        "RateLimitException",
+        "ThrottleException",
+        "TooManyRequestsHttpException",
+        "TimeoutException",
+        "TransientFailure",
+        "TemporaryOutage",
+      ]) {
+        expect(
+          failuresIn(`try {\n  $this->send();\n} catch (${type} $e) {\n  $this->fail($e);\n}`),
+          type,
+        ).toEqual([{ call: "$this->fail", line: 5, transientLine: 4 }]);
+      }
+    });
+
+    test("reads a qualified name and a multi-catch, which is how they are written", () => {
+      expect(
+        failuresIn(
+          "try {\n  $x();\n} catch (\\App\\Errors\\RateLimitException $e) {\n  $this->fail($e);\n}",
+        ),
+      ).toEqual([{ call: "$this->fail", line: 5, transientLine: 4 }]);
+      expect(
+        failuresIn(
+          "try {\n  $x();\n} catch (BadInput | RateLimitException $e) {\n  $job->fail($e);\n}",
+        ),
+      ).toEqual([{ call: "$job->fail", line: 5, transientLine: 4 }]);
+    });
+
+    test("says nothing about a catch of an error nobody called temporary", () => {
+      // The pairing is the whole claim. A job that fails on an unexpected throwable is a job
+      // behaving, and an axis that reported it would fire on every codebase with error handling.
+      expect(
+        failuresIn("try {\n  $x();\n} catch (\\Throwable $e) {\n  $this->fail($e);\n}"),
+      ).toEqual([]);
+    });
+
+    test("a fail after the catch closes is not inside it", () => {
+      // The `) {` lookahead the loops rules learned the hard way, on the third extent family. A
+      // pattern that consumed the brace would balance the next unrelated block, or none, and report
+      // every fail below it as a rate-limit fail.
+      expect(
+        failuresIn(
+          [
+            "try {",
+            "  $x();",
+            "} catch (RateLimitException $e) {",
+            "  $this->store($e);",
+            "}",
+            "$this->fail($e);",
+          ].join("\n"),
+        ),
+      ).toEqual([]);
+    });
+  });
+
+  describe("what the inherit rules read", () => {
+    const inheritedBy = (declaration: string): (string | undefined)[] => {
+      const relPath = "app/Jobs/SyncMember.php";
+      const extracted = extractFile(compiled, {
+        root: ".",
+        lang: "php",
+        file: relPath,
+        relPath,
+        source: `<?php\n\nnamespace Acme\\Jobs;\n\n${declaration}\n{\n}\n`,
+      });
+      if (extracted === null) throw new Error("the php pack yielded no node for the case file");
+      return extracted.captures
+        .filter((capture) => capture.family === "inherit")
+        .map((capture) => capture.groups[1]);
+    };
+
+    test("names the parent a class extends without importing it", () => {
+      // The case the import rules structurally cannot see: a sibling in the same namespace needs no
+      // `use`, because php resolves the bare name against the current namespace. On a real Laravel
+      // repository this was one abstract job with nineteen subclasses and a fan-in of three.
+      expect(inheritedBy("class SyncMember extends AbstractSync")).toEqual(["AbstractSync"]);
+      expect(inheritedBy("final class SyncMember extends AbstractSync")).toEqual(["AbstractSync"]);
+      expect(inheritedBy("abstract class SyncMember extends AbstractSync")).toEqual([
+        "AbstractSync",
+      ]);
+    });
+
+    test("stops at the parent when the declaration goes on to implement", () => {
+      // `implements ShouldQueue` is the commonest tail in the language this pack serves, and a
+      // pattern that ran past the parent name would carry the interface list into the capture.
+      expect(inheritedBy("class SyncMember extends AbstractSync implements ShouldQueue")).toEqual([
+        "AbstractSync",
+      ]);
+    });
+
+    test("reads a fully qualified parent as the qualified name it is", () => {
+      expect(inheritedBy("class SyncMember extends \\Acme\\Jobs\\AbstractSync")).toEqual([
+        "Acme\\Jobs\\AbstractSync",
+      ]);
+    });
+
+    test("names nothing for a class that extends nothing", () => {
+      expect(inheritedBy("class SyncMember")).toEqual([]);
+      expect(inheritedBy("class SyncMember implements ShouldQueue")).toEqual([]);
+    });
+  });
+
   describe("what the loops rules call a loop", () => {
     const dispatchesIn = (body: string): { line: number; loopLine: number }[] => {
       const hazards = compileHazards(pack);

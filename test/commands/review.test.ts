@@ -2262,6 +2262,7 @@ describe("a changed file that holds several exports", () => {
       hazardsScanned: [],
       names: [],
       fanout: [],
+      permanentFailures: [],
     };
   }
 
@@ -2618,5 +2619,107 @@ describe("a changed file the scheduler reaches", () => {
     );
     // Still not a finding, and still nothing about volume.
     expect(printed).toContain("says nothing about volume");
+  });
+
+  /**
+   * The far side of the fan-out, and the only fact in the brief about a file the diff never
+   * touched. The handler is reached through the dispatch target, and its error handling lives one
+   * inheritance hop further, which is where a queued job routinely keeps it.
+   */
+  test("names what the dispatched job does with a failure it was told would pass", () => {
+    mkdirSync(join(repo, "apps/api/app/Jobs"), { recursive: true });
+    mkdirSync(join(repo, "apps/api/app/Console/Commands"), { recursive: true });
+    writeFileSync(
+      join(repo, "apps/api/app/Jobs/AbstractSync.php"),
+      [
+        "<?php",
+        "",
+        "namespace Acme\\Jobs;",
+        "",
+        "abstract class AbstractSync",
+        "{",
+        "    public function handle(): void",
+        "    {",
+        "        try {",
+        "            $this->run();",
+        "        } catch (RateLimitException $e) {",
+        "            $this->storeForRetry($e);",
+        "            $this->fail($e);",
+        "        }",
+        "    }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    // No `use` statement, deliberately: the parent is a sibling in the same namespace, which is the
+    // shape php resolves against the current namespace and the `import` rules never see. Without
+    // the `inherit` family this edge does not exist and the line under test cannot be reached.
+    writeFileSync(
+      join(repo, "apps/api/app/Jobs/SyncMember.php"),
+      [
+        "<?php",
+        "",
+        "namespace Acme\\Jobs;",
+        "",
+        "class SyncMember extends AbstractSync",
+        "{",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(repo, "apps/api/app/Console/Kernel.php"),
+      [
+        "<?php",
+        "",
+        "namespace Acme\\Console;",
+        "",
+        "class Kernel",
+        "{",
+        "    protected function schedule($schedule): void",
+        "    {",
+        "        $schedule->command('acme:reconcile --force')->dailyAt('03:20');",
+        "    }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const dispatching = [
+      "<?php",
+      "",
+      "namespace Acme\\Console\\Commands;",
+      "",
+      "use Acme\\Jobs\\SyncMember;",
+      "",
+      "class ReconcileCommand",
+      "{",
+      "    protected $signature = 'acme:reconcile {--force}';",
+      "",
+      "    public function handle(): void",
+      "    {",
+      "        foreach ($members as $member) {",
+      "            SyncMember::dispatch($member);",
+      "        }",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    writeFileSync(join(repo, COMMAND_FILE), dispatching.replace("$members", "$endingToday"));
+    git(repo, ["add", "-A", "-f"]);
+    commit(repo, "dispatch a job whose base class fails on a rate limit");
+    capture(() => indexCommand(repo));
+    writeFileSync(join(repo, COMMAND_FILE), dispatching);
+    capture(() => indexCommand(repo));
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    // The line the diff has no reason to lead anybody to: the job the widened loop feeds records a
+    // rate limit as a final failure, and it is written in neither changed file.
+    expect(printed).toContain(
+      "on failure  apps/api/app/Jobs/AbstractSync.php:13  $this->fail()  inside a catch at line 11",
+    );
+    // And it is still a coordinate, not a verdict: whether the fail is wrong depends on what
+    // storeForRetry arranged, which no rule here can see.
+    expect(printed).not.toMatch(/on failure.*(?:bug|wrong|must|should)/);
   });
 });

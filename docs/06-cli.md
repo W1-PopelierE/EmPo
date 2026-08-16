@@ -294,7 +294,7 @@ Output (human-readable, and `--json` for machines):
   the two are the same shape. The **order is deliberately untouched**: a consumer that is itself
   widely used is genuinely the one to read first, and the count saying so is in the same row. What
   was missing was never the ranking, it was what each row is. The family is `template`, `import`,
-  `fqcn`, `hook` or `string`, and never the directive: a graph records which rule family matched,
+  `fqcn`, `hook`, `string` or `inherit`, and never the directive: a graph records which rule family matched,
   not whether the php that matched wrote `@extends` or `view(`.
 - **symbol joins**: any bridge edge, e.g. "a mobile screen calls a route this file
   defines," so a backend change's mobile blast radius is visible. **The heading says "symbol joins"
@@ -558,7 +558,13 @@ is having the two in one place, because what a dispatch does with a failure is w
 handler and never at the call site, and a queue that a nightly loop fills and a five-minute entry
 refills is a loop no single one of those three facts states. Only scheduled consumers are listed: the
 row's whole value is the cadence at the far end, so a controller dispatching the same job on a click
-has nothing to say here. The sites come from the
+has nothing to say here. An `on failure` line follows where the target's own code, or the code it
+inherits one hop up, records a failure as final inside a catch of an error the pack calls transient:
+what a queue does with the work that comes back rate-limited is the other half of what a widened loop
+means, and it is written in a file the diff has no reason to touch. One hop and not the closure,
+because a job's imports transitively are most of the application and the base class is the hop that
+pays — `handle` on a queued job is routinely inherited, so the subclass holds the work and the parent
+holds the error handling. The sites come from the
 `loops` rules a language pack declares beside its hazard markers
 ([04-language-packs](04-language-packs.md)) and ride on the graph as an axis of their own. **It is a
 fact in the brief and never a finding**, and every non-empty list says so in a sentence underneath:

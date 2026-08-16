@@ -78,6 +78,8 @@ const hazardPack: Pack = {
   hazards: {
     transactions: [{ pattern: "^begin$", extent: "span", endPattern: "^commit$" }],
     loops: [],
+    transient: [],
+    permanentFailures: [],
     dispatches: [{ pattern: "send\\(([A-Za-z]+)\\)", job: 1 }],
     deferAtSite: [],
     deferAtDeclaration: [],

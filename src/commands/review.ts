@@ -34,7 +34,7 @@ import { configError, type EmpoError, environmentError, readJson } from "../erro
 import type { EmpoConfig, EmpoForge } from "../schema/config.schema";
 import { parseFindingsFile } from "../schema/findings.schema";
 import type { HostTicket } from "../schema/host-payload.schema";
-import type { Graph, GraphNode } from "../schema/types";
+import type { Graph, GraphNode, PermanentFailure } from "../schema/types";
 import { columnWidth } from "../term";
 import { describeTouch, wantedPaths, wantedTerms } from "./check";
 import { type BlastRadius, blastRadius, FLOOR_NOT_CEILING, radiusNode } from "./query";
@@ -1313,12 +1313,50 @@ function printFanout(graph: Graph, facts: FileFacts[]): void {
     for (const other of scheduledSiblings(graph, site)) {
       console.log(`    also reached from ${other.id}  scheduled at ${other.evidence}`);
     }
+    // The one place the brief reaches a fact about a file the diff never touched. What the handler
+    // does with a failure decides whether a widened loop is a bigger batch or a growing pile, and it
+    // is written where the author of this diff had no reason to look. One hop past the target as
+    // well as the target itself, because a job's `handle` is as often inherited as written: the
+    // subclass holds the work and the base class holds the error handling.
+    for (const found of handlerFailures(graph, site.target)) {
+      console.log(
+        `    on failure  ${found.file}:${found.line}  ${found.call}()` +
+          `  inside a catch at line ${found.transientLine}`,
+      );
+    }
   }
   // Said every time the list is non-empty, because a coordinate with no sentence under it reads as
   // an accusation, and this axis has nothing to accuse anybody of.
   console.log("  How often the loop runs is a property of the data, not of the source, so this");
   console.log("  says nothing about volume. If this diff widened what the loop iterates, that is");
   console.log("  the question to ask out loud.");
+}
+
+/**
+ * What the dispatched job's own code does with a failure it was told would pass: the target's file
+ * and the files the target inherits from, one hop.
+ *
+ * One hop and not the whole closure. A job's outgoing edges are its imports, and the transitive
+ * closure of those is most of the application, so every extra hop trades the one file that runs
+ * this work for a hundred that do not. The base class is the hop that pays: `handle` on a queued job
+ * is routinely inherited, so the subclass the dispatch names holds the work and its parent holds the
+ * error handling, and stopping at the target would print nothing for exactly the shape this is for.
+ *
+ * A graph built before the axis existed carries no list and yields nothing here, which reads as "no
+ * failure handling found". That silence is the same one the section header prints as an unknown, so
+ * it is not repaired here: it is one absence with one remedy, `empo index`.
+ */
+function handlerFailures(graph: Graph, target: string): PermanentFailure[] {
+  const all = graph.permanentFailures ?? [];
+  if (all.length === 0) return [];
+
+  const files = new Set<string>();
+  for (const node of graph.nodes) if (node.id === target) files.add(node.file);
+  for (const edge of graph.edges) {
+    if (edge.from !== target || edge.kind === "bridge") continue;
+    for (const node of graph.nodes) if (node.id === edge.to) files.add(node.file);
+  }
+  return all.filter((found) => files.has(found.file));
 }
 
 /**
