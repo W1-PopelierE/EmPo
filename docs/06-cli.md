@@ -210,8 +210,9 @@ assertion terms, and the human approving the diff has no way to see what went mi
 
 ## `empo index`
 
-Rebuilds the graph. Deterministic, seconds, no network. Prints node/edge/bridge counts and the sha
-it built against. Run it whenever the codebase moved. Flags: `--repo <path>`, and `--check` to exit
+Rebuilds the graph. Deterministic, seconds, no network. Prints node/edge/join counts and the sha
+it built against, and a match rate per join, which covers the bridges config declares and the joins
+a pack declares over its own symbols alike. Run it whenever the codebase moved. Flags: `--repo <path>`, and `--check` to exit
 non-zero if the graph would change (a CI staleness gate).
 
 **A names block prints between the flows line and the built line**, one line per edge family whose
@@ -870,8 +871,8 @@ Health check, and it writes nothing. It does execute one thing, and only one: ea
 wired to run, through a shell, which is a checkout-supplied command line and is why `--skip-hooks`
 exists (the hooks block below states that boundary in full). Reports: graph staleness vs HEAD, config validity (bad roots, unknown
 pack, malformed bridge, uncompilable `keyPattern`, an `aliases` target pointing at a directory that
-is not there), directories under no root, per-bridge match
-rate (a low rate usually means a mis-tuned `normalize`), any pack-version or graph-schema drift
+is not there), directories under no root, a match rate per join,
+both the configured bridges and a pack's own (a low rate usually means a mis-tuned `normalize`), any pack-version or graph-schema drift
 against the binary that would make the graph on disk answer differently from a rebuild, what the
 `adapters` block declares and whether this machine and this checkout can honour it, whether every
 hook the host is wired to run actually runs, and whether the config's `commit` list still describes

@@ -92,8 +92,15 @@ export const LOCK_PATH = ".empo/generated/packs.lock.json";
  * would narrow every diff to nothing and report an empty blast radius for a change that has one.
  * Narrowing therefore falls back to the whole file wherever the key is absent, which is what a
  * schema 7 graph gets until it is rebuilt: the answer it always gave.
+ *
+ * 9 is that same case a third time, for `fanout`. A schema 8 graph holds no dispatch-inside-a-loop
+ * list because nothing looked for one, and the empty list means the rules looked and found none:
+ * two answers, and `empo review` prints them apart. The missing key carries that difference on its
+ * own, which is why this file's readers do not default it — but only for a reader that remembers to
+ * ask, and the bump is what tells every other one, `empo doctor` included, that the graph in front
+ * of it predates the axis rather than reporting a repository clean of something nobody looked for.
  */
-export const GRAPH_SCHEMA = 8;
+export const GRAPH_SCHEMA = 9;
 
 export function graphPath(repoRoot: string): string {
   return join(repoRoot, GRAPH_PATH);

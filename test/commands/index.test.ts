@@ -247,8 +247,10 @@ describe("indexCommand", () => {
     // node by an exported symbol rather than by a file, so `nodes[].id`, `edges`, `fanin` and
     // `flows` all keep their names and answer per export. 8 is 3's and 5's case: `nodes[].extents`
     // is added, and its absence means the lines were never recorded where its emptiness would mean
-    // the export spans none, which is a diff narrowed to nothing.
-    expect(graph.schema).toBe(8);
+    // the export spans none, which is a diff narrowed to nothing. 9 is that case a third time:
+    // `fanout` is added, and a graph without the key was built by a run that never looked for a
+    // dispatch inside a loop, where the empty list says the rules looked and found none.
+    expect(graph.schema).toBe(9);
     expect(graph.roots).toEqual([
       { path: "apps/api", lang: "php" },
       { path: "apps/mobile", lang: "typescript" },

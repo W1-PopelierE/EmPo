@@ -831,12 +831,21 @@ written before the axis existed has no key, and a reader defaulting that to the 
 print "no changed file dispatches from inside a loop" about files nothing ever examined. `empo
 review` prints the absence as the unknown it is and names `empo index` as the repair.
 
-**`schema` does not move for it.** A field that arrives announces itself by its absence — the key is
-either in the file or it is not, and every reader of this one is already required to tell those two
-apart — so a version bump would carry nothing the file does not already say about itself. The number
-is for the change no reader can see: a key that keeps its name and changes what it counts (4, and
-`fanin`), or a set of ids that starts meaning exports where it meant files (7). Those are the graphs
-that parse, look well formed, and answer with the old arithmetic. This one cannot.
+**`schema` goes from 8 to 9 with it**, which is 3's and 5's case rather than 4's. A field that
+arrives announces itself by its absence only where absence and emptiness mean the same thing, and
+here they do not: no key means no run ever looked for a dispatch inside a loop, and an empty list
+means the rules looked and found none. The missing key does carry that difference, and the readers
+in this repository are written to preserve it — but only for a reader that remembers to ask, and the
+bump is what tells every other one. It is also what puts the graph in front of `empo doctor` as
+drift, so a repository that upgraded the binary and not the graph is told, rather than being served
+"no changed file dispatches from inside a loop" about files nothing ever examined.
+
+The one bump that would have been wrong is the one for tidiness. The number is not a changelog: it
+exists for a graph that parses, looks well formed, and answers with arithmetic the reader cannot
+tell has moved under it — a key that keeps its name and counts something else (4), a set of ids that
+starts meaning exports where it meant files (7). A field whose absence is itself an answer belongs
+in the same class only because that absence has to survive the reader's default, which is exactly
+what this one is.
 
 Fan-out sites are deduplicated across roots exactly as the hazards are, since two overlapping roots
 re-scan one file and one dispatch site read twice is not two of them, and they are sorted by
