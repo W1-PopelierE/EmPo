@@ -108,7 +108,8 @@ export interface BlastRadius {
    * itself widely used is genuinely the one to read first, and the count that says so is printed in
    * the same row. What was missing was never the order, it was what each row is.
    *
-   * `edge` is the family (`template`, `import`, `fqcn`, `hook`, `string`) and not the directive. A
+   * `edge` is the family (`template`, `import`, `fqcn`, `hook`, `string`, `inherit`) and not the
+   * directive. A
    * graph records which rule family matched, not whether the php that matched said `@extends` or
    * `view(`, and a column that claimed the second would be inventing a fact the build never kept.
    */

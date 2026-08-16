@@ -606,6 +606,13 @@ never the head of one. The second reads
 `class Foo extends \Fully\Qualified\Base`, capturing the qualified name without its leading
 separator, and resolves by `fqcn`.
 
+Between those two sits a spelling neither reads: `class Foo extends Sub\Base`, a parent named
+relative to the current namespace. The bare rule stops at the backslash and the qualified one
+requires a leading separator, so the reference yields no capture and no refusal — it is not counted
+anywhere. Resolving it needs the reading file's own namespace prepended to the capture, which is a
+resolve strategy this engine does not have, and inventing one for a spelling php code uses rarely
+would buy an edge at the price of a strategy nothing else needs.
+
 That the second rule uses the `fqcn` strategy is also the reason the family is not simply more
 `fqcn` rules: **the strategy and the family answer two different questions.** `resolve` says how a
 capture becomes a node id, and the family says what kind of reference the capture was, which is what
@@ -630,8 +637,8 @@ is a pack version bump — the php pack moved from 1.12.0 to 1.13.0 for these tw
 free win.** Inheritance is dense in framework code — jobs, commands,
 controllers, models and test cases all declare a parent — so the family lands on many pairs the
 other five never touched. On that repository one abstract job with nineteen subclasses had a graph
-fan-in of **3**, the three subclasses that sat a namespace deeper and therefore had to import it, and
-a fan-in of **20** after the rules were declared; the repository as a whole went from **17725** edges
+fan-in of **3** — two subclasses that sat a namespace deeper and therefore had to import it, plus one
+class that imports it without extending it — and a fan-in of **20** after the rules were declared; the repository as a whole went from **17725** edges
 to **20292**. A fan-in, a god list or a blast radius written down before the bump does not survive
 the next `empo index`, and it does not survive it because the graph had been missing those edges.
 

@@ -296,8 +296,9 @@ writes no `use` statement, because the language resolves a bare name against the
 so the `import` rules see nothing at all where the strongest coupling in the file is written: half of
 what the subclass does is written in the parent, and the graph said the two files had never heard of
 each other. Measured on a real Laravel repository, one abstract job had nineteen subclasses and a
-fan-in of **3** — exactly the three that lived a namespace deeper and therefore had to import it —
-and a fan-in of **20** afterwards.
+fan-in of **3**: two subclasses that lived a namespace deeper and therefore had to import it, and one
+class that imports it without extending it. Afterwards the fan-in is **20** — the nineteen subclasses
+plus that one importer — so seventeen of the twenty referring files were invisible.
 
 **It is its own family rather than a second `fqcn` rule, and the distinction is the capture and not
 the taxonomy.** `fqcn` reads a name that already says where it lives, and the strategy of the same
@@ -310,10 +311,14 @@ or renders, and this one names where the rest of the file's behaviour is written
 different answer to "how would this break me".
 
 **The `short-name` blind spot applies here in full, and on class names it bites differently than on
-component tags.** A bare parent name carried by two nodes resolves to neither — no edge is emitted
-in either direction, and the reference is counted `ambiguous` in this family's `names` record like
-any other refused short name (the section on name resolution below). A parent in no node at all is
-`unknown`, and on php that is the ordinary and correct case rather than a loss: a class written
+component tags.** A bare parent name carried by two nodes resolves to neither *under these rules* —
+no edge is emitted in either direction, and the reference is counted `ambiguous` in this family's
+`names` record like any other refused short name. The qualification is worth making because the
+strategy itself is not unconditional: `resolveName` narrows by a rule's `targetKinds` **before** it
+asks whether the name is unique (`engine/resolver.ts`), so a rule that declares them can still
+resolve a name two nodes carry. These two declare none, so for them uniqueness is the whole test (the section on name resolution below). A parent in no node at all is
+and a parent in no node at all is
+`unknown`, which on php is the ordinary and correct case rather than a loss: a class written
 `extends Model` or `extends Command` names an Eloquent or Laravel base class that lives in
 `vendor/` and is no part of this repository's graph, so a refusal is the right answer and not a gap
 to be closed. On the same Laravel repository the family read 3379 names and resolved **2564**, with
