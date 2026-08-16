@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { buildRoot } from "../engine/build";
 import { fixturesDir, loadPack } from "../engine/pack-loader";
 import { configError, gateFailure } from "../errors";
-import type { GraphEdge, GraphNode, Hazard, NameResolution, Pack } from "../schema/types";
+import type { Pack } from "../schema/pack.schema";
+import type { GraphEdge, GraphNode, Hazard, NameResolution } from "../schema/types";
 
 /**
  * `empo pack test <name>`: run a pack against its synthetic fixtures and diff the result against

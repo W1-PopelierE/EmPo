@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { configError } from "../errors";
+import { parseOrThrow } from "../errors";
 
 /**
  * The runtime validator for a spine file, `.empo/spines/<name>.json` (docs/08-spines.md). A spine is
@@ -126,14 +126,7 @@ export type SpineTrap = z.infer<typeof spineTrapSchema>;
 
 /** Validate an already-parsed spine value. Throws a config error (exit 2) with every issue. */
 export function parseSpineFile(raw: unknown, source: string): SpineFile {
-  const result = spineFileSchema.safeParse(raw);
-  if (result.success) return result.data;
-
-  const details = result.error.issues.map((issue) => {
-    const path = issue.path.join(".");
-    return path ? `${path}: ${issue.message}` : issue.message;
-  });
-  throw configError(`${source} is not a valid EmPo spine`, details);
+  return parseOrThrow(spineFileSchema, raw, source, "EmPo spine");
 }
 
 /** The JSON Schema editors validate against. Generated, never hand-written. */

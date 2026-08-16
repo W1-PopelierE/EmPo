@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import { buildRoot, dedupeEdges, dedupeNodes } from "../../src/engine/build";
 import { loadPack } from "../../src/engine/pack-loader";
-import type { GraphEdge, GraphNode, Pack } from "../../src/schema/types";
+import type { Pack } from "../../src/schema/pack.schema";
+import type { GraphEdge, GraphNode } from "../../src/schema/types";
 
 const fixture = fileURLToPath(new URL("../../fixtures/acme-platform", import.meta.url));
 const symbolFixture = fileURLToPath(new URL("../../fixtures/symbol-fixture", import.meta.url));

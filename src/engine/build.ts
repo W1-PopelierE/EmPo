@@ -1,11 +1,5 @@
-import type {
-  GraphEdge,
-  GraphNode,
-  Hazard,
-  NameOutcome,
-  NameResolution,
-  Pack,
-} from "../schema/types";
+import type { Pack } from "../schema/pack.schema";
+import type { GraphEdge, GraphNode, Hazard, NameOutcome, NameResolution } from "../schema/types";
 import {
   collectFileScopes,
   compilePack,
@@ -356,7 +350,7 @@ export function dedupeHazards(hazards: Hazard[]): Hazard[] {
  * a tiebreak between two dispatches of one job on one line of one file and never a claim about the
  * null, and it lives here rather than in engine/order.ts because a hazard is resolved in this file.
  */
-export function byHazardOrder(a: Hazard, b: Hazard): number {
+function byHazardOrder(a: Hazard, b: Hazard): number {
   return (
     compareStrings(a.file, b.file) ||
     a.line - b.line ||

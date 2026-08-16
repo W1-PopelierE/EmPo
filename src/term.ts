@@ -16,6 +16,27 @@
  * (no-color.org), and TERM=dumb because that is what a terminal says when it cannot render this.
  */
 
+import { resolve } from "node:path";
+
+/**
+ * A count and its noun, as a sentence fragment: "1 file", "3 files".
+ *
+ * The default appends an "s", which is right for every noun the commands had until "alias", the
+ * first one whose plural is not the singular plus a letter. So the irregular form is a parameter
+ * rather than a rule: a caller that knows its noun passes both, and every other caller is
+ * unchanged.
+ */
+export function plural(count: number, noun: string, plural?: string): string {
+  if (count === 1) return `${count} ${noun}`;
+  return `${count} ${plural ?? `${noun}s`}`;
+}
+
+/** A path as written against the repo root, and unchanged when it lies outside it. */
+export function relativeTo(repoRoot: string, path: string): string {
+  const prefix = `${resolve(repoRoot)}/`;
+  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
+}
+
 export interface Style {
   bold(text: string): string;
   dim(text: string): string;

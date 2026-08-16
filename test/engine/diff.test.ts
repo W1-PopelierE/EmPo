@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { changedLines, changedPaths, parseDiff, touchesLine } from "../../src/engine/diff";
+import { changedLines, changedPaths, parseDiff } from "../../src/engine/diff";
 
 /**
  * The parser turns a diff into the two things a review needs: which files changed and which line
@@ -134,7 +134,6 @@ describe("parseDiff", () => {
     ]);
     // Nothing of it is left in the new file, so no citation can point inside it.
     expect(changedLines(file ?? emptyFile())).toEqual([]);
-    expect(touchesLine(file ?? emptyFile(), 1)).toBe(false);
   });
 
   test("reports a rename with hunks, under its new path", () => {
@@ -343,13 +342,6 @@ describe("parseDiff", () => {
 
     // Only the lines the diff wrote, which is what a citation outside the diff is measured against.
     expect(changedLines(file)).toEqual([2, 22]);
-    // The hunk range is wider than that, because context is what the change was read against.
-    expect(touchesLine(file, 1)).toBe(true);
-    expect(touchesLine(file, 4)).toBe(true);
-    expect(touchesLine(file, 5)).toBe(false);
-    expect(touchesLine(file, 20)).toBe(false);
-    expect(touchesLine(file, 24)).toBe(true);
-    expect(touchesLine(file, 25)).toBe(false);
   });
 
   test("returns nothing for input that is not a diff, instead of throwing", () => {

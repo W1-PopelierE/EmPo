@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, join, relative, sep } from "node:path";
-import { configError } from "../errors";
+import { configError, readJson } from "../errors";
 import type { EmpoConfig } from "../schema/config.schema";
 import { parseSpineFile, type SpineFile } from "../schema/spine.schema";
 import { type Citation, type CitationCheck, checkCitation } from "./citations";
@@ -62,22 +62,15 @@ export function loadSpines(repoRoot: string, config: EmpoConfig): LoadedSpine[] 
 }
 
 /**
- * Derived from the file that was really opened, never from the configured string. Echoing the config
- * back reports a `spines` of `./tools/spines` as `./tools/spines/money.json`, which is not the
- * repo-relative form every other path EmPo prints takes, and this one is printed by verify, by the
- * gate's failure, and by doctor: it is the path a human is told to open. Separators are forced to
- * `/` for the same reason engine/resolver.ts does its path arithmetic in posix.
+ * Derived from the file that was really opened or really written, never echoed back from the
+ * configured string. Echoing the config back reports a `spines` of `./tools/spines` as
+ * `./tools/spines/money.json` rather than `tools/spines/money.json`, which is not the repo-relative
+ * form every other path EmPo prints takes, and this one is printed by verify, by the gate's failure,
+ * by doctor and by the proposal gate: it is the path a human is told to open. Separators are forced
+ * to `/` for the same reason engine/resolver.ts does its path arithmetic in posix.
  */
-function repoRelative(repoRoot: string, absolute: string): string {
+export function repoRelative(repoRoot: string, absolute: string): string {
   return relative(repoRoot, absolute).split(sep).join("/");
-}
-
-function readJson(absolute: string, path: string): unknown {
-  try {
-    return JSON.parse(readFileSync(absolute, "utf8"));
-  } catch (error) {
-    throw configError(`${path} is not valid JSON`, [(error as Error).message]);
-  }
 }
 
 export interface SpineCitation {

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { forgeSlug } from "../adapters/forge/types";
@@ -13,13 +13,14 @@ import { loadPack } from "../engine/pack-loader";
 import { applyProposal, gateProposal, type ProposalResult } from "../engine/proposal";
 import { scaffold } from "../engine/scaffold";
 import { loadSpines } from "../engine/spines";
-import { configError } from "../errors";
+import { configError, readJson } from "../errors";
 import { writeAgents } from "../host/agents";
 import { writeClaude } from "../host/claude";
 import { writeCodex } from "../host/codex";
 import type { EmpoAdapters, EmpoConfig } from "../schema/config.schema";
 import { parseProposalFile } from "../schema/proposal.schema";
 import type { Graph, GraphNode } from "../schema/types";
+import { plural, relativeTo } from "../term";
 import { indexCommand } from "./index";
 
 /**
@@ -723,14 +724,12 @@ function proposalPhase(repoRoot: string, path: string, options: InitOptions): vo
     ]);
   }
 
-  let raw: unknown;
-  try {
-    raw = JSON.parse(readFileSync(path, "utf8"));
-  } catch (error) {
-    throw configError(`${path} is not valid JSON`, [(error as Error).message]);
-  }
-
-  const result = gateProposal(repoRoot, config, graph, parseProposalFile(raw, path));
+  const result = gateProposal(
+    repoRoot,
+    config,
+    graph,
+    parseProposalFile(readJson(path, path), path),
+  );
 
   console.log("");
   console.log(`proposal   ${path}`);
@@ -849,21 +848,6 @@ function parseTracker(value: string | undefined): string | undefined {
     throw configError("--tracker was given no host", ["For example: --tracker jira"]);
   }
   return host;
-}
-
-function relativeTo(repoRoot: string, path: string): string {
-  const prefix = `${resolve(repoRoot)}/`;
-  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
-}
-
-/**
- * `plural` appends an "s", which is right for every noun this command had until "alias", the first
- * one whose plural is not the singular plus a letter. So the irregular form is a parameter rather
- * than a rule: a caller that knows its noun passes both, and every existing caller is unchanged.
- */
-function plural(count: number, noun: string, plural?: string): string {
-  if (count === 1) return `${count} ${noun}`;
-  return `${count} ${plural ?? `${noun}s`}`;
 }
 
 /**

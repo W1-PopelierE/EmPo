@@ -4,14 +4,13 @@ import { configError } from "../errors";
 import { normalizeRepoPath } from "../schema/config.schema";
 import type {
   CommentSyntax,
-  EdgeKind,
   Normalizer,
   Pack,
   ResolveStrategy,
   ScopeRule,
-  SymbolRef,
   SymbolRule,
-} from "../schema/types";
+} from "../schema/pack.schema";
+import type { EdgeKind, SymbolRef } from "../schema/types";
 import {
   balancedEnd,
   type CompiledHazards,

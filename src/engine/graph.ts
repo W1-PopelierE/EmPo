@@ -1,8 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { configError, EmpoError } from "../errors";
+import { configError, EmpoError, readJson } from "../errors";
 import type { EmpoConfig } from "../schema/config.schema";
-import type { Graph, GraphEdge, GraphNode, Hazard, NameResolution, Pack } from "../schema/types";
+import type { Pack } from "../schema/pack.schema";
+import type { Graph, GraphEdge, GraphNode, Hazard, NameResolution } from "../schema/types";
 import { type BridgeReport, bridgeRoots } from "./bridger";
 import { buildRoot, type DuplicateNode, dedupeEdges, dedupeHazards, dedupeNodes } from "./build";
 import { computeCoverage } from "./coverage";
@@ -256,15 +257,7 @@ export function readGraph(repoRoot: string): Graph {
     throw configError("No graph found", [`Looked for ${path}`, "Run empo index first."]);
   }
 
-  let parsed: Graph;
-  try {
-    parsed = JSON.parse(readFileSync(path, "utf8")) as Graph;
-  } catch (error) {
-    throw configError(`${path} is not valid JSON`, [
-      (error as Error).message,
-      "Run empo index to rebuild it.",
-    ]);
-  }
+  const parsed = readJson(path, path, ["Run empo index to rebuild it."]) as Graph;
 
   // Outside the catch, so a file that parses and a file that does not keep separate answers: the
   // message above is about the parse and nothing else. Anything that is not an array is treated as

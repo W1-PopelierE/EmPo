@@ -85,15 +85,6 @@ export function changedPaths(files: ChangedFile[]): string[] {
   return [...paths].sort(compareStrings);
 }
 
-/**
- * Whether a new-file line number falls inside one of this file's changed hunks. The range is
- * half-open, so a hunk that only deletes (`newLines` 0) covers nothing: there is no line left in
- * the new file to cite, and claiming its neighbour would put a finding on unchanged code.
- */
-export function touchesLine(file: ChangedFile, line: number): boolean {
-  return file.hunks.some((hunk) => line >= hunk.newStart && line < hunk.newStart + hunk.newLines);
-}
-
 /** Every new-file line number this file added or changed, ascending. */
 export function changedLines(file: ChangedFile): number[] {
   const lines = new Set<number>();

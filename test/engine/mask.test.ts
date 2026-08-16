@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { maskComments } from "../../src/engine/mask";
-import type { CommentSyntax } from "../../src/schema/types";
+import type { CommentSyntax } from "../../src/schema/pack.schema";
 
 /**
  * The mask blanks comments before any pack rule runs, so a class name or a route inside a comment

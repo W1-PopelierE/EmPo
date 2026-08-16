@@ -4,8 +4,8 @@ import { guardSpines, guardsPath, matchesPattern, testFileMatcher } from "../../
 import { loadPack } from "../../src/engine/pack-loader";
 import type { LoadedSpine } from "../../src/engine/spines";
 import { configSchema, type EmpoConfig } from "../../src/schema/config.schema";
+import type { Pack } from "../../src/schema/pack.schema";
 import { parseSpineFile } from "../../src/schema/spine.schema";
-import type { Pack } from "../../src/schema/types";
 
 /**
  * The commit gate reads two artifacts and nothing else: a diff and a spine. So every case here

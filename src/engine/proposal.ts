@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { type EmpoConfig, normalizeRepoPath } from "../schema/config.schema";
 import type { ProposalFile } from "../schema/proposal.schema";
 import { parseSpineFile, type SpineFile } from "../schema/spine.schema";
@@ -7,7 +7,7 @@ import type { FlowDefinition, Graph } from "../schema/types";
 import { type Citation, checkCitation } from "./citations";
 import { assignFlows, loadFlows, matchesDeclaredPath } from "./flows";
 import { compareStrings } from "./order";
-import { spineCitations, spinesDir } from "./spines";
+import { repoRelative, spineCitations, spinesDir } from "./spines";
 
 /**
  * The gate over step 5 of `empo init` (docs/06-cli.md): the agent proposes flows and spine
@@ -445,15 +445,6 @@ function spineTarget(repoRoot: string, config: EmpoConfig, name: string): SpineT
     exists: contained && existsSync(absolute),
     contained,
   };
-}
-
-/**
- * Derived from the path really written, never echoed back from the config, for the reason
- * engine/spines.ts gives: a `spines` of `./tools/spines` has to report as `tools/spines/money.json`,
- * which is the repo-relative form every other path EmPo prints takes. Separators are forced to `/`.
- */
-function repoRelative(repoRoot: string, absolute: string): string {
-  return relative(repoRoot, absolute).split(sep).join("/");
 }
 
 /**

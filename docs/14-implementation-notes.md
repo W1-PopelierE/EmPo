@@ -353,6 +353,15 @@ export default defineConfig({
 These interfaces are the spine of the codebase. Pin them first; everything else consumes them. They
 are the TypeScript form of [05-graph-model](05-graph-model.md) and [04-language-packs](04-language-packs.md).
 
+The pack half of what follows no longer lives in `types.ts`: `Pack` and everything under it
+(`ExtractRule`, `SymbolRule`, `ScopeRule`, `PackNodeId`, `CommentSyntax`, `PackKindRule`, the hazard
+rules, `PackViews`, `PackPackageSource`, `PackAliasSource`) are `z.infer` of the schemas in
+`src/schema/pack.schema.ts`, like every other parsed file in this repository. A pack is validated at
+load, so a second hand-written statement of its shape is a mirror that drifts without TypeScript
+seeing it — `CommentSyntax.line` was declared optional here while the schema gave it `.default([])`,
+which made the engine guard a value the parser guarantees and let a schema field added without a
+matching edit here reach no consumer at all. What follows is the shape, not the source of it.
+
 ```ts
 export type EdgeKind = "import" | "fqcn" | "string" | "template" | "hook" | "bridge";
 export type NodeStrategy = "fqcn" | "module-path" | "symbol";

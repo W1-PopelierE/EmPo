@@ -6,7 +6,8 @@ import { afterAll, describe, expect, test } from "vitest";
 import { buildRoot } from "../../src/engine/build";
 import { loadConfig } from "../../src/engine/config";
 import { buildGraph, GRAPH_SCHEMA, serializeGraph } from "../../src/engine/graph";
-import type { GraphEdge, Hazard, Pack } from "../../src/schema/types";
+import type { Pack } from "../../src/schema/pack.schema";
+import type { GraphEdge, Hazard } from "../../src/schema/types";
 
 /**
  * The guardrail docs/14-implementation-notes.md asks for: build the acme fixture twice and assert

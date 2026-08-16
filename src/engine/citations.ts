@@ -104,10 +104,6 @@ export function checkCitation(readRoot: string, citation: Citation): CitationChe
   };
 }
 
-export function checkCitations(readRoot: string, citations: Citation[]): CitationCheck[] {
-  return citations.map((citation) => checkCitation(readRoot, citation));
-}
-
 /**
  * A review runs against a detached worktree and is given exactly that tree to read. A citation that
  * is absolute, or that climbs out with `..`, points at a file the review was never handed, so it is

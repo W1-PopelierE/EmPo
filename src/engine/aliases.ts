@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, posix } from "node:path";
-import type { Pack, PackAliasSource } from "../schema/types";
+import type { Pack, PackAliasSource } from "../schema/pack.schema";
 import { maskComments } from "./mask";
 import { compareStrings } from "./order";
 

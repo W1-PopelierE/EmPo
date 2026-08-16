@@ -341,6 +341,64 @@ describe("createGithubIssuesTracker over a real gh", () => {
 });
 
 describe("createTracker", () => {
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /**
+   * A `gh` on PATH that answers `issue view` with the argument line it was handed, as the issue
+   * title. The tracker is a closure over one gh invocation and exposes the repository it was given
+   * nowhere else, so without this the only honest thing a test could assert about `--repo` is that
+   * building the tracker did not throw.
+   */
+  function withEchoingGh<T>(act: (repoRoot: string) => T): T {
+    const dir = mkdtempSync(join(tmpdir(), "empo-tracker-slug-"));
+    dirs.push(dir);
+    writeFileSync(
+      join(dir, "gh"),
+      `${[
+        "#!/bin/sh",
+        'if [ "$1" = "--version" ]; then echo "gh version 2.0.0"; exit 0; fi',
+        'printf \'{"number":123,"title":"%s"}\\n\' "$*"',
+      ].join("\n")}\n`,
+      { mode: 0o755 },
+    );
+
+    const path = process.env.PATH;
+    process.env.PATH = `${dir}:${path ?? ""}`;
+    try {
+      return act(dir);
+    } finally {
+      process.env.PATH = path;
+    }
+  }
+
+  /**
+   * The slug that reaches gh, asserted as the string it is. Config keeps the workspace and the repo
+   * apart because every Bitbucket call wants them separate, and `gh --repo` wants them joined
+   * (forge/types.ts). The forge side was fixed for exactly that; the tracker kept falling back to
+   * the bare `forge.repo`, so a github-issues tracker with no `project` of its own ran
+   * `gh issue view --repo EmPo` and died on `expected the "[HOST/]OWNER/REPO" format` before it
+   * fetched anything, leaving every review it ran silently ungraded on ticket fit.
+   */
+  test("joins the github forge's workspace and repo into the slug the tracker fetches with", () => {
+    const title = withEchoingGh((repoRoot) => {
+      const { adapter } = createTracker(
+        config({
+          forge: { kind: "github", workspace: "W1-PopelierE", repo: "EmPo" },
+          tracker: { kind: "github-issues" },
+        }),
+        repoRoot,
+      );
+
+      return adapter.getTicket("#123")?.title;
+    });
+
+    expect(title).toContain("--repo W1-PopelierE/EmPo");
+  });
+
   test("gives the none adapter with a stated reason when no tracker is configured", () => {
     const { adapter, note } = createTracker(config(), "/repo");
 

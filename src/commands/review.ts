@@ -30,7 +30,7 @@ import {
   type SpineReport,
   verifySpine,
 } from "../engine/spines";
-import { configError, type EmpoError, environmentError } from "../errors";
+import { configError, type EmpoError, environmentError, readJson } from "../errors";
 import type { EmpoConfig, EmpoForge } from "../schema/config.schema";
 import { parseFindingsFile } from "../schema/findings.schema";
 import type { HostTicket } from "../schema/host-payload.schema";
@@ -1495,14 +1495,7 @@ function gatePhase(repoRoot: string, pr: string | undefined, options: ReviewOpti
     ]);
   }
 
-  let raw: unknown;
-  try {
-    raw = JSON.parse(readFileSync(path, "utf8"));
-  } catch (error) {
-    throw configError(`${path} is not valid JSON`, [(error as Error).message]);
-  }
-
-  const findings = parseFindingsFile(raw, path);
+  const findings = parseFindingsFile(readJson(path, path), path);
   const id = pr ?? "local";
   const session = readSession(repoRoot, id);
   const readRoot = session?.readRoot ?? repoRoot;

@@ -1,6 +1,7 @@
 import { commandExists } from "../../engine/git";
 import type { EmpoConfig } from "../../schema/config.schema";
 import type { HostTicket } from "../../schema/host-payload.schema";
+import { forgeSlug } from "../forge/types";
 import { createGithubIssuesTracker } from "./github-issues";
 import { createMcpTracker } from "./mcp";
 import { createNoneTracker } from "./none";
@@ -106,7 +107,18 @@ function unbuildableTracker(kind: never): TrackerSelection {
   };
 }
 
+/**
+ * The github forge's repository as `OWNER/REPO`, the only form `gh --repo` accepts.
+ *
+ * Through `forgeSlug` and not `forge.repo`, because config keeps the workspace and the repo apart
+ * (detection splits an origin remote that way for the Bitbucket calls that want them separate) and
+ * the bare repo name makes `gh issue view --repo EmPo` die on `expected the "[HOST/]OWNER/REPO"
+ * format`. The forge side was fixed for exactly this; the tracker kept its own unjoined copy.
+ *
+ * Undefined stays undefined: `createGithubIssuesTracker` leaves the flag off entirely then, so gh
+ * infers the repository from the checkout, which is the right answer and `--repo ""` is not.
+ */
 function githubForgeRepo(config: EmpoConfig): string | undefined {
   const forge = config.adapters?.forge;
-  return forge?.kind === "github" ? forge.repo : undefined;
+  return forge?.kind === "github" ? forgeSlug(forge) : undefined;
 }
