@@ -1,6 +1,83 @@
 {
   "nodes": [
     {
+      "id": "Acme\\Console\\Commands\\ReconcileCommand",
+      "file": "app/Console/Commands/ReconcileCommand.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "command",
+      "name": "ReconcileCommand",
+      "produces": [
+        {
+          "symbol": "scheduled-command",
+          "key": "acme:reconcile",
+          "line": 10
+        }
+      ],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Console\\Commands\\SweepCommand",
+      "file": "app/Console/Commands/SweepCommand.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "command",
+      "name": "SweepCommand",
+      "produces": [
+        {
+          "symbol": "scheduled-command",
+          "key": "acme:sweep",
+          "line": 9
+        }
+      ],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Console\\Commands\\UnscheduledCommand",
+      "file": "app/Console/Commands/UnscheduledCommand.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "command",
+      "name": "UnscheduledCommand",
+      "produces": [
+        {
+          "symbol": "scheduled-command",
+          "key": "acme:backfill",
+          "line": 9
+        }
+      ],
+      "consumes": [],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
+      "id": "Acme\\Console\\Kernel",
+      "file": "app/Console/Kernel.php",
+      "root": ".",
+      "lang": "php",
+      "kind": "class",
+      "name": "Kernel",
+      "produces": [],
+      "consumes": [
+        {
+          "symbol": "scheduled-command",
+          "key": "acme:reconcile",
+          "line": 11
+        },
+        {
+          "symbol": "scheduled-command",
+          "key": "acme:sweep",
+          "line": 12
+        }
+      ],
+      "isTest": false,
+      "assertsValue": false
+    },
+    {
       "id": "Acme\\Http\\Controllers\\CatalogController",
       "file": "app/Http/Controllers/CatalogController.php",
       "root": ".",
@@ -718,6 +795,26 @@
   ],
   "edges": [
     {
+      "from": "Acme\\Console\\Commands\\ReconcileCommand",
+      "to": "Acme\\Jobs\\ChargeCard",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Console/Commands/ReconcileCommand.php",
+        "line": 5
+      }
+    },
+    {
+      "from": "Acme\\Console\\Commands\\ReconcileCommand",
+      "to": "Acme\\Models\\Order",
+      "kind": "import",
+      "symbol": null,
+      "evidence": {
+        "file": "app/Console/Commands/ReconcileCommand.php",
+        "line": 6
+      }
+    },
+    {
       "from": "Acme\\Http\\Controllers\\CatalogController",
       "to": "Acme\\Jobs\\RebuildSearchIndex",
       "kind": "import",
@@ -1355,6 +1452,15 @@
       "job": "PostLedgerEntry",
       "target": "Acme\\Jobs\\PostLedgerEntry",
       "transactionLine": 15
+    }
+  ],
+  "fanout": [
+    {
+      "file": "app/Console/Commands/ReconcileCommand.php",
+      "line": 18,
+      "job": "ChargeCard",
+      "target": "Acme\\Jobs\\ChargeCard",
+      "loopLine": 17
     }
   ],
   "names": [

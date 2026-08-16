@@ -295,13 +295,18 @@ Output (human-readable, and `--json` for machines):
   was missing was never the ranking, it was what each row is. The family is `template`, `import`,
   `fqcn`, `hook` or `string`, and never the directive: a graph records which rule family matched,
   not whether the php that matched wrote `@extends` or `view(`.
-- **cross-language reach**: any bridge edge, e.g. "a mobile screen calls a route this file
-  defines," so a backend change's mobile blast radius is visible. **Both ends of the join are
-  printed**, the consuming side and the producing side, because either one can be the file you
-  asked about: a bridge edge runs from the caller to the definer, so naming one end alone answers
-  the question from one direction and repeats it back from the other. Where no bridge edge is in
-  the radius, the line says which of the two silences it is in, a graph holding no bridge edges at
-  all or joins that are simply nowhere near this node.
+- **symbol joins**: any bridge edge, e.g. "a mobile screen calls a route this file
+  defines," so a backend change's mobile blast radius is visible. **The heading says "symbol joins"
+  and no longer "cross-language reach"**, because a pack can declare a join over its own symbols
+  inside one root ([04-language-packs](04-language-packs.md)): the php pack joins
+  `scheduled-command`, so a Laravel scheduler entry and the command class it names are two ends of
+  one bridge edge and both of them are php. A heading promising two languages would be a false fact
+  printed above true ones. **Both ends of the join are printed**, the consuming side and the
+  producing side, because either one can be the file you asked about: a join edge runs from the
+  caller to the definer, so naming one end alone answers the question from one direction and repeats
+  it back from the other. Where no join edge is in the radius, the line says which of the two
+  silences it is in, a graph holding no join edges at all or joins that are simply nowhere near this
+  node.
 - **names block**: what the name-resolving rules yielded on this repository, in the same lines
   `empo index` and `empo doctor` print and `empo doctor` documents below.
 - **staleness line**: `built_against` sha and commits-behind-HEAD.
@@ -541,6 +546,22 @@ does not consult the configured forge at all, and prints a note naming the one i
 no pull request for a forge to answer about, so spending the id on a lookup only produced a failure
 against a pull request nobody had named.
 
+**The brief also prints every dispatch a changed file makes from inside a loop**, under the heading
+`dispatches inside a loop  (step 2: what this change can put on the queue)`, one row per site naming
+the `file:line`, the job it dispatches and the line the loop opened on. The sites come from the
+`loops` rules a language pack declares beside its hazard markers
+([04-language-packs](04-language-packs.md)) and ride on the graph as an axis of their own. **It is a
+fact in the brief and never a finding**, and every non-empty list says so in a sentence underneath:
+how often the loop runs is a property of the data and not of the source. A dispatch inside a loop is
+how a batch is written, and it is wrong only when what the loop iterates is unbounded — EmPo cannot
+know how many rows a query returns, a rule that guessed would fabricate, and the model reading the
+diff is the one that can go and read the query. So the coordinate is stated at the moment the diff
+is read, and the finding, if there is one, comes out through the same verification gate as every
+other. On a graph built before the axis existed the section says exactly that and asks for `empo
+index`, rather than printing an empty list a reader would take for a clean bill of health; under
+`--json` the same list rides at the top level as `fanout`, and is null and not `[]` in that case,
+for the reason `--hazards` and `spinesCurated` are.
+
 **The spines section has three answers, not two.** It prints `spines touched  N of M`, and the
 denominator is there because `N = 0` means two different things. `M = 0` says this repository curates
 no spine, so nothing here is claimed either way; `N = 0` with `M > 0` says no spine claims a file or
@@ -566,6 +587,14 @@ file holds, capped at five with a `+N more` for the rest: the ids all begin with
 printed two columns to the left, so the export names are the only new information the line can
 carry. Where the nodes carry no export name the column falls back to the ids, which under a `fqcn`
 pack is usually the class name and is then the whole answer.
+
+**Inside that block the join rows are labelled by the symbol they matched**, `join <symbol>
+<from> consumes <to>  named at <file:line>`, and not by the word "cross-language" they used to
+carry: a pack can join a symbol inside one root, so a scheduled command joined to the entry that
+schedules it is php on both ends and calling the row cross-language tells a reviewer reading a php
+diff that the php file is on the far side of a language boundary, which is not a fact about
+anything. Both ends print for the reason `empo query` prints both, that the changed file is as often
+the consuming side as the producing one.
 
 **The nodes in that block are the exports the diff's lines touched, not every export the file
 holds.** Each symbol node carries the lines it spans (`nodes[].extents`,

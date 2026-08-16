@@ -244,6 +244,26 @@ or more languages init prints a note saying so, because until a bridge is config
 reports no cross-language reach at all, and that is indistinguishable from a repository that
 genuinely has no coupling.
 
+**A bridge here is a claim only a human can make, and a pack join is a different thing that needs no
+config at all.** Writing a bridge asserts that two roots somebody deliberately chose to keep apart
+really do exchange a symbol, and that these particular `normalize` rules are what make the two
+spellings of it comparable. Neither half of that is in a file listing, which is why `empo init` still
+writes none and why it says so out loud. A pack's `joins` list asserts nothing about anybody's
+layout: it says the framework the pack reads spells one call two ways — a Laravel scheduler entry and
+the command class it names, both php — so the engine matches the produced key against the consumed
+one **inside a single root**, needing no `normalize` because both halves are normalized by rules in
+that one pack. The php pack declares it for `scheduled-command`; the pack side is
+[04-language-packs](04-language-packs.md), and it is opt-in per symbol kind rather than "every symbol
+this pack writes both halves of", since the php pack also consumes its own `http-route` keys from its
+feature tests and joining that one would give every route a fan-in edge from its test.
+
+Two things follow for anyone reading a graph. A `bridge` edge is no longer proof that a coupling
+crosses a language ([05-graph-model](05-graph-model.md)), which is why every command now calls these
+"joins" rather than "cross-language reach". And a single-language repository, which never gets a
+`bridges` block at all, can hold them anyway — that is the point of putting the claim in the pack:
+left to config, the edge would exist only where somebody already knew to ask for it, which is exactly
+where it teaches nothing.
+
 ### `adapters` (optional)
 
 Two adapters, each pluggable. Absent adapters degrade gracefully: no `forge` means `empo review`

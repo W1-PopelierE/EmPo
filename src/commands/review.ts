@@ -299,6 +299,14 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
             // file's radius back knows from these two numbers that it is not holding one.
             nodesInFile: entry.yielded,
           })),
+          // The same fact the brief prints under `dispatches inside a loop`, restricted to the
+          // changed files for the same reason: null and not [] on a graph built before the axis,
+          // because a consumer defaulting the absence to "found none" would read a clean bill of
+          // health off a field no run ever wrote.
+          fanout:
+            graph.fanout === undefined
+              ? null
+              : graph.fanout.filter((site) => facts.some((entry) => entry.file.path === site.file)),
           // The denominator rides alongside the list, so a reader can tell "no spine claims this
           // change" from "this repository curates no spine". Both answer `spines: []`, and only one
           // of them is reassuring (the same rule --hazards keeps for a graph older than the axis).
@@ -1044,6 +1052,7 @@ function printBrief(repoRoot: string, graph: Graph, view: BriefView): void {
   printCi(view);
   printChangedFiles(facts);
   printBlastRadius(facts);
+  printFanout(graph, facts);
   printFlows(facts);
   printSpines(view.spines, view.curated);
   printTests(graph, facts);
@@ -1242,16 +1251,64 @@ function printBlastRadius(facts: FileFacts[]): void {
     for (const bridge of radius.bridges.slice(0, 5)) {
       // Both ends, for the reason `empo query` prints both: the changed file is as often the
       // consuming side as the producing one, and a row naming only the near end tells a reviewer
-      // reading a php diff that the php file is cross-language, which is not a fact about anything.
+      // reading a php diff that the php file is on the far side of one, which is not a fact about
+      // anything. The symbol is the row's label rather than "cross-language", because a pack can
+      // join a symbol inside one root: a scheduled command is joined to the entry that schedules it
+      // and both halves are php, so the two ends are a language apart only sometimes.
       console.log(
-        `    cross-language ${bridge.symbol ?? "?"}  ${bridge.from}` +
+        `    join ${bridge.symbol ?? "?"}  ${bridge.from}` +
           ` consumes ${bridge.to}  named at ${bridge.evidence}`,
       );
     }
     if (radius.bridges.length > 5) {
-      console.log(`    ... and ${radius.bridges.length - 5} more cross-language joins`);
+      console.log(`    ... and ${radius.bridges.length - 5} more symbol joins`);
     }
   }
+}
+
+/**
+ * Every dispatch a changed file makes from inside a loop, and nothing about how often it runs.
+ *
+ * This is a fact and not a finding, and the line between them is the whole point of the section. A
+ * dispatch in a loop is how a batch is written; it is wrong only when the loop is unbounded, and
+ * whether it is depends on how many rows a query returns, which is not in the source. EmPo cannot
+ * decide it, a rule that guessed would fabricate, and the reviewing model is the one that can go and
+ * read the query. So the coordinate goes in the brief, at the moment the diff is being read, and the
+ * finding — if there is one — comes out through the same gate as every other finding.
+ *
+ * A graph written before the axis existed carries no `fanout` key at all, and that is printed as the
+ * unknown it is rather than as an empty list: the rule `--hazards` follows (commands/query.ts).
+ */
+function printFanout(graph: Graph, facts: FileFacts[]): void {
+  const all = graph.fanout ?? null;
+
+  console.log("");
+  console.log("dispatches inside a loop  (step 2: what this change can put on the queue)");
+
+  if (all === null) {
+    console.log("  unknown: this graph was built before the axis existed. Run empo index.");
+    return;
+  }
+
+  const changed = new Set(facts.map((entry) => entry.file.path));
+  const rows = all.filter((site) => changed.has(site.file));
+  if (rows.length === 0) {
+    console.log("  none: no changed file dispatches from inside a loop");
+    return;
+  }
+
+  const width = columnWidth(rows, (site) => `${site.file}:${site.line}`);
+  for (const site of rows) {
+    console.log(
+      `  ${`${site.file}:${site.line}`.padEnd(width)}  dispatches ${site.job}` +
+        `  loop opened at line ${site.loopLine}`,
+    );
+  }
+  // Said every time the list is non-empty, because a coordinate with no sentence under it reads as
+  // an accusation, and this axis has nothing to accuse anybody of.
+  console.log("  How often the loop runs is a property of the data, not of the source, so this");
+  console.log("  says nothing about volume. If this diff widened what the loop iterates, that is");
+  console.log("  the question to ask out loud.");
 }
 
 /**

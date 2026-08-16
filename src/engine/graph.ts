@@ -1,11 +1,18 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { configError, EmpoError, readJson } from "../errors";
-import type { EmpoConfig } from "../schema/config.schema";
+import type { EmpoBridge, EmpoConfig } from "../schema/config.schema";
 import type { Pack } from "../schema/pack.schema";
-import type { Graph, GraphEdge, GraphNode, Hazard, NameResolution } from "../schema/types";
+import type { Fanout, Graph, GraphEdge, GraphNode, Hazard, NameResolution } from "../schema/types";
 import { type BridgeReport, bridgeRoots } from "./bridger";
-import { buildRoot, type DuplicateNode, dedupeEdges, dedupeHazards, dedupeNodes } from "./build";
+import {
+  buildRoot,
+  type DuplicateNode,
+  dedupeEdges,
+  dedupeFanout,
+  dedupeHazards,
+  dedupeNodes,
+} from "./build";
 import { computeCoverage } from "./coverage";
 import { assignFlows, loadFlows } from "./flows";
 import { commitsAhead, gitInfo, shortSha } from "./git";
@@ -113,6 +120,7 @@ export function buildGraph(options: BuildGraphOptions): BuiltGraph {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const hazards: Hazard[] = [];
+  const fanout: Fanout[] = [];
   const duplicates: DuplicateNode[] = [];
   const names: NameResolution[] = [];
   const files = new Set<string>();
@@ -134,6 +142,7 @@ export function buildGraph(options: BuildGraphOptions): BuiltGraph {
     nodes.push(...built.nodes);
     edges.push(...built.edges);
     hazards.push(...built.hazards);
+    fanout.push(...built.fanout);
     duplicates.push(...built.duplicates);
     names.push(...built.names);
     for (const file of built.files) files.add(file);
@@ -144,8 +153,16 @@ export function buildGraph(options: BuildGraphOptions): BuiltGraph {
   const merged = dedupeNodes(nodes);
 
   // Bridges join the roots after every root is built, because a bridge edge is the one edge whose
-  // two ends come from different packs. Its input is the nodes, never the source.
-  const bridged = bridgeRoots(merged.nodes, config.bridges);
+  // two ends need not come from one pack. Its input is the nodes, never the source.
+  //
+  // The pack's own `joins` are run through the same matcher, one synthetic bridge per root, and they
+  // are appended rather than merged: a config bridge and a pack join are two different claims about
+  // one symbol kind and `empo doctor` prints a match rate per bridge, so folding them together would
+  // report one rate over two populations that were never one question.
+  const bridged = bridgeRoots(merged.nodes, [
+    ...config.bridges,
+    ...packJoins(roots, (lang) => packs.get(lang)?.joins ?? []),
+  ]);
   const mergedEdges = dedupeEdges([...edges, ...bridged.edges]).sort(byEdgeOrder);
 
   const flows = assignFlows(merged.nodes, loadFlows(repoRoot, config.flows));
@@ -192,8 +209,39 @@ export function buildGraph(options: BuildGraphOptions): BuiltGraph {
       // overlap and scan one file twice do read its names twice, which inflates both the numerator
       // and the denominator, and `empo index` already names that overlap as the defect it is.
       names: mergeNames(names),
+      // Last, because appending is what keeps every key above it at the offset the previous schema
+      // left it at (the field-order test in test/engine/graph.test.ts). Deduplicated across roots
+      // for the reason the hazards are: two overlapping roots re-scan one file, and one dispatch
+      // site read twice is not two of them.
+      fanout: dedupeFanout(fanout),
     },
   };
+}
+
+/**
+ * The joins a pack declares over its own symbols, as one bridge per root that speaks that language.
+ *
+ * A bridge in config is a human's claim that two roots exchange a symbol; a pack join is the pack
+ * saying both halves of one call are written in the language it reads, which is a fact about the
+ * framework and not about anybody's layout. So it needs no config, and it joins a root to itself:
+ * `engine/bridger.ts` compares `node.root` against a set of root paths and never asks whether the
+ * two sides are different, and it already refuses an edge from a node to itself.
+ *
+ * `normalize` is deliberately left off. A config bridge needs one because the two sides were written
+ * by different people in different languages; both halves of a pack join are matched by rules in one
+ * pack, which normalizes them itself through the `normalize` on its own symbol rules.
+ */
+export function packJoins(
+  roots: { path: string; lang: string }[],
+  joinsOf: (lang: string) => string[],
+): EmpoBridge[] {
+  return roots.flatMap((root) =>
+    joinsOf(root.lang).map((kind) => ({
+      kind,
+      produces: root.path,
+      consumes: root.path,
+    })),
+  );
 }
 
 /**

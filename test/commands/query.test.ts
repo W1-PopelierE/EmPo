@@ -99,6 +99,7 @@ function ambiguousGraph(): Graph {
     hazards: [],
     hazardsScanned: [],
     names: [],
+    fanout: [],
   };
 }
 
@@ -149,6 +150,7 @@ function symbolGraph(): Graph {
     hazards: [],
     hazardsScanned: [],
     names: [],
+    fanout: [],
   };
 }
 
@@ -248,6 +250,7 @@ function renderedComponentGraph(): Graph {
     hazards: [],
     hazardsScanned: [],
     names: [],
+    fanout: [],
   };
 }
 
@@ -302,6 +305,7 @@ function frameworkGraph(): Graph {
     hazards: [],
     hazardsScanned: [],
     names: [],
+    fanout: [],
   };
 }
 
@@ -355,6 +359,7 @@ function renderedLayoutGraph(): Graph {
     hazards: [],
     hazardsScanned: [],
     names: [],
+    fanout: [],
   };
 }
 
@@ -398,6 +403,7 @@ function manyGodsGraph(count: number): Graph {
     hazards: [],
     hazardsScanned: [],
     names: [],
+    fanout: [],
   };
 }
 
@@ -445,6 +451,7 @@ function hazardGraph(rows: Hazard[], scanned: string[] = ["php"], langs = ["php"
     hazards: rows,
     hazardsScanned: scanned,
     names: [],
+    fanout: [],
   };
 }
 
@@ -1104,10 +1111,10 @@ describe("queryCommand staleness", () => {
  * and the last three defects in printed output here were invisible to every assertion in the suite
  * because the helper reading it stopped at a blank line and squashed runs of whitespace.
  */
-describe("queryCommand cross-language reach", () => {
+describe("queryCommand symbol joins", () => {
   function block(printed: string): string[] {
     const lines = printed.split("\n");
-    const start = lines.indexOf("cross-language reach");
+    const start = lines.indexOf("symbol joins");
     expect(start).toBeGreaterThan(-1);
     const end = lines.indexOf("", start + 1);
     return lines.slice(start + 1, end === -1 ? undefined : end);
@@ -1153,7 +1160,7 @@ describe("queryCommand cross-language reach", () => {
     const near = block(capture(() => queryCommand(repo, ADMIN_CONTROLLER)));
 
     expect(near).toEqual([
-      "  none: of the 3 bridge edges in the graph, none is in this blast radius",
+      "  none: of the 3 join edges in the graph, none is in this blast radius",
     ]);
 
     const none = block(
@@ -1161,7 +1168,7 @@ describe("queryCommand cross-language reach", () => {
     );
 
     expect(none).toEqual([
-      "  none: the graph holds no bridge edges at all, so nothing here crosses a language",
+      "  none: the graph holds no join edges at all, so no symbol here is matched to another",
     ]);
   });
 
@@ -1185,7 +1192,7 @@ describe("queryCommand cross-language reach", () => {
     // edge, since the radius is closed under consumers and `from` is one of them.
     const lines = block(capture(() => queryCommand(repoWithGraph(single), "Acme\\Wide\\Node002")));
 
-    expect(lines).toEqual(["  none: the one bridge edge in the graph is not in this blast radius"]);
+    expect(lines).toEqual(["  none: the one join edge in the graph is not in this blast radius"]);
   });
 
   test("caps the list and says how many it held back", () => {

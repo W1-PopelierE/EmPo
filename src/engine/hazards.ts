@@ -55,6 +55,7 @@ interface CompiledStrings {
 
 export interface CompiledHazards {
   transactions: CompiledTransactionRule[];
+  loops: CompiledTransactionRule[];
   dispatches: CompiledDispatchRule[];
   deferAtSite: RegExp[];
   deferAtDeclaration: RegExp[];
@@ -79,6 +80,21 @@ export interface DispatchSite {
 }
 
 /**
+ * A dispatch that sits inside something the pack calls a loop. Deliberately not a `DispatchSite`
+ * with a second line on it: a hazard asks whether this dispatch waits for a commit, and a deferral
+ * has no meaning here, so carrying `deferredAtSite` would put a field in `graph.json` that no reader
+ * of this axis can act on.
+ */
+export interface LoopedDispatch {
+  /** The job as written at the dispatch site, from the rule's `job` group. */
+  job: string;
+  /** 1-based line of the dispatch. */
+  line: number;
+  /** 1-based line of the opener of the innermost loop enclosing it. */
+  loopLine: number;
+}
+
+/**
  * Compiles one pack's hazard rules once. Every regex is built here and never per call, the same
  * contract engine/extractor.ts `compilePack` keeps.
  *
@@ -97,14 +113,9 @@ export function compileHazards(pack: Pack): CompiledHazards | null {
   const hazards = pack.hazards;
   if (hazards === undefined) return null;
 
-  const transactions: CompiledTransactionRule[] = [];
-  for (const rule of hazards.transactions) {
-    const compiled = compileTransactionRule(rule);
-    if (compiled !== null) transactions.push(compiled);
-  }
-
   return {
-    transactions,
+    transactions: compileExtentRules(hazards.transactions),
+    loops: compileExtentRules(hazards.loops),
     dispatches: hazards.dispatches.map((rule) => ({
       regex: new RegExp(rule.pattern, "gm"),
       job: rule.job,
@@ -124,6 +135,16 @@ export function compileHazards(pack: Pack): CompiledHazards | null {
       multiline: pack.comments?.multilineQuotes,
     },
   };
+}
+
+/** The rules that compiled, in order. A rule missing its companion is dropped, see the docstring. */
+function compileExtentRules(rules: HazardTransactionRule[]): CompiledTransactionRule[] {
+  const compiled: CompiledTransactionRule[] = [];
+  for (const rule of rules) {
+    const one = compileTransactionRule(rule);
+    if (one !== null) compiled.push(one);
+  }
+  return compiled;
 }
 
 function compileTransactionRule(rule: HazardTransactionRule): CompiledTransactionRule | null {
@@ -163,12 +184,51 @@ function compileTransactionRule(rule: HazardTransactionRule): CompiledTransactio
  * banned repo-wide (engine/order.ts).
  */
 export function findEnclosedDispatches(compiled: CompiledHazards, source: string): DispatchSite[] {
-  const extents = transactionExtents(compiled, source);
+  return enclosedBy(compiled, source, compiled.transactions).map((found) => ({
+    job: found.job,
+    line: found.line,
+    transactionLine: found.enclosingLine,
+    deferredAtSite: deferredAt(compiled, source, found.offset),
+  }));
+}
+
+/**
+ * Every dispatch that sits inside a loop extent: the same walk over a different set of openers.
+ *
+ * Empty for a pack that declares no `loops`, and empty in exactly the same way for a file whose
+ * dispatches all sit outside every loop it holds. Those two are told apart one layer up, by whether
+ * the pack declared the block at all, for the reason the hazards axis tells them apart
+ * (schema/types.ts, `Graph.hazardsScanned`).
+ */
+export function findLoopedDispatches(compiled: CompiledHazards, source: string): LoopedDispatch[] {
+  return enclosedBy(compiled, source, compiled.loops).map((found) => ({
+    job: found.job,
+    line: found.line,
+    loopLine: found.enclosingLine,
+  }));
+}
+
+/** One dispatch inside one extent, before either caller names the extent it went looking for. */
+interface EnclosedDispatch {
+  job: string;
+  line: number;
+  /** 1-based line of the opener of the innermost extent enclosing the dispatch. */
+  enclosingLine: number;
+  /** Character offset of the dispatch, which is what a defer marker is measured from. */
+  offset: number;
+}
+
+function enclosedBy(
+  compiled: CompiledHazards,
+  source: string,
+  rules: CompiledTransactionRule[],
+): EnclosedDispatch[] {
+  const extents = extentsOf(rules, source);
   if (extents.length === 0) return [];
 
   const starts = lineStarts(source);
   const seen = new Set<string>();
-  const found: { site: DispatchSite; offset: number }[] = [];
+  const found: EnclosedDispatch[] = [];
 
   for (const rule of compiled.dispatches) {
     for (const match of matchAll(rule.regex, source)) {
@@ -187,22 +247,16 @@ export function findEnclosedDispatches(compiled: CompiledHazards, source: string
       seen.add(key);
 
       found.push({
-        site: {
-          job,
-          line: lineAt(starts, match.index),
-          transactionLine: lineAt(starts, enclosing.start),
-          deferredAtSite: deferredAt(compiled, source, match.index),
-        },
+        job,
+        line: lineAt(starts, match.index),
+        enclosingLine: lineAt(starts, enclosing.start),
         offset: match.index,
       });
     }
   }
 
-  found.sort(
-    (a, b) =>
-      a.site.line - b.site.line || compareStrings(a.site.job, b.site.job) || a.offset - b.offset,
-  );
-  return found.map((entry) => entry.site);
+  found.sort((a, b) => a.line - b.line || compareStrings(a.job, b.job) || a.offset - b.offset);
+  return found;
 }
 
 /**
@@ -217,12 +271,12 @@ export function declaresDeferral(compiled: CompiledHazards, source: string): boo
 }
 
 /**
- * Every transaction extent in this file, in no particular order because callers ask "does any
+ * Every extent these rules open in this file, in no particular order because callers ask "does any
  * extent contain this offset" and never read the list.
  */
-function transactionExtents(compiled: CompiledHazards, source: string): Extent[] {
+function extentsOf(rules: CompiledTransactionRule[], source: string): Extent[] {
   const extents: Extent[] = [];
-  for (const rule of compiled.transactions) {
+  for (const rule of rules) {
     for (const match of matchAll(rule.regex, source)) {
       const matchEnd = match.index + match.length;
       const end =

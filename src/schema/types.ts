@@ -115,6 +115,23 @@ export interface Hazard {
 }
 
 /**
+ * One dispatch written inside a loop. Not a hazard and deliberately kept out of `Hazard`: nothing
+ * here is wrong, and a reader who found it in the hazards list would go looking for the defect.
+ *
+ * What it is, is the seam where a change somewhere else becomes traffic here. How many times the
+ * loop runs is a property of the data, and EmPo reads source, so the count is not in this record and
+ * never will be. The line is, and that is what puts the question in front of whoever is reading a
+ * diff that widened the query above it.
+ */
+export interface Fanout {
+  file: string; // repo-relative, the dispatch site
+  line: number; // the dispatch
+  job: string; // the job as written at the dispatch site
+  target: string | null; // resolved node id, null when unresolvable
+  loopLine: number; // the line that opened the enclosing loop
+}
+
+/**
  * One short name a name-resolving strategy read, and what the node index made of it.
  *
  * Only `observer` and `short-name` produce these, because they are the two strategies whose whole
@@ -241,4 +258,12 @@ export interface Graph {
    * every surface prints the absence as an unknown that `empo index` repairs.
    */
   names: NameResolution[];
+  /**
+   * Dispatches written inside a loop, empty when no pack in this repo declares a `loops` block.
+   *
+   * Read by `empo review`, which prints the ones inside a changed file as a fact about that file.
+   * It rides on `hazardsScanned` rather than carrying a second scanned list, because both blocks
+   * live under one pack key and a pack that declares `hazards` at all is a pack that was asked.
+   */
+  fanout: Fanout[];
 }

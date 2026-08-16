@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { runPackFixtures } from "../../src/commands/pack";
 import { compilePack, extractFile } from "../../src/engine/extractor";
+import { compileHazards, findLoopedDispatches } from "../../src/engine/hazards";
 import { fixturesDir } from "../../src/engine/pack-loader";
 
 /**
@@ -14,7 +15,7 @@ describe("php pack", () => {
 
   test("loads with its declared identity", () => {
     expect(pack.name).toBe("php");
-    expect(pack.version).toBe("1.11.0");
+    expect(pack.version).toBe("1.12.0");
   });
 
   test("reproduces the expected nodes", () => {
@@ -615,5 +616,227 @@ describe("php pack", () => {
   test("is deterministic across runs", () => {
     const second = runPackFixtures("php");
     expect(JSON.stringify(second.actual)).toBe(JSON.stringify(actual));
+  });
+
+  /**
+   * The loop rules, against the shapes a corpus of whole files cannot hold enough of. What is
+   * pinned is the direction of each failure, not a wish that there be none: this axis prints
+   * coordinates for a reader to check, so a miss costs a glance at a diff and a runaway extent costs
+   * the reader's trust in every row under it.
+   */
+  describe("what the loops rules call a loop", () => {
+    const dispatchesIn = (body: string): { line: number; loopLine: number }[] => {
+      const hazards = compileHazards(pack);
+      if (hazards === null) throw new Error("the php pack declares no hazards block");
+      return findLoopedDispatches(hazards, `<?php\n${body}\n`).map((site) => ({
+        line: site.line,
+        loopLine: site.loopLine,
+      }));
+    };
+
+    test("a braced loop of every keyword encloses the dispatch inside it", () => {
+      expect(dispatchesIn("foreach ($a as $b) {\n  Sync::dispatch($b);\n}")).toEqual([
+        { line: 3, loopLine: 2 },
+      ]);
+      // A `for` header holds semicolons and a call of its own, so the rule cannot be the one that
+      // refuses semicolons, and the two keywords are two rules for that reason alone.
+      expect(
+        dispatchesIn("for ($i = 0; $i < count($x); $i++) {\n  Sync::dispatch($i);\n}"),
+      ).toEqual([{ line: 3, loopLine: 2 }]);
+      expect(dispatchesIn("while ($row = $q->next()) {\n  Sync::dispatch($row);\n}")).toEqual([
+        { line: 3, loopLine: 2 },
+      ]);
+      expect(dispatchesIn("$m->each(function ($x) {\n  Sync::dispatch($x);\n});")).toEqual([
+        { line: 3, loopLine: 2 },
+      ]);
+    });
+
+    test("a dispatch after the loop closes is not in it", () => {
+      // The regression this axis is one character away from at all times. `balancedEnd` starts
+      // looking for its opening delimiter at the END of the pattern match, so a rule whose pattern
+      // consumes the body's `{` sends it hunting for the next unrelated block — or for none, in
+      // which case the extent runs to the end of the file and every dispatch below is reported as
+      // per-row. The brace is therefore a lookahead in every loop rule, and this is the test that
+      // says so: every other case here passes just as happily with the brace consumed.
+      expect(
+        dispatchesIn("foreach ($u as $x) {\n  Sync::dispatch($x);\n}\nSync::dispatch($x);"),
+      ).toEqual([{ line: 3, loopLine: 2 }]);
+      expect(
+        dispatchesIn(
+          [
+            "class R {",
+            "  public function a() {",
+            "    foreach ($u as $x) { $x->touch(); }",
+            "  }",
+            "  public function b() {",
+            "    Sync::dispatch();",
+            "  }",
+            "}",
+          ].join("\n"),
+        ),
+      ).toEqual([]);
+    });
+
+    test("the alternative syntax opens nothing, rather than swallowing the rest of the file", () => {
+      // `foreach (…): … endforeach;` has no brace to balance, and a rule that stopped at the header
+      // would send `balancedEnd` looking for the next `{` anywhere below — an unrelated function, or
+      // none at all, in which case the extent runs to the end of the file and every dispatch under
+      // it is reported as looped. Requiring the `) {` is what buys that off, and the price is the
+      // line below.
+      expect(
+        dispatchesIn(
+          [
+            "foreach ($a as $b):",
+            "  echo 1;",
+            "endforeach;",
+            "function later() {",
+            "  Sync::dispatch();",
+            "}",
+          ].join("\n"),
+        ),
+      ).toEqual([]);
+    });
+
+    test("the batch spellings a Laravel repository actually writes are loops too", () => {
+      // Closure and arrow, instance and static, with and without the leading chunk size. These are
+      // the shapes a nightly job is written in, and a rule set that knew only `foreach` would read
+      // the most deliberate batch code in a repository as straight-line.
+      expect(
+        dispatchesIn("User::chunk(100, function ($us) {\n  Sync::dispatch($us);\n});"),
+      ).toEqual([{ line: 3, loopLine: 2 }]);
+      expect(
+        dispatchesIn("User::chunkById(100, function ($us) {\n  Sync::dispatch($us);\n});"),
+      ).toEqual([{ line: 3, loopLine: 2 }]);
+      // The arrow form balances parentheses instead of braces, the way the arrow spelling of a
+      // transaction does: an arrow body is an expression and has no block to count.
+      expect(dispatchesIn("$m->each(fn ($x) => Sync::dispatch($x));")).toEqual([
+        { line: 2, loopLine: 2 },
+      ]);
+    });
+
+    test("an unbraced body is missed, and missed is the safe direction here", () => {
+      // The price of requiring the `) {`. A miss costs a line nobody was told about; the extent this
+      // buys off ran to the end of the file and reported every dispatch below it as per-row.
+      expect(dispatchesIn("foreach ($a as $b) Sync::dispatch($b);")).toEqual([]);
+      // Neither is `do { … } while (…);`, whose `while` closes a block rather than opening one, and
+      // which is what sent the extent to the end of the file before the `) {` was required.
+      expect(
+        dispatchesIn(
+          "do { $p++; } while ($p < 10);\nclass L { function h() { Sync::dispatch(); } }",
+        ),
+      ).toEqual([]);
+    });
+
+    test("the header restrictions that buy that off, and what they cost", () => {
+      // A `;` inside a foreach or while header, and a `for` header split over lines, are both
+      // missed. Both restrictions exist to stop the pattern crossing from one construct to a
+      // `) {` belonging to another, which is how the alternative syntax used to swallow a file.
+      // Pinned rather than left to be rediscovered: these are the two shapes a reader will
+      // eventually notice are absent, and the answer is that they were traded, not overlooked.
+      expect(dispatchesIn("foreach (explode(';', $c) as $r) {\n  Sync::dispatch($r);\n}")).toEqual(
+        [],
+      );
+      expect(
+        dispatchesIn("for (\n  $i = 0;\n  $i < 3;\n  $i++\n) {\n  Sync::dispatch($i);\n}"),
+      ).toEqual([]);
+    });
+
+    test("a header split over lines still opens, and a conditional never does", () => {
+      expect(dispatchesIn("foreach (\n  $a as $b\n) {\n  Sync::dispatch($b);\n}")).toEqual([
+        { line: 5, loopLine: 2 },
+      ]);
+      expect(dispatchesIn("if ($a) {\n  Sync::dispatch();\n}")).toEqual([]);
+    });
+  });
+
+  /**
+   * The two halves of the scheduled-command join, against the spellings Laravel has shipped over
+   * three major versions. A corpus of whole files cannot hold enough of them, and the failure they
+   * guard against is silent in both directions: a spelling nobody matched is an edge that is simply
+   * absent, and a `->command(` that is not a schedule is a key nothing will ever produce.
+   */
+  describe("what the scheduled-command rules read", () => {
+    const symbolsIn = (body: string): { produces: string[]; consumes: string[] } => {
+      const relPath = "app/Console/Probe.php";
+      const out = extractFile(compiled, {
+        root: ".",
+        lang: "php",
+        file: relPath,
+        relPath,
+        source: `<?php\n${body}\n`,
+      });
+      return {
+        produces: out?.produces.map((ref) => ref.key) ?? [],
+        consumes: out?.consumes.map((ref) => ref.key) ?? [],
+      };
+    };
+
+    test("a command declares its signature in more than one shape, and each keys the same", () => {
+      // The key is the leading token in every one of them: a signature carries its arguments and
+      // options in the same literal while the scheduler names the command alone, so keying on the
+      // whole string would join nothing on exactly the commands that take an argument.
+      expect(symbolsIn("class C { protected $signature = 'app:x {--force} {club?}'; }").produces) //
+        .toEqual(["app:x"]);
+      expect(symbolsIn("class C { protected string $signature = 'app:x'; }").produces).toEqual([
+        "app:x",
+      ]);
+      // `protected` and not any visibility, which is a discrimination and not an oversight: an
+      // Artisan command overrides `Command::$signature`, which is protected, while `private
+      // $signature` and `public $signature` are what a webhook HMAC verifier and a signed-payload
+      // DTO call their field. Reading those would put a fabricated scheduled-command in graph.json
+      // for a class that schedules nothing.
+      expect(symbolsIn("class W { private $signature = 'sha256'; }").produces).toEqual([]);
+      expect(symbolsIn("class P { public $signature = 'v1'; }").produces).toEqual([]);
+      // Laravel 11's attribute form, where the name is not a property at all, in the spellings PHP
+      // allows for it: named or positional, in any argument order, fully qualified, and grouped
+      // with another attribute inside one `#[]`. Named arguments are order-independent in PHP, so
+      // a rule anchored on `AsCommand(name:` reads only the half of them that happen to write the
+      // name first.
+      expect(symbolsIn("#[AsCommand(name: 'app:x')]\nclass C {}").produces).toEqual(["app:x"]);
+      expect(symbolsIn("#[AsCommand('app:x')]\nclass C {}").produces).toEqual(["app:x"]);
+      expect(
+        symbolsIn("#[AsCommand(description: 'Reconciles', name: 'app:x')]\nclass C {}").produces,
+      ).toEqual(["app:x"]);
+      expect(
+        symbolsIn(
+          "#[\\Symfony\\Component\\Console\\Attribute\\AsCommand(name: 'app:x')]\nclass C {}",
+        ).produces,
+      ).toEqual(["app:x"]);
+      expect(symbolsIn("#[Foo, AsCommand(name: 'app:x')]\nclass C {}").produces).toEqual(["app:x"]);
+      // A description and no name is not a command name, and the positional rule must not read it:
+      // the first argument is the name only when it is the first argument.
+      expect(symbolsIn("#[AsCommand(description: 'Reconciles')]\nclass C {}").produces).toEqual([]);
+    });
+
+    test("the scheduler names it in more than one shape, and only the scheduler does", () => {
+      expect(symbolsIn("$schedule->command('app:x --force')->dailyAt('03:20');").consumes).toEqual([
+        "app:x",
+      ]);
+      // Laravel 11 moved the schedule into routes/console.php, where it is a facade call.
+      expect(symbolsIn("Schedule::command('app:x')->hourly();").consumes).toEqual(["app:x"]);
+      expect(
+        symbolsIn("\\Illuminate\\Support\\Facades\\Schedule::command('app:x')->hourly();").consumes,
+      ).toEqual(["app:x"]);
+
+      // A schedule injected and held as a property is still the scheduler naming a command.
+      expect(symbolsIn("$this->schedule->command('app:x')->daily();").consumes).toEqual(["app:x"]);
+
+      // `->command(` is not enough on its own. A key nothing can ever produce is not harmless: it
+      // is printed by `empo doctor` as a consumed key no producer declares, which is the line that
+      // tells a reader their pack is mis-tuned.
+      expect(symbolsIn("$process->command('ls -la');").consumes).toEqual([]);
+      expect(symbolsIn("$this->command('/usr/bin/foo');").consumes).toEqual([]);
+      // Registering a closure command is a definition, not a schedule, and it is neither half.
+      expect(symbolsIn("Artisan::command('mail:send {user}', fn () => 1);").consumes).toEqual([]);
+    });
+
+    test("a scheduler entry naming the class is not this join, and does not need to be", () => {
+      // `$schedule->command(ReconcileCommand::class)` carries no signature, so nothing here reads
+      // it. It needs nothing: naming the class is what the `use` at the top of the file already
+      // turned into an ordinary import edge, and the command's fan-in is non-zero without this.
+      expect(symbolsIn("$schedule->command(ReconcileCommand::class)->daily();").consumes).toEqual(
+        [],
+      );
+    });
   });
 });

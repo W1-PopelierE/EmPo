@@ -17,13 +17,21 @@ detect when that line has moved or the claim has rotted. The basis of drift dete
 the value that code produces. A wrong result ships silently there. Printed in capitals by
 `empo query` because it is the most important thing in the answer.
 
-**Bridge.** A declared cross-language coupling resolved by matching produced symbols against consumed
-symbols across roots (level 2 coupling). The mechanism that lets a backend change report its mobile
-blast radius. Declared in `config.json`. See [03-config-schema](03-config-schema.md).
+**Bridge (symbol join).** A coupling resolved by matching produced symbols against consumed symbols
+(level 2 coupling). Two different things declare one. A `bridges` entry in `config.json` is a human's
+claim that two roots exchange a symbol, and is the mechanism that lets a backend change report its
+mobile blast radius. A pack's `joins` is the pack's claim about its own framework, matched inside a
+single root and needing no config: the php pack joins `scheduled-command`, so a Laravel scheduler
+entry and the command class whose `$signature` it names are the two ends of one bridge edge and both
+of them are php. **So a bridge edge is not always cross-language**, which is why `empo query` heads
+the section "symbol joins", `empo review` labels the rows `join <symbol>`, and `empo index` and
+`empo doctor` report match rates as `join <kind>`. See [03-config-schema](03-config-schema.md) and
+[04-language-packs](04-language-packs.md).
 
-**Coupling levels.** The three ways code connects: intra-language (imports, level 1), inter-language
-(shared strings across a language boundary, level 2), and flow (an end-user journey spanning both,
-level 3). See [01-architecture](01-architecture.md).
+**Coupling levels.** The three ways code connects: intra-language (imports, level 1), symbol matching
+(a produced key against a consumed one, level 2 — across a language boundary for a configured bridge,
+inside one root for a pack's own `joins`), and flow (an end-user journey spanning both, level 3). See
+[01-architecture](01-architecture.md).
 
 **Discipline.** Layer 3: the universal, shipped review workflow. Language- and host-independent. Its
 governing rule is that no finding reaches a human unverified. See [07-review-discipline](07-review-discipline.md).
@@ -38,6 +46,18 @@ template, hook, bridge) and `file:line` evidence. See [05-graph-model](05-graph-
 blast-radius number. High fan-in nodes are "gods." Nodes and not edges, because one file can
 reference another through two rule families at once (it imports a component and then renders it),
 and that is one thing depending on it. See [05-graph-model](05-graph-model.md).
+
+**Fan-out (dispatch inside a loop).** A queued job dispatched from inside a loop, so one request can
+put an unknown number of messages on the queue. Found lexically, from the `loops` rules a language
+pack declares in its optional `hazards` block, carried in the graph's top-level `fanout` list and
+reported by `empo review`, which prints the sites in the changed files as a section of the phase-1
+brief and carries the same list under a top-level `fanout` key in `--json`. **It is a fact and never
+a finding**: a dispatch in a loop is how a batch is written, and how often the loop runs is a
+property of the data and not of the source, so EmPo states the coordinate and the reviewing model,
+which can go and read the query, decides — through the same verification funnel as every other
+finding. A graph built before the axis holds no list at all, and that is reported as unknown rather
+than as none, the same distinction the `hazards` axis keeps. See
+[04-language-packs](04-language-packs.md).
 
 **Flow.** An end-user journey that state or value travels through, defined as a list of paths that may
 cross roots. The unit the blast radius is reported in. Human-owned in `flows.json`, proposed by the

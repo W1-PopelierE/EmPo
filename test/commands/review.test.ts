@@ -406,7 +406,7 @@ describe("the brief", () => {
     expect(printed).toContain(`${ORDER_TEST_FILE}  asserts a value`);
   });
 
-  test("names both ends of a cross-language join, the way empo query does", () => {
+  test("names both ends of a symbol join, the way empo query does", () => {
     // This line was changed in the same commit that fixed `empo query`'s, for the same reason, and
     // was asserted by nothing: reverting it to the near end alone left the whole suite green. It is
     // executed by the brief above, since the changed calculator's radius holds both bridges, which
@@ -414,9 +414,7 @@ describe("the brief", () => {
     changeCalculator();
 
     const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
-    const row = printed
-      .split("\n")
-      .find((line) => line.trimStart().startsWith("cross-language http-route"));
+    const row = printed.split("\n").find((line) => line.trimStart().startsWith("join http-route"));
 
     expect(row).toBeDefined();
     // Both ends and the separator word, the same three things the query pin holds.
@@ -2263,6 +2261,7 @@ describe("a changed file that holds several exports", () => {
       hazards: [],
       hazardsScanned: [],
       names: [],
+      fanout: [],
     };
   }
 
@@ -2329,5 +2328,128 @@ describe("a changed file that holds several exports", () => {
 
     expect(printed.match(/src\/setup\.test\.ts/g)?.length).toBe(1);
     expect(printed).toContain(`${SETUP_TEST}  asserts a value`);
+  });
+});
+
+/**
+ * The scheduler as an entrypoint, in the brief. Two facts and neither is a finding: this changed
+ * file is reached from a scheduled entry, and it dispatches from inside a loop. Both are printed for
+ * the reviewing model to ask the cardinality question about; neither reaches the author except
+ * through the gate every other finding goes through.
+ *
+ * The command is committed and indexed first and only then edited, because "a changed file that is
+ * reachable from the scheduler" is the case under test and a file that is new in the diff is not
+ * yet in anybody's graph.
+ */
+describe("a changed file the scheduler reaches", () => {
+  const COMMAND_FILE = "apps/api/app/Console/Commands/ReconcileCommand.php";
+
+  function commandSource(body: string): string {
+    return [
+      "<?php",
+      "",
+      "namespace Acme\\Console\\Commands;",
+      "",
+      "class ReconcileCommand",
+      "{",
+      "    protected $signature = 'acme:reconcile {--force}';",
+      "",
+      "    public function handle(): void",
+      "    {",
+      body,
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+  }
+
+  function scheduleTheCommand(): void {
+    mkdirSync(join(repo, "apps/api/app/Console/Commands"), { recursive: true });
+    writeFileSync(
+      join(repo, "apps/api/app/Console/Kernel.php"),
+      [
+        "<?php",
+        "",
+        "namespace Acme\\Console;",
+        "",
+        "class Kernel",
+        "{",
+        "    protected function schedule($schedule): void",
+        "    {",
+        "        $schedule->command('acme:reconcile --force')->dailyAt('03:20');",
+        "    }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(join(repo, COMMAND_FILE), commandSource("        $this->reconcile();"));
+    git(repo, ["add", "-A", "-f"]);
+    commit(repo, "schedule the reconcile command");
+    capture(() => indexCommand(repo));
+  }
+
+  test("the brief names the scheduler entry that reaches it, and cites the scheduled line", () => {
+    scheduleTheCommand();
+    writeFileSync(join(repo, COMMAND_FILE), commandSource("        $this->reconcileEverything();"));
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+    const row = printed
+      .split("\n")
+      .find((line) => line.trimStart().startsWith("join scheduled-command"));
+
+    // The near end is the Kernel and the far end is the command, and the citation is the scheduler
+    // line itself: that is where the cadence is written, which the graph does not carry, so the row
+    // sends the reader to the one line that states it.
+    expect(row).toBeDefined();
+    expect(row ?? "").toContain(
+      "Acme\\Console\\Kernel consumes Acme\\Console\\Commands\\ReconcileCommand",
+    );
+    expect(row ?? "").toMatch(/named at apps\/api\/app\/Console\/Kernel\.php:9$/);
+  });
+
+  /** The loop written into the working tree, and the graph rebuilt over it. */
+  function dispatchInALoop(): void {
+    writeFileSync(
+      join(repo, COMMAND_FILE),
+      commandSource(
+        [
+          "        foreach ($members as $member) {",
+          "            SyncMember::dispatch($member);",
+          "        }",
+        ].join("\n"),
+      ),
+    );
+    // Reindexed, because every fact in the brief is a fact about the indexed graph and this one is
+    // no exception: a loop that exists only in an uncommitted edit no run has read is a loop the
+    // graph does not hold, and the brief prints the staleness of its own source under every section.
+    capture(() => indexCommand(repo));
+  }
+
+  test("a dispatch inside a loop in the changed file is stated, and stated as a question", () => {
+    scheduleTheCommand();
+    dispatchInALoop();
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    expect(printed).toContain("dispatches inside a loop");
+    expect(printed).toContain(`${COMMAND_FILE}:12  dispatches SyncMember  loop opened at line 11`);
+    // The sentence under the coordinate, because the coordinate alone reads as an accusation and
+    // this axis accuses nobody: it is the cardinality question, put where the diff is being read.
+    expect(printed).toContain("How often the loop runs is a property of the data");
+  });
+
+  test("neither fact is worded as a finding, and neither reaches the author on its own", () => {
+    scheduleTheCommand();
+    dispatchInALoop();
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    // The brief is facts and the findings file is where a claim about the pull request goes. Phase 1
+    // writes no finding at all, so a fan-out line can only reach the author by an agent making the
+    // claim itself and putting it through the gate, like every other finding.
+    expect(existsSync(findingsPathOf(repo))).toBe(false);
+    for (const word of ["unbounded", "too many", "risk", "must fix"]) {
+      expect(printed.toLowerCase()).not.toContain(`loop  ${word}`);
+    }
   });
 });

@@ -104,8 +104,10 @@ export function bridgeLines(reports: BridgeReport[]): string[] {
   const lines: string[] = [];
 
   for (const report of reports) {
+    // "join" and not "bridge": these reports now cover a pack's own intra-root joins as well as the
+    // bridges config declares (engine/graph.ts), and one word has to be true of both.
     lines.push(
-      `bridge ${report.kind}  ${report.matched}/${report.consumed} consumed keys matched ` +
+      `join ${report.kind}  ${report.matched}/${report.consumed} consumed keys matched ` +
         `against ${report.produced} produced`,
     );
 

@@ -348,6 +348,7 @@ function graphOf(
     hazards: [],
     hazardsScanned: [],
     names: [],
+    fanout: [],
   };
 }
 
@@ -963,11 +964,27 @@ describe("healthReport config facts", () => {
     const repo = copyFixture();
 
     const withGraph = healthReport(repo);
+    // `bridgeCount` counts what config declares and the reports cover what the matcher ran, which
+    // is no longer the same list: a pack joins its own symbols inside a root with nothing in config
+    // saying so (engine/graph.ts), and `empo index` prints a line for that one too. The two numbers
+    // differing is the honest shape, and the third row is the php pack's scheduled-command join.
     expect(withGraph.bridgeCount).toBe(2);
-    expect(withGraph.bridges).toHaveLength(2);
-    expect(withGraph.bridges.map((bridge) => bridge.kind)).toEqual(["http-route", "inertia-page"]);
+    expect(withGraph.bridges.map((bridge) => bridge.kind)).toEqual([
+      "http-route",
+      "inertia-page",
+      "scheduled-command",
+    ]);
     expect(withGraph.bridges[0]?.matched).toBeGreaterThan(0);
     expect(withGraph.bridges[1]?.matched).toBeGreaterThan(0);
+    // The fixture schedules nothing, so the join ran and matched nothing, which is a different fact
+    // from a join that was never run and is why the row is printed at all.
+    expect(withGraph.bridges[2]).toEqual({
+      kind: "scheduled-command",
+      produced: 0,
+      consumed: 0,
+      matched: 0,
+      unmatched: [],
+    });
 
     rmSync(join(repo, ".empo/generated"), { recursive: true, force: true });
 

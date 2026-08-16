@@ -1,6 +1,6 @@
 {
   "name": "php",
-  "version": "1.11.0",
+  "version": "1.12.0",
 
   "match": {
     "extensions": [".php"],
@@ -212,10 +212,36 @@
       ],
       "normalize": { "path": ["strip-leading-slash"] },
       "scopedBy": { "name": "route-prefix", "part": "path", "join": "/" }
+    },
+    {
+      "symbol": "scheduled-command",
+      "pattern": "protected\\s+(?:static\\s+)?(?:string\\s+)?\\$signature\\s*=\\s*['\"]\\s*([^'\"\\s{]+)",
+      "map": { "signature": 1 },
+      "key": "{signature}"
+    },
+    {
+      "symbol": "scheduled-command",
+      "pattern": "#\\[[^\\]]*?AsCommand\\(\\s*['\"]\\s*([^'\"\\s{]+)",
+      "map": { "signature": 1 },
+      "key": "{signature}"
+    },
+    {
+      "symbol": "scheduled-command",
+      "pattern": "#\\[[^\\]]*?AsCommand\\((?:[^)]*?[,(]\\s*)?name:\\s*['\"]\\s*([^'\"\\s{]+)",
+      "map": { "signature": 1 },
+      "key": "{signature}"
     }
   ],
 
+  "joins": ["scheduled-command"],
+
   "consumes": [
+    {
+      "symbol": "scheduled-command",
+      "pattern": "(?:\\$[A-Za-z0-9_]*[Ss]chedule|->\\s*[A-Za-z0-9_]*[Ss]chedule|Schedule)\\s*(?:->|::)\\s*command\\(\\s*['\"]\\s*([^'\"\\s{]+)",
+      "map": { "signature": 1 },
+      "key": "{signature}"
+    },
     {
       "symbol": "http-route",
       "pattern": "\\$this->(get|post|put|patch|delete)\\(\\s*['\"]([^'\"]+)['\"]",
@@ -309,6 +335,33 @@
   },
 
   "hazards": {
+    "loops": [
+      {
+        "pattern": "(?<![A-Za-z0-9_$])(?:foreach|while)\\s*\\([^{;]*\\)\\s*(?=\\{)",
+        "extent": "balanced",
+        "open": "{",
+        "close": "}"
+      },
+      {
+        "pattern": "(?<![A-Za-z0-9_$])for\\s*\\([^{\\n]*\\)\\s*(?=\\{)",
+        "extent": "balanced",
+        "open": "{",
+        "close": "}"
+      },
+      {
+        "pattern": "(?:->|::)\\s*(?:each|eachById|map|chunk|chunkById|chunkMap)\\(\\s*(?:[0-9]+\\s*,\\s*)?(?:static\\s+)?function\\b",
+        "extent": "balanced",
+        "open": "{",
+        "close": "}"
+      },
+      {
+        "pattern": "(?:->|::)\\s*(?:each|eachById|map|chunk|chunkById|chunkMap)(?=\\(\\s*(?:[0-9]+\\s*,\\s*)?(?:static\\s+)?fn\\b)",
+        "extent": "balanced",
+        "open": "(",
+        "close": ")"
+      }
+    ],
+
     "transactions": [
       {
         "pattern": "(?:(?<![\\w\\\\])\\\\?DB::|->)transaction\\(\\s*(?:static\\s+)?function\\b",

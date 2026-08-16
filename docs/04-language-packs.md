@@ -126,6 +126,10 @@ exactly the honesty this tradeoff requires.
       "normalize": { "method": ["upper"], "path": ["strip-leading-slash"] } }
   ],
 
+  // 5c. optional: symbol kinds this pack writes both halves of, joined inside one root with no
+  //     bridge in config. Refused at load unless this pack both produces and consumes the kind
+  "joins": ["scheduled-command"],
+
   // 5b. optional: what encloses a symbol and contributes to one of its parts. A rule above names one
   //     with "scopedBy": { "name": "route-prefix", "part": "path", "join": "/" }; php declares the
   //     only such block that ships
@@ -160,6 +164,24 @@ exactly the honesty this tradeoff requires.
       { "pattern": "DB::transaction(?=\\(\\s*fn\\b)",
         "extent": "balanced", "open": "(", "close": ")" },
       { "pattern": "DB::beginTransaction\\(", "extent": "span", "endPattern": "DB::commit\\(" }
+    ],
+    // the same two extent forms, walked by the same code, but a dispatch in a loop is a fact and
+    // never a hazard: these land in graph.fanout, not in graph.hazards
+    "loops": [
+      // a "{" must follow: an extent that opens on a loop with no block runs to the first unrelated
+      // brace, or to the end of the file, and invents everything under it. And it is a lookahead,
+      // because balancedEnd starts at the END of the match: a pattern that eats the body's own
+      // brace steps past it and sends the walk to the next unrelated block instead
+      { "pattern": "(?<![A-Za-z0-9_$])(?:foreach|while)\\s*\\([^{;]*\\)\\s*(?=\\{)",
+        "extent": "balanced", "open": "{", "close": "}" },
+      // `for` apart: its header holds semicolons, so its bound is the line instead
+      { "pattern": "(?<![A-Za-z0-9_$])for\\s*\\([^{\\n]*\\)\\s*(?=\\{)",
+        "extent": "balanced", "open": "{", "close": "}" },
+      { "pattern": "(?:->|::)\\s*(?:each|eachById|map|chunk|chunkById|chunkMap)\\(\\s*(?:[0-9]+\\s*,\\s*)?(?:static\\s+)?function\\b",
+        "extent": "balanced", "open": "{", "close": "}" },
+      // the arrow callback opens no block, so it balances its parens, as the arrow transaction does
+      { "pattern": "(?:->|::)\\s*(?:each|eachById|map|chunk|chunkById|chunkMap)(?=\\(\\s*(?:[0-9]+\\s*,\\s*)?(?:static\\s+)?fn\\b)",
+        "extent": "balanced", "open": "(", "close": ")" }
     ],
     "dispatches": [ { "pattern": "([A-Za-z0-9_\\\\]+)::dispatch\\(", "job": 1 } ],
     "deferAtSite": ["->afterCommit\\("],           // this one dispatch waits for the commit
@@ -1205,7 +1227,9 @@ worse there, and honest about what it knows, which is that a value goes in that 
 it is called.
 
 This is the single highest-leverage part of the pack. It is what lets `empo query` on a controller
-report the mobile screen that calls it, or on a Vue page report the controller that renders it.
+report the mobile screen that calls it, or on a Vue page report the controller that renders it. It
+is also, as written here, a mechanism that only ever fires when a human configured it, which is what
+section 5c is about.
 
 ### 5b. `scopes`: what encloses a symbol
 
@@ -1312,6 +1336,106 @@ And the whole block is enclosure the pack can *see*. A prefix assembled at runti
 config, or applied by middleware the routes never name is invisible here exactly as a dispatch
 reached through a helper is invisible to section 7. A key that comes out unprefixed has not been
 proved unprefixed; it has been proved to sit inside no construct a pack rule matched.
+
+### 5c. `joins`: both halves written in one language
+
+Section 5 describes how a produced table and a consumed table are matched, and leaves implicit the
+thing that decides whether they are matched at all. Until this field existed that thing was always
+the same: a `bridge` in the user's `.empo/config.json`. `engine/bridger.ts` runs once per configured
+bridge and never otherwise (`engine/graph.ts`), so a symbol kind no bridge names is matched by
+nobody, however completely both tables were filled. And a bridge is the one part of the config `empo
+init` refuses to guess, because it is a claim only a person can make — that two roots somebody
+deliberately kept apart really do exchange this symbol, under a normalization only they know. Init
+does not even mention the gap unless the repository holds two or more languages
+(`commands/init.ts`). So in a single-language repository the two tables were built, deduplicated,
+written into `graph.json`, and never introduced to each other. A pack could produce a symbol on one
+line and consume it forty lines away in its own dialect, and the graph would say nothing, forever,
+without a word of warning — the shape section 5b already names as the worst failure this document
+has: not a wrong answer, a missing one that looks like a clean bill of health.
+
+`joins` is a top-level list of symbol kinds (`string[]`, default `[]`) whose two halves are written
+in one language and matched inside one root. `engine/graph.ts` `packJoins` turns each declared kind
+into one synthetic bridge per root that speaks that language, with `produces` and `consumes` both
+set to that root's own path, and appends those to `config.bridges` before `bridgeRoots` runs. The
+matcher needs no change to accept them: it compares each node's root against a set of root paths and
+never asks whether the two sides are different roots, and it already refuses an edge from a node to
+itself. Appended and not merged, because `empo doctor` prints a match rate per bridge, and a config
+bridge and a pack join are two different claims about one symbol kind — folded together they would
+report one rate over two populations that were never one question. `empo doctor` prints the pack's
+own joins beside the configured bridges for the same reason (`engine/health.ts`).
+
+There is deliberately no `normalize` on a pack join. A config bridge needs one because its two sides
+were written by different people in different languages, and nothing but a human knows that `post`
+and `POST` are one method. Both halves of a join come out of one pack, which has already normalized
+them on its own symbol rules, so a second normalization here would be a second place to keep in sync
+with the first.
+
+**It is opt-in per kind, and it is emphatically not "every symbol a pack writes both halves of".**
+That rule is available, it needs no field at all, and it is wrong. The php pack produces
+`http-route` from the route files and consumes it from its own feature tests, which is exactly what
+makes `empo query` able to say a route is exercised. Joining that kind inside a root would hand
+every route in the repository a fan-in edge from the test that calls it, and every number this tool
+prints about that route would move — not because anything about the code changed, but because a
+default did. A field somebody has to type per kind is the difference between an edge that was asked
+for and an edge that arrived.
+
+`src/schema/pack.schema.ts` refuses at load a `joins` entry this pack does not both produce and
+consume, and the message names which half is missing (`joins "x", which this pack only produces: a
+join needs both halves`) or says no rule writes the kind at all. The failure it prevents is silent
+in precisely the way the section above describes: a join whose counterpart table is empty runs,
+matches nothing, and leaves a graph indistinguishable from a repository where nothing is scheduled.
+A kind named here is a claim that both halves exist in this pack, so it is checked while the person
+who typed the name is still looking at it.
+
+The php pack declares one: `scheduled-command`. The command class produces the symbol from
+`protected $signature = '…'`, with an optional `static` and `string` in front of it, and from the
+`#[AsCommand(…)]` attribute, which is the same declaration in the spelling newer Laravel prefers.
+Two rules read the attribute rather than one, because PHP gives it more than one legal shape: the
+name is the first argument or a named `name:` one, named arguments are order-independent so
+`AsCommand(description: '…', name: '…')` is as ordinary as the other order, the attribute may be
+written fully qualified, and several attributes may share one `#[]`. A rule anchored on the literal
+`#[AsCommand(name:` reads the one spelling its author happened to have in front of them and misses
+the rest silently, which is this section's recurring failure. **`protected` and not every
+visibility**, which was tried and reverted: an Artisan command
+overrides `Command::$signature`, which is protected, so the wider rule found nothing new on the
+command side, while `private $signature` and `public $signature` are what a webhook HMAC verifier
+and a signed-payload DTO call their own field. The narrower rule keeps a distinction the wider one
+spent for nothing.
+
+`app/Console/Kernel.php` consumes the symbol from `$schedule->command('…')`, from a schedule held as
+a property (`$this->schedule->command('…')`), and from the `Schedule::command(` facade spelling,
+since the framework offers all of these and a rule that knew one would drop the rest of any schedule
+that mixes them. Every branch is anchored on a receiver that is a schedule rather than on
+`->command(` alone, because `->command(` is an ordinary method name: a process builder writing
+`$process->command('ls -la')` would otherwise consume a symbol named `ls`, and a phantom consumed key
+is worse than a missing one — it is counted against the join's match rate and sends whoever reads
+`empo doctor` looking for a command nobody ever scheduled. The receiver is also all a regex has to
+go on, so the one spelling that falls out is a short parameter name: `function schedule(Schedule $s)`
+followed by `$s->command('…')` names its schedule only in the type hint, which is nowhere near the
+call site.
+
+Both sides key on the leading token, up to the first whitespace or `{`, which is not a tidiness
+choice: a signature carries its arguments and options in the same string (`orders:reconcile {club?}
+{--force}`) while the scheduler names the command alone, so keying on the whole literal would match
+nothing on every command that takes an argument, which is most of the interesting ones.
+
+`Schedule::command(ReconcileCommand::class)` takes no part in this join and does not need to. That
+form names the class, and a file naming a class imports it, so level 1 has already drawn the edge
+from the scheduler to the command through the `use` line at the top of the file. The join exists for
+the other spelling, the one where the only thing written down anywhere is a string.
+
+**Which side produces and which consumes is load-bearing, not a naming convention.** A bridge edge
+runs from the consumer to the producer, the same direction an import runs, and it is evidenced at
+the consumer's call site (`engine/bridger.ts`). The definition side must therefore be the `produces`
+side. Written the other way round the edge points from the command class at the scheduler, and the
+fan-in this join exists to create lands on `Kernel.php` — which already had plenty — instead of on
+the command, which had none.
+
+Which is what the field buys. A scheduled command is a class nobody calls: no controller constructs
+it, no service imports it, its name appears once in the repository as a string in a scheduler entry.
+Before this join, a diff touching that command file read as a leaf with a fan-in of zero — the shape
+`empo review` treats as the safest thing in the change — while it was in fact the thing that runs
+every night against production data.
 
 ### 6. `tests`: coverage
 
@@ -1526,7 +1650,7 @@ to `covered`, and the denominator from `0 are reached by a test` to `1 is reache
 itself does not move, which is worth stating because it is the number somebody would check: the file
 is a consumer either way, and what changes is whether anything knows it is a test.
 
-### 7. `hazards`: the optional transaction axis
+### 7. `hazards`: the optional transaction axis, and the loop axis beside it
 
 The hazard is one specific thing: a queued job dispatched from inside a database transaction without
 waiting for the commit. The queue does not roll back with the database, so a worker can pick the job
@@ -1544,7 +1668,7 @@ differently ([06-cli](06-cli.md)), which is the same rule the graph already appl
 matches no node ([05-graph-model](05-graph-model.md)): an empty result is a fact worth seeing and an
 absent one is not the same fact.
 
-Four fields, and every string in all four is a marker the engine walks rather than a language the
+Five fields, and every string in all five is a marker the engine walks rather than a language the
 engine knows:
 
 - **`transactions`** is a list of `{ pattern, extent }`, where `extent` says how to find where the
@@ -1569,6 +1693,10 @@ engine knows:
   file when no later `)` restores the depth. An arrow body is a single expression, so the common
   miscount ends the extent early rather than late; the late case is unbounded all the same, and one
   stray `(` in a string can enclose every dispatch below it.
+- **`loops`** is a list of the same `{ pattern, extent }` shape, with the same two forms, compiled
+  by the same `compileExtentRules` and walked by the same `enclosedBy` as the field above it,
+  because "what does this construct enclose" is one question whatever opened it. What it asks is a
+  different question, and the paragraphs after this list are about keeping the two apart.
 - **`dispatches`** is a list of `{ pattern, job }`, where `job` is the 1-based capture group holding
   the dispatched job's name. It is a group number and not a convention, because a language spells the
   dispatch two or three ways and the name does not sit in the same place in all of them. Two rules
@@ -1606,7 +1734,92 @@ a transaction or a queue is, and no language name appears in it. That is exactly
 `engine/mask.ts` already makes for comments, where a pack names `//` and `/* */` and the engine walks
 them. A pack naming `DB::transaction(` is the same kind of statement as a pack naming `//`.
 
-**Two blind spots, both structural, neither a bug to be fixed later.**
+**`loops` shares the walk and shares nothing else, and the separation is the design.** A dispatch
+inside a transaction is a defect: the queue does not roll back, and a worker can beat the commit. A
+dispatch inside a loop is not wrong at all — it is how a batch is written, and a rule that called it
+a finding would be wrong on nearly every match it made. So the results never mix.
+`engine/hazards.ts` exposes `findLoopedDispatches` beside `findEnclosedDispatches`, the sites it
+returns land in `Graph.fanout` and never in `Graph.hazards`, and they carry a `loopLine` rather than
+a `transactionLine`. Nothing subtracts a deferral there either: `deferAtSite` and
+`deferAtDeclaration` answer "does this dispatch wait for the commit", which is a question this axis
+never asked, so an `afterCommit` on a dispatch inside a loop changes nothing about it and the
+`LoopedDispatch` record deliberately carries no field for it. A field in `graph.json` that no reader
+of an axis can act on is worse than a missing one: somebody will act on it anyway.
+
+The php pack declares four rules for it. Two are the keyword loops, each guarded by a lookbehind so
+a keyword sitting at the end of a longer identifier (`$stepsfor (…)`) opens nothing: `foreach` and
+`while` together, and `for` on its own, because a `for` header holds semicolons and the other two
+never do, so one pattern bounding the header cannot serve both. Two are the collection callbacks —
+`->each`, `->eachById`, `->map`, `->chunk`, `->chunkById`, `->chunkMap`, in the `->` and `::`
+spellings, with the leading size argument of `chunk(100, …)` optional — one rule for the `function`
+callback, `static function` included, balancing `{`/`}`, and one for the `fn` callback, balancing
+`(`/`)` for the reason the arrow form of `DB::transaction` does above: `fn () => …` opens no block,
+and a brace-counting walk would balance the next unrelated block instead.
+
+**Both keyword rules require a `{` to follow the header, and they require it through a lookahead —
+`\)\s*(?=\{)` and not `\)\s*\{`. That distinction is the subtlest line in this block and it is
+load-bearing twice over.** `balancedEnd` starts looking for its `open` delimiter at the *end* of the
+match, so a pattern that eats the body's own brace has already stepped past it: the walk then finds
+the next unrelated `{` in the file and balances that instead, or finds none and runs the extent to
+the end of the file, which reports every dispatch below as looped. The brace is a condition on the
+opener and not a part of it, and the two spellings differ in nothing else, which is exactly what
+makes the wrong one survive review. It survived one here. The whole suite stayed green while the
+rules ate the brace, because no test held a dispatch written after a loop had closed; the test that
+would have failed (`a dispatch after the loop closes is not in it`) exists now.
+
+Requiring the brace at all is the other half of the argument, and it buys off three ordinary
+spellings that would otherwise open an extent nothing ever closes: the alternative
+`foreach (…): … endforeach;` syntax, `do { … } while (…);`, whose `while` sits after its block
+rather than before one, and a loop whose body is a single unbraced statement. All three now match
+nothing.
+
+What that costs is paid in the direction this axis must fail in, and it costs three shapes. A loop
+with an unbraced body (`foreach ($a as $b) Sync::dispatch($b);`) is missed. A `foreach` or `while`
+header holding a semicolon is missed, because that header's bound stops at `;`:
+`foreach (explode(';', $csv) as $row) {` is what import and CSV code looks like, which makes it not
+a rare shape in exactly the code most likely to dispatch once per row. And a `for` header broken
+over several lines is missed, because `for`'s bound stops at the newline as well — a `for` header
+carries its own semicolons, so a `;` cannot bound it and only the line can. Neither bound is
+arbitrary: they are what stops a header pattern from crossing out of its own construct and latching
+onto some later `) {`, which is precisely how the alternative syntax used to swallow a whole file. A
+`foreach` or `while` header spread over several lines does work; only `for` pays that part.
+
+A missed loop costs a reader one glance at a diff they were already reading. An extent that runs to
+the end of the file costs the credibility of every row printed under it, and a reader who has been
+shown one invented coordinate is right to stop trusting the rest. That asymmetry is why the price is
+paid on this side, and why it is written here as a price rather than left out as an omission.
+
+Three limits beyond those. **`array_map` and friends are not matched**: the callback rules require a
+`->` or `::` receiver, so a free function taking a closure is not a loop as far as this pack is
+concerned. **A `for` whose unbraced body and the block after it share one line** is the one shape
+that still over-reports, and it is left standing rather than papered over: a `;` cannot bound a
+`for` header, so on `for ($i = 0; $i < 3; $i++) echo x(); if ($y) { Sync::dispatch(); }` the pattern
+runs past the loop's own body and latches onto the `if`'s brace, and the dispatch inside the `if` is
+reported with the `for` as its loop. Only the line bound contains it, so the whole shape has to be
+written on one line, which is why it survives: bounding it further would need the paren balancing a
+regex does not have, and every formatter in ordinary use breaks that line. And **the number of
+iterations is never knowable from source**: how many rows a query returns is not written anywhere a
+regex can reach.
+
+The string-literal blind spot below applies here as it does to transactions — the source these rules
+see is comment-masked and not string-masked, so a loop keyword inside a quoted string or a heredoc
+still matches. The brace requirement narrows that to strings which literally contain `) {`, a
+smaller set than "any string mentioning `foreach`" and not an empty one. The `fn` rule is the
+exposed one, because it balances parentheses rather than braces, and a stray parenthesis in a string
+is far commoner than a stray brace: `'(inclusive)'` in a message ends its extent early, and an
+unmatched `(` extends it.
+
+That last limit is why `empo review` prints these sites as a fact and never as a finding. It lists
+every dispatch a changed file makes from inside a loop, with the line the loop opened at, and then
+says in the same breath that this says nothing about volume (`commands/review.ts`, `printFanout`). A
+coordinate with no sentence under it reads as an accusation, and this axis has nothing to accuse
+anybody of. What it is good for is the moment a diff widens what a loop iterates: the query changed
+upstream, the dispatch downstream did not, and nothing in the diff shows the two lines together. The
+reviewing model can go and read the query; EmPo can only make sure the question gets asked out loud
+while somebody is still reading.
+
+**Two blind spots, both structural, neither a bug to be fixed later.** They belong to the walk
+rather than to the transaction axis, so `loops` inherits both of them exactly as written.
 
 The first is a consequence of the masking rule in section 3. Comments are blanked before any pack
 rule runs, so a commented-out transaction is invisible, but **string literals are deliberately not

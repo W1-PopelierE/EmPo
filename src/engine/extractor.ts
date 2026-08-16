@@ -18,6 +18,8 @@ import {
   type DispatchSite,
   declaresDeferral,
   findEnclosedDispatches,
+  findLoopedDispatches,
+  type LoopedDispatch,
 } from "./hazards";
 import { maskComments } from "./mask";
 import { compareStrings } from "./order";
@@ -96,6 +98,12 @@ export interface ExtractedFile {
    * one file's extraction does not have (engine/build.ts does it).
    */
   dispatches: DispatchSite[];
+  /**
+   * Jobs this file dispatches from inside a loop, unresolved for the reason `dispatches` is. The two
+   * lists overlap freely: a dispatch inside a loop inside a transaction is on both, and it is two
+   * facts about one line rather than one fact counted twice.
+   */
+  loopDispatches: LoopedDispatch[];
   /**
    * This file declares that dispatching it waits for the commit, so a dispatch of the job it
    * declares is not a hazard wherever it was written. Read here and applied in engine/build.ts,
@@ -327,6 +335,7 @@ export function extractFile(
     // The masked source, like every other rule: a dispatch inside a commented-out block is not a
     // dispatch, and a pack whose rules read the raw text would report hazards nobody can run.
     dispatches: compiled.hazards === null ? [] : findEnclosedDispatches(compiled.hazards, source),
+    loopDispatches: compiled.hazards === null ? [] : findLoopedDispatches(compiled.hazards, source),
     defersCommit: compiled.hazards !== null && declaresDeferral(compiled.hazards, source),
   };
 }

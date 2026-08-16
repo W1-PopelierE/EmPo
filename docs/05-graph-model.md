@@ -21,7 +21,8 @@ specifies its schema. It is written only by `empo index`, never by hand, never b
   "coverage": { "orders": CoverageInfo, … },
   "hazards": [ Hazard, … ],                    // a second axis: dispatches inside a transaction
   "hazardsScanned": [ "php" ],                 // the langs whose pack looked, as of this build
-  "names": [ NameResolution, … ]               // what the name-resolving rules did with what they read
+  "names": [ NameResolution, … ],              // what the name-resolving rules did with what they read
+  "fanout": [ Fanout, … ]                      // a third axis: dispatches inside a loop, last key
 }
 ```
 
@@ -161,11 +162,37 @@ Edge kinds and where they come from:
 | `string` | pack `edges.string` rules (class name in a quoted string) | 1 |
 | `template` | pack `edges.template` rules (a name inside a Blade/Twig/JSX tag or include) | 1 |
 | `hook` | pack `edges.hook` rules (observer/listener registered in a provider) | 1 |
-| `bridge` | symbol-table match across roots per a config `bridge` | 2 inter-language |
+| `bridge` | symbol-table match between a produced and a consumed key, per a config `bridge` or a pack `joins` kind | 2 symbol join |
 
 Every edge carries `evidence` (file and line) so `empo query` can cite where a coupling was found,
 and so a human can go read it. A finding with no `file:line` is not allowed anywhere in EmPo; this
 is where the citations start.
+
+**A `bridge` edge is no longer necessarily cross-language, and the level column says "symbol join"
+rather than "inter-language" because of it.** What a bridge edge has always been is a symbol matched
+between a produced and a consumed key; that the two keys sat in two roots speaking two languages was
+a property of the only thing that could declare one, which was a config `bridges` entry. A pack can
+now declare `joins` ([04-language-packs](04-language-packs.md)), a list of symbol kinds whose two
+halves it writes itself, and `packJoins` in `engine/graph.ts` turns each declared kind into one
+bridge per root that speaks that language, with the same root on both sides. The php pack declares
+it for `scheduled-command`: a Laravel scheduler entry consumes the command name that the command
+class produces from its signature, both halves are php, and both sit in one root. Nothing in the
+matcher changed to allow it — `engine/bridger.ts` collects each side by asking whether a node's root
+is one of the paths that side lists, never whether the two sides differ, and it already refuses an
+edge from a node to itself — so what moved is what the word is allowed to mean, and the wording
+followed it rather than the other way round.
+
+The wording is worth stating exactly, because these strings are read by an agent that quotes them.
+`empo query` prints the section as **`symbol joins`** where it used to say "cross-language reach",
+and its three empty answers now speak of "join edges" (a graph with none at all, the one that is not
+in this blast radius, and n of which none is). `empo review` prints each row of a changed file's
+radius as **`join <symbol>`**, with the symbol as the label rather than the word "cross-language",
+since a scheduled command is joined to the entry that schedules it and the two ends are a language
+apart only sometimes. `empo index` and `empo doctor` share one renderer (`bridgeLines` in
+`engine/bridger.ts`) and print **`join <kind>  m/n consumed keys matched against p produced`**, one
+word that has to be true of a config bridge and of a pack join alike. A heading claiming a language
+boundary above rows that do not cross one is a false fact printed over true ones, which is the whole
+reason any of these lines moved.
 
 A `template` edge runs from the file that wrote the reference to the node that reference names, and
 both shipped packs fill it. The reference is usually a tag and it is not always one: the php pack
@@ -748,6 +775,74 @@ shape of a Blade component library, so a warning on it would fire forever on a d
 be turned off. The number is the whole of the answer; whether it is the right number is the reader's
 judgement.
 
+## Dispatches inside a loop
+
+```jsonc
+{
+  "file": "apps/api/app/Console/Commands/BackfillReceipts.php",  // the dispatch site, repo-relative
+  "line": 41,                                     // the dispatch
+  "job": "SendReceiptJob",                        // the job as written at the dispatch site
+  "target": "Acme\\Jobs\\SendReceiptJob",         // resolved node id, or null
+  "loopLine": 38                                  // the line that opened the enclosing loop
+}
+```
+
+`fanout` is every dispatch written inside a loop, and it is the **last** key in the file: appending
+is what keeps every key above it at the offset the previous schema left it at. It comes out of the
+same extraction the hazards do, from the `loops` markers a pack declares beside `transactions` and
+`dispatches` in its optional `hazards` block ([04-language-packs](04-language-packs.md) section 7),
+and a pack that declares none contributes nothing here. `resolveFanout` in `engine/build.ts`
+resolves `job` through the same node index the edges resolve through, so `target` is a node id or
+null on exactly the rules `Hazard.target` follows: a name that normalizes to nothing, a name no node
+carries, and a short name two nodes share all give null, and null is kept rather than dropped
+because what makes the coordinate worth printing is the enclosure and not the name.
+
+**It is deliberately not part of `hazards`, and the separation is the whole of the design.** A
+dispatch inside a loop is not a defect. It is how a batch is written, and it is wrong only when the
+loop is unbounded, which depends on how many rows the query above it returns and is therefore not in
+the source at all. A reader who found these rows among the hazards would go hunting for the defect
+that put them there, find none, and learn to distrust the list that does carry defects. So it is a
+list of its own, and `empo review` prints it under its own heading with a sentence under every
+non-empty list saying that it accuses nobody: a coordinate with no sentence under it reads as an
+accusation.
+
+**Nothing here counts how often the loop runs, and nothing ever will.** That count is a property of
+the data and EmPo reads source, so a field for it could only ever hold a guess, and a guess printed
+beside a `file:line` is a fabrication a reviewer would act on. What the record carries is the line,
+which is what puts the question in front of whoever is reading a diff that widened the query above
+the loop — and the reviewing model, unlike the engine, can go and read that query.
+
+**Nothing is subtracted from this list.** The hazards drop a dispatch its own statement defers and a
+dispatch whose job declares that every dispatch of it waits; neither applies here. A deferral says a
+dispatch waits for a commit, which answers a question this axis never asked, and dropping the
+deferred ones would hide the fan-out of a job that is careful about transactions and unbounded about
+volume.
+
+**It rides on `hazardsScanned` rather than carrying a scanned list of its own.** Both blocks live
+under one pack key, so declaring `hazards` at all is the act of looking and a pack that declared it
+was asked about both axes; a second list keyed by the same packs would be one fact written twice,
+and two copies of one fact drift. The reading is the same as for the hazards: an empty `fanout`
+under a `hazardsScanned` naming this language means the rules looked and found none, and an empty
+one under an empty `hazardsScanned` means nobody looked.
+
+**A missing key is a third state, and `readGraph` preserves it.** It leaves `fanout` exactly as
+parsed, missing key included, which is the rule `hazards` follows and for the same reason: a graph
+written before the axis existed has no key, and a reader defaulting that to the empty list would
+print "no changed file dispatches from inside a loop" about files nothing ever examined. `empo
+review` prints the absence as the unknown it is and names `empo index` as the repair.
+
+**`schema` does not move for it.** A field that arrives announces itself by its absence — the key is
+either in the file or it is not, and every reader of this one is already required to tell those two
+apart — so a version bump would carry nothing the file does not already say about itself. The number
+is for the change no reader can see: a key that keeps its name and changes what it counts (4, and
+`fanin`), or a set of ids that starts meaning exports where it meant files (7). Those are the graphs
+that parse, look well formed, and answer with the old arithmetic. This one cannot.
+
+Fan-out sites are deduplicated across roots exactly as the hazards are, since two overlapping roots
+re-scan one file and one dispatch site read twice is not two of them, and they are sorted by
+`(file, line, job, target)` through the same comparison, so this list is byte-stable like the rest of
+the file.
+
 ## What the graph deliberately does not contain
 
 Documented so nobody mistakes absence for safety:
@@ -775,8 +870,8 @@ graph says, grep and confirm.
 
 `empo index` is deterministic: same source plus same pack versions produce a byte-identical
 `graph.json` (nodes sorted by id, edges sorted by `(from, to, kind, evidence.line)` with the
-evidence file breaking the last tie, since an edge has no id to sort on, hazards sorted by
-`(file, line, job, target)` for the same reason, `names` sorted by family with each
+evidence file breaking the last tie, since an edge has no id to sort on, hazards and `fanout` sorted
+by `(file, line, job, target)` for the same reason, `names` sorted by family with each
 `ambiguousNames` sorted by cost and tie-broken on the name, and no timestamps except
 `builtAgainst` which is a content-derived git sha). This makes the file diffable and makes "did the
 graph actually change" answerable. For very large repos the file can be sharded

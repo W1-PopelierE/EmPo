@@ -71,11 +71,13 @@ const hazardPack: Pack = {
   match: { extensions: [".txt"] },
   node: { id: { strategy: "module-path" }, kindRules: [] },
   edges: {},
+  joins: [],
   produces: [],
   consumes: [],
   tests: { paths: [], assertionTerms: [], assertionExcludes: [] },
   hazards: {
     transactions: [{ pattern: "^begin$", extent: "span", endPattern: "^commit$" }],
+    loops: [],
     dispatches: [{ pattern: "send\\(([A-Za-z]+)\\)", job: 1 }],
     deferAtSite: [],
     deferAtDeclaration: [],

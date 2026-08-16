@@ -1,5 +1,12 @@
 import type { Pack } from "../schema/pack.schema";
-import type { GraphEdge, GraphNode, Hazard, NameOutcome, NameResolution } from "../schema/types";
+import type {
+  Fanout,
+  GraphEdge,
+  GraphNode,
+  Hazard,
+  NameOutcome,
+  NameResolution,
+} from "../schema/types";
 import {
   collectFileScopes,
   compilePack,
@@ -34,6 +41,12 @@ export interface RootGraph {
    * distinction is `Graph.hazards` at the top and it is the pack, not this, that draws it.
    */
   hazards: Hazard[];
+  /**
+   * The dispatches this root makes from inside a loop. Empty when the pack declares no `loops`
+   * block, and empty in the same way when it declares one and no dispatch sits inside a loop: the
+   * two are told apart by `hazardsScanned`, which both blocks ride on (schema/types.ts).
+   */
+  fanout: Fanout[];
   /**
    * Every repo-relative path this root scanned, not a count. Two roots may overlap, and a count
    * summed per root would report more files than the repository holds while nodes and edges are
@@ -122,6 +135,7 @@ export function buildRoot(options: BuildRootOptions): RootGraph {
     nodes: deduped.nodes,
     edges: dedupeEdges(edges).sort(byEdgeOrder),
     hazards: resolveHazards(extracted, index),
+    fanout: resolveFanout(extracted, index),
     files: scanned.map((file) => file.file),
     duplicates: deduped.duplicates,
     // Tallied before the edges are deduplicated, and deliberately: an edge deduplicated away was a
@@ -177,6 +191,28 @@ function resolveHazards(files: ExtractedFile[], index: NodeIndex): Hazard[] {
   }
 
   return dedupeHazards(hazards);
+}
+
+/**
+ * The dispatches written inside a loop, with the same job resolution the hazards get and none of
+ * their filtering. Nothing is subtracted here: a deferral says a dispatch waits for a commit, which
+ * is an answer to a question this axis never asked, and dropping a deferred dispatch would hide the
+ * fan-out of a job that is careful about transactions and unbounded about volume.
+ */
+function resolveFanout(files: ExtractedFile[], index: NodeIndex): Fanout[] {
+  const fanout: Fanout[] = [];
+  for (const file of files) {
+    for (const dispatch of file.loopDispatches) {
+      fanout.push({
+        file: file.file,
+        line: dispatch.line,
+        job: dispatch.job,
+        target: resolveJob(index, dispatch.job),
+        loopLine: dispatch.loopLine,
+      });
+    }
+  }
+  return dedupeFanout(fanout);
 }
 
 /**
@@ -340,6 +376,30 @@ export function dedupeHazards(hazards: Hazard[]): Hazard[] {
     if (!byKey.has(key)) byKey.set(key, hazard);
   }
   return [...byKey.values()].sort(byHazardOrder);
+}
+
+/**
+ * One row per dispatch site, sorted, for the reason `dedupeHazards` deduplicates: two overlapping
+ * roots scan one file twice and two dispatch rules can match one call, and either way it is one line
+ * of source shown twice. Shared by buildRoot and by graph.ts across roots.
+ */
+export function dedupeFanout(fanout: Fanout[]): Fanout[] {
+  const byKey = new Map<string, Fanout>();
+  for (const site of fanout) {
+    // The NUL join and the escape spelling are `dedupeEdges`': a path may hold a space, and a space
+    // join would let two sites collapse into one.
+    const key =
+      `${site.file}\u0000${site.line}\u0000${site.job}` +
+      `\u0000${site.target ?? ""}\u0000${site.loopLine}`;
+    if (!byKey.has(key)) byKey.set(key, site);
+  }
+  return [...byKey.values()].sort(
+    (a, b) =>
+      compareStrings(a.file, b.file) ||
+      a.line - b.line ||
+      compareStrings(a.job, b.job) ||
+      compareStrings(a.target ?? "", b.target ?? ""),
+  );
 }
 
 /**

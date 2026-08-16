@@ -795,7 +795,11 @@ function printBlastRadius(answer: BlastRadius): void {
   }
   console.log("");
 
-  console.log("cross-language reach");
+  // "symbol joins" and no longer "cross-language reach": a bridge edge is a symbol matched between a
+  // produced and a consumed key, and since a pack can declare a join inside one root (engine/graph.ts)
+  // the two ends are not always two languages. A Laravel scheduler entry and the command class it
+  // names are one language, and a heading claiming otherwise is a false fact printed above true ones.
+  console.log("symbol joins");
   if (answer.bridges.length === 0) {
     // Two silences, and the old line stated the first one whichever it was in. A repository with
     // bridges configured and none of them near this node was told "the graph holds no bridge edges
@@ -806,10 +810,10 @@ function printBlastRadius(answer: BlastRadius): void {
     // a noun, and this section is read by an agent that quotes what it is given.
     console.log(
       answer.bridgeEdgesInGraph === 0
-        ? "  none: the graph holds no bridge edges at all, so nothing here crosses a language"
+        ? "  none: the graph holds no join edges at all, so no symbol here is matched to another"
         : answer.bridgeEdgesInGraph === 1
-          ? "  none: the one bridge edge in the graph is not in this blast radius"
-          : `  none: of the ${plural(answer.bridgeEdgesInGraph, "bridge edge")} in the graph, ` +
+          ? "  none: the one join edge in the graph is not in this blast radius"
+          : `  none: of the ${plural(answer.bridgeEdgesInGraph, "join edge")} in the graph, ` +
             "none is in this blast radius",
     );
   }

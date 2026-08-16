@@ -29,6 +29,7 @@ const hazards: PackHazards = {
       endPattern: "DB::commit\\(\\)",
     },
   ],
+  loops: [],
   dispatches: [{ pattern: "dispatch\\(new ([A-Za-z]+)", job: 1 }],
   deferAtSite: ["->afterCommit\\("],
   deferAtDeclaration: ["\\$afterCommit\\s*=\\s*true"],
@@ -55,6 +56,7 @@ function packWith(block?: PackHazards): Pack {
     node: { id: { strategy: "module-path" }, kindRules: [] },
     comments,
     edges: {},
+    joins: [],
     produces: [],
     consumes: [],
     tests: { paths: [], assertionTerms: [], assertionExcludes: [] },
@@ -80,7 +82,13 @@ describe("compileHazards", () => {
 
   test("compiles a declared but empty block, because found none is not nobody looked", () => {
     const empty = compileHazards(
-      packWith({ transactions: [], dispatches: [], deferAtSite: [], deferAtDeclaration: [] }),
+      packWith({
+        transactions: [],
+        loops: [],
+        dispatches: [],
+        deferAtSite: [],
+        deferAtDeclaration: [],
+      }),
     );
 
     expect(empty).not.toBeNull();
@@ -94,6 +102,7 @@ describe("compileHazards", () => {
     // is the safe direction: counting nothing would report every dispatch in the file.
     const lame = compiled({
       transactions: [{ pattern: "DB::transaction\\s*\\(", extent: "balanced" }],
+      loops: [],
       dispatches: hazards.dispatches,
       deferAtSite: [],
       deferAtDeclaration: [],
@@ -277,6 +286,7 @@ describe("findEnclosedDispatches, a static-method dispatch spelling", () => {
    */
   const statik: PackHazards = {
     transactions: hazards.transactions,
+    loops: [],
     dispatches: [{ pattern: "([A-Za-z\\\\]+)::dispatch\\(", job: 1 }],
     deferAtSite: ["->\\s*afterCommit\\(\\s*\\)"],
     deferAtDeclaration: [],
@@ -459,6 +469,7 @@ describe("declaresDeferral", () => {
   test("is false when the pack declares no declaration-side markers", () => {
     const none = compiled({
       transactions: hazards.transactions,
+      loops: [],
       dispatches: hazards.dispatches,
       deferAtSite: [],
       deferAtDeclaration: [],
@@ -485,11 +496,13 @@ const symbolHazardPack: Pack = {
   match: { extensions: [".txt"] },
   node: { id: { strategy: "symbol", symbolPattern: "^export ([A-Za-z]+)$" }, kindRules: [] },
   edges: {},
+  joins: [],
   produces: [],
   consumes: [],
   tests: { paths: [], assertionTerms: [], assertionExcludes: [] },
   hazards: {
     transactions: [{ pattern: "^begin$", extent: "span", endPattern: "^commit$" }],
+    loops: [],
     dispatches: [{ pattern: "send\\(([A-Za-z]+)\\)", job: 1 }],
     deferAtSite: [],
     deferAtDeclaration: ["^defer$"],
