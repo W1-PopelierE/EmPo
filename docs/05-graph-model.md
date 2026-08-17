@@ -7,7 +7,7 @@ specifies its schema. It is written only by `empo index`, never by hand, never b
 
 ```jsonc
 {
-  "schema": 8,                          // the format this file was written in, not the one empo writes
+  "schema": 10,                         // the format this file was written in, not the one empo writes
   "builtAgainst": "9cd9b6278…",         // git sha graph was built from
   "builtAtCommitSubject": "…",          // for human sanity when reading the file
   "roots": [ { "path": "apps/api", "lang": "php" }, … ],
@@ -838,8 +838,9 @@ judgement.
 }
 ```
 
-`fanout` is every dispatch written inside a loop, and it is the **last** key in the file: appending
-is what keeps every key above it at the offset the previous schema left it at. It comes out of the
+`fanout` is every dispatch written inside a loop, and it was appended as the last key in the file —
+the place `permanentFailures` was appended after it, for the same reason: appending is what keeps
+every key above at the offset the previous schema left it at. It comes out of the
 same extraction the hazards do, from the `loops` markers a pack declares beside `transactions` and
 `dispatches` in its optional `hazards` block ([04-language-packs](04-language-packs.md) section 7),
 and a pack that declares none contributes nothing here. `resolveFanout` in `engine/build.ts`

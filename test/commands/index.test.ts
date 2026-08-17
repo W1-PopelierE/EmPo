@@ -359,6 +359,20 @@ describe("indexCommand", () => {
     expect(coverage.admin?.blind).toBe(false);
   });
 
+  test("the header counts the joined edges under the word the rest of EmPo uses for them", () => {
+    // "bridged" was the word when a config bridge was the only thing that made one. A pack now
+    // joins its own symbols within a root, so the count covers both and the label says the noun
+    // both halves share (docs/06-cli.md).
+    const lines = printedLines(() => {
+      indexCommand(repo);
+    });
+    const { stats } = graphOnDisk();
+
+    expect(lines.join("\n")).toContain(`${stats.edges} edges, ${stats.bridgedEdges} joined`);
+    // A literal denominator would pass over a fixture that joins nothing at all.
+    expect(stats.bridgedEdges).toBeGreaterThan(0);
+  });
+
   test("the header states how many flows a test reaches, beside how many are blind", () => {
     // The denominator `blind` is a numerator of, printed for the reason `--blind` carries
     // `flowsConsidered`: a flow no test reaches can never be blind, so the blind count alone is the

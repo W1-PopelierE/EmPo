@@ -35,7 +35,7 @@ export function indexCommand(repoRoot: string, options: IndexOptions = {}): void
   console.log(`roots      ${graph.roots.map((r) => `${r.path} (${r.lang})`).join(", ")}`);
   console.log(
     `graph      ${graph.stats.files} files, ${graph.stats.nodes} nodes, ` +
-      `${graph.stats.edges} edges, ${graph.stats.bridgedEdges} bridged`,
+      `${graph.stats.edges} edges, ${graph.stats.bridgedEdges} joined`,
   );
   // The reached count is the denominator `blind` is a numerator of, and it is here for the reason
   // `flowsConsidered` is in commands/query.ts: a flow no test reaches at all can never be blind, so

@@ -81,8 +81,10 @@ exactly the honesty this tradeoff requires.
     "template":[ { "pattern": "<x-([a-z0-9][A-Za-z0-9._-]*)", "resolve": "short-name",
                    "normalize": ["last-dot-segment", "pascal-case"] } ],
     "hook":    [ { "pattern": "([A-Za-z0-9_]+)::observe\\(([A-Za-z0-9_]+)::class", "resolve": "observer" } ],
-    "inherit": [ { "pattern": "^[ \\t]*(?:final\\s+|abstract\\s+|readonly\\s+)*class\\s+[A-Za-z0-9_]+\\s+extends\\s+([A-Za-z0-9_]+)",
-                   "resolve": "short-name" } ]
+    "inherit": [ { "pattern": "^[ \\t]*(?:final\\s+|abstract\\s+|readonly\\s+)*class\\s+[A-Za-z0-9_]+\\s+extends\\s+([A-Za-z0-9_]+)\\s*(?:implements\\b|\\{|$)",
+                   "resolve": "short-name" },
+                 { "pattern": "^[ \\t]*(?:final\\s+|abstract\\s+|readonly\\s+)*class\\s+[A-Za-z0-9_]+\\s+extends\\s+\\\\((?:[A-Za-z0-9_]+\\\\)*[A-Za-z0-9_]+)",
+                   "resolve": "fqcn" } ]
   },
 
   // 4b. optional: how this language spells a declaration, first group the name declared. Read by
