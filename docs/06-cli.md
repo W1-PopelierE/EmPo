@@ -548,11 +548,12 @@ no pull request for a forge to answer about, so spending the id on a lookup only
 against a pull request nobody had named.
 
 **The brief also prints every dispatch a changed file makes from inside a loop**, under the heading
-`dispatches inside a loop  (step 2: what this change can put on the queue)`, one row per site naming
+`dispatches inside a loop  (step 2: what changed files can put on the queue)`, one row per site naming
 the `file:line`, the job it dispatches and the line the loop opened on. Under each row, where the
-resolver matched the job to a node, a `target` line names that node and its file, and an `also
-reached from` line names every other consumer of the job that a scheduler entry reaches, cited on
-that entry's own scheduled line. Both are lookups and neither is new evidence: the job's consumers
+resolver matched the job to a node, a `target` line names that node and its file, and a `reached
+from` line names every consumer of the job that a scheduler entry reaches, cited on that entry's own
+scheduled line — the dispatching file included, because a scheduled command dispatching in a loop is
+the commonest shape this axis is for and its own cadence is the one the reader most needs. Both are lookups and neither is new evidence: the job's consumers
 are ordinary edges and a scheduled command is joined to the entry that schedules it. What they add
 is having the two in one place, because what a dispatch does with a failure is written in the
 handler and never at the call site, and a queue that a nightly loop fills and a five-minute entry
@@ -564,7 +565,11 @@ what a queue does with the work that comes back rate-limited is the other half o
 means, and it is written in a file the diff has no reason to touch. One hop and not the closure,
 because a job's imports transitively are most of the application and the base class is the hop that
 pays — `handle` on a queued job is routinely inherited, so the subclass holds the work and the parent
-holds the error handling. The sites come from the
+holds the error handling. Inheritance and no other edge kind: an `import` or `fqcn` edge names a file
+the job mentions, not one whose code runs as the job's, and a failure taken from there would be
+printed under the name of work that never executes it. A graph written before the failure axis
+existed says `on failure: unknown` once under the heading rather than leaving every row blank, the
+same rule the heading itself follows for a graph older than `fanout`. The sites come from the
 `loops` rules a language pack declares beside its hazard markers
 ([04-language-packs](04-language-packs.md)) and ride on the graph as an axis of their own. **It is a
 fact in the brief and never a finding**, and every non-empty list says so in a sentence underneath:

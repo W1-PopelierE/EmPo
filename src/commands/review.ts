@@ -1283,7 +1283,7 @@ function printFanout(graph: Graph, facts: FileFacts[]): void {
   const all = graph.fanout ?? null;
 
   console.log("");
-  console.log("dispatches inside a loop  (step 2: what this change can put on the queue)");
+  console.log("dispatches inside a loop  (step 2: what changed files can put on the queue)");
 
   if (all === null) {
     console.log("  unknown: this graph was built before the axis existed. Run empo index.");
@@ -1295,6 +1295,13 @@ function printFanout(graph: Graph, facts: FileFacts[]): void {
   if (rows.length === 0) {
     console.log("  none: no changed file dispatches from inside a loop");
     return;
+  }
+
+  // A schema 9 graph has `fanout` but no `permanentFailures`: the same absence one axis later, and
+  // one the header above cannot carry, because the rows it guards are there. Said once and not per
+  // row, since it is a property of the graph and not of any dispatch in it.
+  if (graph.permanentFailures === undefined) {
+    console.log("  on failure: unknown, this graph predates the axis. Run empo index.");
   }
 
   const width = columnWidth(rows, (site) => `${site.file}:${site.line}`);
@@ -1311,7 +1318,7 @@ function printFanout(graph: Graph, facts: FileFacts[]): void {
     const handler = graph.nodes.find((node) => node.id === site.target);
     console.log(`    target ${site.target}${handler === undefined ? "" : `  ${handler.file}`}`);
     for (const other of scheduledSiblings(graph, site)) {
-      console.log(`    also reached from ${other.id}  scheduled at ${other.evidence}`);
+      console.log(`    reached from ${other.id}  scheduled at ${other.evidence}`);
     }
     // The one place the brief reaches a fact about a file the diff never touched. What the handler
     // does with a failure decides whether a widened loop is a bigger batch or a growing pile, and it
@@ -1342,9 +1349,14 @@ function printFanout(graph: Graph, facts: FileFacts[]): void {
  * is routinely inherited, so the subclass the dispatch names holds the work and its parent holds the
  * error handling, and stopping at the target would print nothing for exactly the shape this is for.
  *
+ * The hop is an `inherit` edge and no other kind, for the same reason it is only one. An `import`,
+ * `fqcn`, `template` or `hook` edge names a file the job mentions; only inheritance names a file
+ * whose code runs as the job's own, and a failure recorded in an imported helper printed under this
+ * job's name would be attributed to work that never executes it.
+ *
  * A graph built before the axis existed carries no list and yields nothing here, which reads as "no
- * failure handling found". That silence is the same one the section header prints as an unknown, so
- * it is not repaired here: it is one absence with one remedy, `empo index`.
+ * failure handling found". `printFanout` prints that absence as the unknown it is before it gets
+ * here: it is one absence with one remedy, `empo index`.
  */
 function handlerFailures(graph: Graph, target: string): PermanentFailure[] {
   const all = graph.permanentFailures ?? [];
@@ -1353,7 +1365,7 @@ function handlerFailures(graph: Graph, target: string): PermanentFailure[] {
   const files = new Set<string>();
   for (const node of graph.nodes) if (node.id === target) files.add(node.file);
   for (const edge of graph.edges) {
-    if (edge.from !== target || edge.kind === "bridge") continue;
+    if (edge.from !== target || edge.kind !== "inherit") continue;
     for (const node of graph.nodes) if (node.id === edge.to) files.add(node.file);
   }
   return all.filter((found) => files.has(found.file));
@@ -1371,18 +1383,19 @@ function handlerFailures(graph: Graph, target: string): PermanentFailure[] {
  * Only scheduled consumers, and not every consumer of the job: a widely used job has thirty, and a
  * controller that dispatches one on a click has no cadence to compare against. The whole value of
  * the row is the cadence at the far end, so a consumer nothing schedules has nothing to say here.
+ *
+ * The dispatching file itself is not excluded. The commonest shape this axis is for is a scheduled
+ * command that dispatches in a loop, and dropping the edge written at the fanout site would drop the
+ * one cadence the reader most needs: the one on the file in front of them.
  */
 function scheduledSiblings(
   graph: Graph,
-  site: { file: string; target: string | null },
+  site: { target: string | null },
 ): { id: string; evidence: string }[] {
   const joins = graph.edges.filter((edge) => edge.kind === "bridge");
   const seen = new Set<string>();
   return graph.edges
-    .filter(
-      (edge) =>
-        edge.to === site.target && edge.kind !== "bridge" && edge.evidence.file !== site.file,
-    )
+    .filter((edge) => edge.to === site.target && edge.kind !== "bridge")
     .flatMap((edge) =>
       joins
         .filter((join) => join.to === edge.from)

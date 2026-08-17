@@ -791,6 +791,14 @@ describe("php pack", () => {
       ).toEqual([]);
     });
 
+    test("a name that merely ends in a keyword is not a loop", () => {
+      // The boundary in front of every loop keyword. Without it `function stepsfor()` matches the
+      // `for` rule, the braced body balances, and an ordinary function reads as per-row work.
+      expect(dispatchesIn("function stepsfor($x) {\n  Sync::dispatch($x);\n}")).toEqual([]);
+      expect(dispatchesIn("function refreshwhile($x) {\n  Sync::dispatch($x);\n}")).toEqual([]);
+      expect(dispatchesIn("function runforeach($x) {\n  Sync::dispatch($x);\n}")).toEqual([]);
+    });
+
     test("the alternative syntax opens nothing, rather than swallowing the rest of the file", () => {
       // `foreach (…): … endforeach;` has no brace to balance, and a rule that stopped at the header
       // would send `balancedEnd` looking for the next `{` anywhere below — an unrelated function, or

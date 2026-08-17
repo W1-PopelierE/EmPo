@@ -2615,7 +2615,13 @@ describe("a changed file the scheduler reaches", () => {
     // The other entry that feeds the same queue, cited on ITS scheduled line, which is where its
     // cadence is written. This is the row that turns a volume change into a loop.
     expect(printed).toContain(
-      "also reached from Acme\\Console\\Commands\\RetryCommand  scheduled at apps/api/app/Console/Kernel.php:10",
+      "reached from Acme\\Console\\Commands\\RetryCommand  scheduled at apps/api/app/Console/Kernel.php:10",
+    );
+    // And the changed file's own cadence, which is the half a reader cannot get anywhere else: the
+    // loop they just widened runs nightly. Excluding the dispatch site would have dropped exactly
+    // the row the shape this axis was written for produces.
+    expect(printed).toContain(
+      "reached from Acme\\Console\\Commands\\ReconcileCommand  scheduled at apps/api/app/Console/Kernel.php:9",
     );
     // Still not a finding, and still nothing about volume.
     expect(printed).toContain("says nothing about volume");
@@ -2721,5 +2727,133 @@ describe("a changed file the scheduler reaches", () => {
     // And it is still a coordinate, not a verdict: whether the fail is wrong depends on what
     // storeForRetry arranged, which no rule here can see.
     expect(printed).not.toMatch(/on failure.*(?:bug|wrong|must|should)/);
+  });
+
+  /**
+   * The other side of "one hop": the hop is an inheritance and nothing else. A job imports a dozen
+   * helpers and none of them run as the job, so a failure written in one of them printed under the
+   * job's name is an attribution to work that never executes it.
+   */
+  test("a failure in a file the job merely imports is not attributed to the job", () => {
+    mkdirSync(join(repo, "apps/api/app/Jobs"), { recursive: true });
+    mkdirSync(join(repo, "apps/api/app/Support"), { recursive: true });
+    mkdirSync(join(repo, "apps/api/app/Console/Commands"), { recursive: true });
+    writeFileSync(
+      join(repo, "apps/api/app/Support/Rescue.php"),
+      [
+        "<?php",
+        "",
+        "namespace Acme\\Support;",
+        "",
+        "class Rescue",
+        "{",
+        "    public function attempt(): void",
+        "    {",
+        "        try {",
+        "            $this->run();",
+        "        } catch (RateLimitException $e) {",
+        "            $this->fail($e);",
+        "        }",
+        "    }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    // An import and not an extends: the only difference between this test and the one above, and
+    // the whole of what decides whether the failure belongs to the job.
+    writeFileSync(
+      join(repo, "apps/api/app/Jobs/SyncMember.php"),
+      [
+        "<?php",
+        "",
+        "namespace Acme\\Jobs;",
+        "",
+        "use Acme\\Support\\Rescue;",
+        "",
+        "class SyncMember",
+        "{",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const dispatching = [
+      "<?php",
+      "",
+      "namespace Acme\\Console\\Commands;",
+      "",
+      "use Acme\\Jobs\\SyncMember;",
+      "",
+      "class ReconcileCommand",
+      "{",
+      "    public function handle(): void",
+      "    {",
+      "        foreach ($members as $member) {",
+      "            SyncMember::dispatch($member);",
+      "        }",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    writeFileSync(join(repo, COMMAND_FILE), dispatching.replace("$members", "$endingToday"));
+    git(repo, ["add", "-A", "-f"]);
+    commit(repo, "dispatch a job that imports a helper which fails on a rate limit");
+    capture(() => indexCommand(repo));
+    writeFileSync(join(repo, COMMAND_FILE), dispatching);
+    capture(() => indexCommand(repo));
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    // The dispatch is found, so the row exists to attribute anything to at all.
+    expect(printed).toContain("dispatches SyncMember");
+    expect(printed).not.toContain("apps/api/app/Support/Rescue.php");
+  });
+
+  /**
+   * The absence the header above cannot carry. A schema 9 graph has `fanout`, so the rows print and
+   * the header says nothing; its failure list was never written, and a blank under every row would
+   * read as "this job records no final failure" off a scan that never ran.
+   */
+  test("a graph built before the failure axis says so instead of printing no failures", () => {
+    mkdirSync(join(repo, "apps/api/app/Jobs"), { recursive: true });
+    mkdirSync(join(repo, "apps/api/app/Console/Commands"), { recursive: true });
+    writeFileSync(
+      join(repo, "apps/api/app/Jobs/SyncMember.php"),
+      ["<?php", "", "namespace Acme\\Jobs;", "", "class SyncMember", "{", "}", ""].join("\n"),
+    );
+    const dispatching = [
+      "<?php",
+      "",
+      "namespace Acme\\Console\\Commands;",
+      "",
+      "use Acme\\Jobs\\SyncMember;",
+      "",
+      "class ReconcileCommand",
+      "{",
+      "    public function handle(): void",
+      "    {",
+      "        foreach ($members as $member) {",
+      "            SyncMember::dispatch($member);",
+      "        }",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    writeFileSync(join(repo, COMMAND_FILE), dispatching.replace("$members", "$endingToday"));
+    git(repo, ["add", "-A", "-f"]);
+    commit(repo, "dispatch a job from a loop");
+    capture(() => indexCommand(repo));
+    writeFileSync(join(repo, COMMAND_FILE), dispatching);
+    capture(() => indexCommand(repo));
+
+    // The graph a schema 9 build wrote: the fanout axis present, the failure axis never scanned.
+    const aged = JSON.parse(readFileSync(graphPath(repo), "utf8")) as Record<string, unknown>;
+    aged.schema = GRAPH_SCHEMA - 1;
+    delete aged.permanentFailures;
+    writeFileSync(graphPath(repo), JSON.stringify(aged));
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    expect(printed).toContain("dispatches SyncMember");
+    expect(printed).toContain("on failure: unknown, this graph predates the axis. Run empo index.");
   });
 });
