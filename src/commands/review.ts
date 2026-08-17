@@ -34,7 +34,7 @@ import { configError, type EmpoError, environmentError, readJson } from "../erro
 import type { EmpoConfig, EmpoForge } from "../schema/config.schema";
 import { parseFindingsFile } from "../schema/findings.schema";
 import type { HostTicket } from "../schema/host-payload.schema";
-import type { Graph, GraphNode } from "../schema/types";
+import type { Graph, GraphNode, PermanentFailure } from "../schema/types";
 import { columnWidth } from "../term";
 import { describeTouch, wantedPaths, wantedTerms } from "./check";
 import { type BlastRadius, blastRadius, FLOOR_NOT_CEILING, radiusNode } from "./query";
@@ -299,6 +299,14 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
             // file's radius back knows from these two numbers that it is not holding one.
             nodesInFile: entry.yielded,
           })),
+          // The same fact the brief prints under `dispatches inside a loop`, restricted to the
+          // changed files for the same reason: null and not [] on a graph built before the axis,
+          // because a consumer defaulting the absence to "found none" would read a clean bill of
+          // health off a field no run ever wrote.
+          fanout:
+            graph.fanout === undefined
+              ? null
+              : graph.fanout.filter((site) => facts.some((entry) => entry.file.path === site.file)),
           // The denominator rides alongside the list, so a reader can tell "no spine claims this
           // change" from "this repository curates no spine". Both answer `spines: []`, and only one
           // of them is reassuring (the same rule --hazards keeps for a graph older than the axis).
@@ -1044,6 +1052,7 @@ function printBrief(repoRoot: string, graph: Graph, view: BriefView): void {
   printCi(view);
   printChangedFiles(facts);
   printBlastRadius(facts);
+  printFanout(graph, facts);
   printFlows(facts);
   printSpines(view.spines, view.curated);
   printTests(graph, facts);
@@ -1242,16 +1251,166 @@ function printBlastRadius(facts: FileFacts[]): void {
     for (const bridge of radius.bridges.slice(0, 5)) {
       // Both ends, for the reason `empo query` prints both: the changed file is as often the
       // consuming side as the producing one, and a row naming only the near end tells a reviewer
-      // reading a php diff that the php file is cross-language, which is not a fact about anything.
+      // reading a php diff that the php file is on the far side of one, which is not a fact about
+      // anything. The symbol is the row's label rather than "cross-language", because a pack can
+      // join a symbol inside one root: a scheduled command is joined to the entry that schedules it
+      // and both halves are php, so the two ends are a language apart only sometimes.
       console.log(
-        `    cross-language ${bridge.symbol ?? "?"}  ${bridge.from}` +
+        `    join ${bridge.symbol ?? "?"}  ${bridge.from}` +
           ` consumes ${bridge.to}  named at ${bridge.evidence}`,
       );
     }
     if (radius.bridges.length > 5) {
-      console.log(`    ... and ${radius.bridges.length - 5} more cross-language joins`);
+      console.log(`    ... and ${radius.bridges.length - 5} more symbol joins`);
     }
   }
+}
+
+/**
+ * Every dispatch a changed file makes from inside a loop, and nothing about how often it runs.
+ *
+ * This is a fact and not a finding, and the line between them is the whole point of the section. A
+ * dispatch in a loop is how a batch is written; it is wrong only when the loop is unbounded, and
+ * whether it is depends on how many rows a query returns, which is not in the source. EmPo cannot
+ * decide it, a rule that guessed would fabricate, and the reviewing model is the one that can go and
+ * read the query. So the coordinate goes in the brief, at the moment the diff is being read, and the
+ * finding — if there is one — comes out through the same gate as every other finding.
+ *
+ * A graph written before the axis existed carries no `fanout` key at all, and that is printed as the
+ * unknown it is rather than as an empty list: the rule `--hazards` follows (commands/query.ts).
+ */
+function printFanout(graph: Graph, facts: FileFacts[]): void {
+  const all = graph.fanout ?? null;
+
+  console.log("");
+  console.log("dispatches inside a loop  (step 2: what changed files can put on the queue)");
+
+  if (all === null) {
+    console.log("  unknown: this graph was built before the axis existed. Run empo index.");
+    return;
+  }
+
+  const changed = new Set(facts.map((entry) => entry.file.path));
+  const rows = all.filter((site) => changed.has(site.file));
+  if (rows.length === 0) {
+    console.log("  none: no changed file dispatches from inside a loop");
+    return;
+  }
+
+  // A schema 9 graph has `fanout` but no `permanentFailures`: the same absence one axis later, and
+  // one the header above cannot carry, because the rows it guards are there. Said once and not per
+  // row, since it is a property of the graph and not of any dispatch in it.
+  if (graph.permanentFailures === undefined) {
+    console.log("  on failure: unknown, this graph predates the axis. Run empo index.");
+  }
+
+  const width = columnWidth(rows, (site) => `${site.file}:${site.line}`);
+  for (const site of rows) {
+    console.log(
+      `  ${`${site.file}:${site.line}`.padEnd(width)}  dispatches ${site.job}` +
+        `  loop opened at line ${site.loopLine}`,
+    );
+    if (site.target === null) continue;
+    // The job as a coordinate and not as a bare word. `job` is the spelling at the dispatch site and
+    // `target` is the node the resolver matched it to, and printing only the first stops the reader
+    // exactly one hop short of the code that will run: what a dispatch does with a failure is
+    // written in the handler, never at the call.
+    const handler = graph.nodes.find((node) => node.id === site.target);
+    console.log(`    target ${site.target}${handler === undefined ? "" : `  ${handler.file}`}`);
+    for (const other of scheduledSiblings(graph, site)) {
+      console.log(`    reached from ${other.id}  scheduled at ${other.evidence}`);
+    }
+    // The one place the brief reaches a fact about a file the diff never touched. What the handler
+    // does with a failure decides whether a widened loop is a bigger batch or a growing pile, and it
+    // is written where the author of this diff had no reason to look. One hop past the target as
+    // well as the target itself, because a job's `handle` is as often inherited as written: the
+    // subclass holds the work and the base class holds the error handling.
+    for (const found of handlerFailures(graph, site.target)) {
+      console.log(
+        `    on failure  ${found.file}:${found.line}  ${found.call}()` +
+          `  inside a catch at line ${found.transientLine}`,
+      );
+    }
+  }
+  // Said every time the list is non-empty, because a coordinate with no sentence under it reads as
+  // an accusation, and this axis has nothing to accuse anybody of.
+  console.log("  How often the loop runs is a property of the data, not of the source, so this");
+  console.log("  says nothing about volume. If this diff widened what the loop iterates, that is");
+  console.log("  the question to ask out loud.");
+}
+
+/**
+ * What the dispatched job's own code does with a failure it was told would pass: the target's file
+ * and the files the target inherits from, one hop.
+ *
+ * One hop and not the whole closure. A job's outgoing edges are its imports, and the transitive
+ * closure of those is most of the application, so every extra hop trades the one file that runs
+ * this work for a hundred that do not. The base class is the hop that pays: `handle` on a queued job
+ * is routinely inherited, so the subclass the dispatch names holds the work and its parent holds the
+ * error handling, and stopping at the target would print nothing for exactly the shape this is for.
+ *
+ * The hop is an `inherit` edge and no other kind, for the same reason it is only one. An `import`,
+ * `fqcn`, `template` or `hook` edge names a file the job mentions; only inheritance names a file
+ * whose code runs as the job's own, and a failure recorded in an imported helper printed under this
+ * job's name would be attributed to work that never executes it.
+ *
+ * A graph built before the axis existed carries no list and yields nothing here, which reads as "no
+ * failure handling found". `printFanout` prints that absence as the unknown it is before it gets
+ * here: it is one absence with one remedy, `empo index`.
+ */
+function handlerFailures(graph: Graph, target: string): PermanentFailure[] {
+  const all = graph.permanentFailures ?? [];
+  if (all.length === 0) return [];
+
+  const files = new Set<string>();
+  for (const node of graph.nodes) if (node.id === target) files.add(node.file);
+  for (const edge of graph.edges) {
+    if (edge.from !== target || edge.kind !== "inherit") continue;
+    for (const node of graph.nodes) if (node.id === edge.to) files.add(node.file);
+  }
+  return all.filter((found) => files.has(found.file));
+}
+
+/**
+ * The other consumers of a dispatched job that a scheduler entry reaches, and the scheduled line.
+ *
+ * This is the fan-out axis meeting the join axis, and neither half is new: the graph already holds
+ * every consumer of the job, and a scheduled command is already joined to the entry that schedules
+ * it. Printed apart they are two facts a reader has to think to combine. Printed together they are
+ * the sentence "the queue you just widened is also fed on a timer", which is the question that turns
+ * a volume change into a loop and cannot be asked of the dispatch site alone.
+ *
+ * Only scheduled consumers, and not every consumer of the job: a widely used job has thirty, and a
+ * controller that dispatches one on a click has no cadence to compare against. The whole value of
+ * the row is the cadence at the far end, so a consumer nothing schedules has nothing to say here.
+ *
+ * The dispatching file itself is not excluded. The commonest shape this axis is for is a scheduled
+ * command that dispatches in a loop, and dropping the edge written at the fanout site would drop the
+ * one cadence the reader most needs: the one on the file in front of them.
+ */
+function scheduledSiblings(
+  graph: Graph,
+  site: { target: string | null },
+): { id: string; evidence: string }[] {
+  const joins = graph.edges.filter((edge) => edge.kind === "bridge");
+  const seen = new Set<string>();
+  return graph.edges
+    .filter((edge) => edge.to === site.target && edge.kind !== "bridge")
+    .flatMap((edge) =>
+      joins
+        .filter((join) => join.to === edge.from)
+        .map((join) => ({
+          id: edge.from,
+          evidence: `${join.evidence.file}:${join.evidence.line}`,
+        })),
+    )
+    .filter((row) => {
+      const key = `${row.id} ${row.evidence}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => compareStrings(a.id, b.id) || compareStrings(a.evidence, b.evidence));
 }
 
 /**

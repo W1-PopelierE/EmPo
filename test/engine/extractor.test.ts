@@ -28,6 +28,7 @@ const basePack: Pack = {
     kindRules: [{ kind: "class" }],
   },
   edges: {},
+  joins: [],
   produces: [],
   consumes: [],
   tests: { paths: [], assertionTerms: [], assertionExcludes: [] },

@@ -7,7 +7,7 @@ specifies its schema. It is written only by `empo index`, never by hand, never b
 
 ```jsonc
 {
-  "schema": 8,                          // the format this file was written in, not the one empo writes
+  "schema": 10,                         // the format this file was written in, not the one empo writes
   "builtAgainst": "9cd9b6278…",         // git sha graph was built from
   "builtAtCommitSubject": "…",          // for human sanity when reading the file
   "roots": [ { "path": "apps/api", "lang": "php" }, … ],
@@ -21,7 +21,10 @@ specifies its schema. It is written only by `empo index`, never by hand, never b
   "coverage": { "orders": CoverageInfo, … },
   "hazards": [ Hazard, … ],                    // a second axis: dispatches inside a transaction
   "hazardsScanned": [ "php" ],                 // the langs whose pack looked, as of this build
-  "names": [ NameResolution, … ]               // what the name-resolving rules did with what they read
+  "names": [ NameResolution, … ],              // what the name-resolving rules did with what they read
+  "fanout": [ Fanout, … ],                     // a third axis: dispatches inside a loop
+  "permanentFailures": [ PermanentFailure, … ] // a fourth: a final failure inside a catch of a
+                                               // transient error, last key
 }
 ```
 
@@ -146,7 +149,7 @@ than being recomputed per flow.
 {
   "from": "Acme\\Http\\Controllers\\OrderController",
   "to":   "Acme\\Libraries\\Price\\PriceCalculator",
-  "kind": "import",              // import | fqcn | string | template | hook | bridge
+  "kind": "import",              // import | fqcn | string | template | hook | inherit | bridge
   "symbol": null,               // set only for bridge edges: the symbol kind that joined them
   "evidence": { "file": "apps/api/…/OrderController.php", "line": 42 }
 }
@@ -161,11 +164,38 @@ Edge kinds and where they come from:
 | `string` | pack `edges.string` rules (class name in a quoted string) | 1 |
 | `template` | pack `edges.template` rules (a name inside a Blade/Twig/JSX tag or include) | 1 |
 | `hook` | pack `edges.hook` rules (observer/listener registered in a provider) | 1 |
-| `bridge` | symbol-table match across roots per a config `bridge` | 2 inter-language |
+| `inherit` | pack `edges.inherit` rules (a class naming the class it derives from) | 1 |
+| `bridge` | symbol-table match between a produced and a consumed key, per a config `bridge` or a pack `joins` kind | 2 symbol join |
 
 Every edge carries `evidence` (file and line) so `empo query` can cite where a coupling was found,
 and so a human can go read it. A finding with no `file:line` is not allowed anywhere in EmPo; this
 is where the citations start.
+
+**A `bridge` edge is no longer necessarily cross-language, and the level column says "symbol join"
+rather than "inter-language" because of it.** What a bridge edge has always been is a symbol matched
+between a produced and a consumed key; that the two keys sat in two roots speaking two languages was
+a property of the only thing that could declare one, which was a config `bridges` entry. A pack can
+now declare `joins` ([04-language-packs](04-language-packs.md)), a list of symbol kinds whose two
+halves it writes itself, and `packJoins` in `engine/graph.ts` turns each declared kind into one
+bridge per root that speaks that language, with the same root on both sides. The php pack declares
+it for `scheduled-command`: a Laravel scheduler entry consumes the command name that the command
+class produces from its signature, both halves are php, and both sit in one root. Nothing in the
+matcher changed to allow it — `engine/bridger.ts` collects each side by asking whether a node's root
+is one of the paths that side lists, never whether the two sides differ, and it already refuses an
+edge from a node to itself — so what moved is what the word is allowed to mean, and the wording
+followed it rather than the other way round.
+
+The wording is worth stating exactly, because these strings are read by an agent that quotes them.
+`empo query` prints the section as **`symbol joins`** where it used to say "cross-language reach",
+and its three empty answers now speak of "join edges" (a graph with none at all, the one that is not
+in this blast radius, and n of which none is). `empo review` prints each row of a changed file's
+radius as **`join <symbol>`**, with the symbol as the label rather than the word "cross-language",
+since a scheduled command is joined to the entry that schedules it and the two ends are a language
+apart only sometimes. `empo index` and `empo doctor` share one renderer (`bridgeLines` in
+`engine/bridger.ts`) and print **`join <kind>  m/n consumed keys matched against p produced`**, one
+word that has to be true of a config bridge and of a pack join alike. A heading claiming a language
+boundary above rows that do not cross one is a false fact printed over true ones, which is the whole
+reason any of these lines moved.
 
 A `template` edge runs from the file that wrote the reference to the node that reference names, and
 both shipped packs fill it. The reference is usually a tag and it is not always one: the php pack
@@ -254,6 +284,54 @@ quoted string in a file that can hold a tag anyway, and every edge to a duplicat
 dropped in silence, carry their numbers in [04-language-packs](04-language-packs.md) section 4, and
 the second is why nobody should assume this family yields much on a repository it has not been run
 against.
+
+An `inherit` edge runs from the file declaring a class to the class it derives from, and it exists
+because that is the one coupling a language with namespaces loses in silence. The php pack fills the
+family from two rules over a `class` declaration, `final`, `abstract` and `readonly` in front of it
+allowed: `class Foo extends Bare`, whose captured name is bare and resolves by `short-name`, and
+`class Foo extends \Fully\Qualified\Base`, whose capture is the qualified name without its leading
+separator and resolves by `fqcn`, the same strategy a `use` statement resolves through. The first of
+those is the reason the family was written. A php class extending a sibling in its own namespace
+writes no `use` statement, because the language resolves a bare name against the current namespace,
+so the `import` rules see nothing at all where the strongest coupling in the file is written: half of
+what the subclass does is written in the parent, and the graph said the two files had never heard of
+each other. Measured on a real Laravel repository, one abstract job had nineteen subclasses and a
+fan-in of **3**: two subclasses that lived a namespace deeper and therefore had to import it, and one
+class that imports it without extending it. Afterwards the fan-in is **20** — the nineteen subclasses
+plus that one importer — so seventeen of the twenty referring files were invisible.
+
+**It is its own family rather than a second `fqcn` rule, and the distinction is the capture and not
+the taxonomy.** `fqcn` reads a name that already says where it lives, and the strategy of the same
+name turns it into a node id with no index and no ambiguity to resolve. `extends Bare` says nothing
+about where the parent lives; it is a bare name that has to be looked up in the index of short names
+like a Blade tag, so the two rules of this family do not even share a resolve strategy with each
+other. Keeping them apart in the graph is what lets the `kind` column go on doing its job, which is
+to tell a reader what sort of reference was found: every other family names something the file calls
+or renders, and this one names where the rest of the file's behaviour is written, which is a
+different answer to "how would this break me".
+
+**The `short-name` blind spot applies here in full, and on class names it bites differently than on
+component tags.** A bare parent name carried by two nodes resolves to neither *under these rules* —
+no edge is emitted in either direction, and the reference is counted `ambiguous` in this family's
+`names` record like any other refused short name. The qualification is worth making because the
+strategy itself is not unconditional: `resolveName` narrows by a rule's `targetKinds` **before** it
+asks whether the name is unique (`engine/resolver.ts`), so a rule that declares them can still
+resolve a name two nodes carry. These two declare none, so for them uniqueness is the whole test (the section on name resolution below). A parent in no node at all is
+and a parent in no node at all is
+`unknown`, which on php is the ordinary and correct case rather than a loss: a class written
+`extends Model` or `extends Command` names an Eloquent or Laravel base class that lives in
+`vendor/` and is no part of this repository's graph, so a refusal is the right answer and not a gap
+to be closed. On the same Laravel repository the family read 3379 names and resolved **2564**, with
+**139** ambiguous and **676** in no node.
+
+**This raises the fan-in of php repositories that were already indexed, and that is not a neutral
+addition.** Inheritance is dense in a framework codebase — every job, every command, every controller
+and every model declares a parent — so the family lands on pairs the other five never touched. The
+same repository went from **17725** edges to **20292**, and the edges in that difference are ones the
+graph should always have carried. Every
+number a reader may have written down about a php repository, a fan-in, a god list, a blast radius,
+a coverage denominator, changes at the next `empo index`, and it changes because the graph was
+missing edges rather than because it is now inventing them.
 
 There is exactly one edge per `(from, to, kind)`, and the earliest evidence wins. A second reference
 between the same pair through the same kind is the same coupling, so it is dropped rather than
@@ -748,6 +826,100 @@ shape of a Blade component library, so a warning on it would fire forever on a d
 be turned off. The number is the whole of the answer; whether it is the right number is the reader's
 judgement.
 
+## Dispatches inside a loop
+
+```jsonc
+{
+  "file": "apps/api/app/Console/Commands/BackfillReceipts.php",  // the dispatch site, repo-relative
+  "line": 41,                                     // the dispatch
+  "job": "SendReceiptJob",                        // the job as written at the dispatch site
+  "target": "Acme\\Jobs\\SendReceiptJob",         // resolved node id, or null
+  "loopLine": 38                                  // the line that opened the enclosing loop
+}
+```
+
+`fanout` is every dispatch written inside a loop, and it was appended as the last key in the file —
+the place `permanentFailures` was appended after it, for the same reason: appending is what keeps
+every key above at the offset the previous schema left it at. It comes out of the
+same extraction the hazards do, from the `loops` markers a pack declares beside `transactions` and
+`dispatches` in its optional `hazards` block ([04-language-packs](04-language-packs.md) section 7),
+and a pack that declares none contributes nothing here. `resolveFanout` in `engine/build.ts`
+resolves `job` through the same node index the edges resolve through, so `target` is a node id or
+null on exactly the rules `Hazard.target` follows: a name that normalizes to nothing, a name no node
+carries, and a short name two nodes share all give null, and null is kept rather than dropped
+because what makes the coordinate worth printing is the enclosure and not the name.
+
+**It is deliberately not part of `hazards`, and the separation is the whole of the design.** A
+dispatch inside a loop is not a defect. It is how a batch is written, and it is wrong only when the
+loop is unbounded, which depends on how many rows the query above it returns and is therefore not in
+the source at all. A reader who found these rows among the hazards would go hunting for the defect
+that put them there, find none, and learn to distrust the list that does carry defects. So it is a
+list of its own, and `empo review` prints it under its own heading with a sentence under every
+non-empty list saying that it accuses nobody: a coordinate with no sentence under it reads as an
+accusation.
+
+**Nothing here counts how often the loop runs, and nothing ever will.** That count is a property of
+the data and EmPo reads source, so a field for it could only ever hold a guess, and a guess printed
+beside a `file:line` is a fabrication a reviewer would act on. What the record carries is the line,
+which is what puts the question in front of whoever is reading a diff that widened the query above
+the loop — and the reviewing model, unlike the engine, can go and read that query.
+
+**Nothing is subtracted from this list.** The hazards drop a dispatch its own statement defers and a
+dispatch whose job declares that every dispatch of it waits; neither applies here. A deferral says a
+dispatch waits for a commit, which answers a question this axis never asked, and dropping the
+deferred ones would hide the fan-out of a job that is careful about transactions and unbounded about
+volume.
+
+**It rides on `hazardsScanned` rather than carrying a scanned list of its own.** Both blocks live
+under one pack key, so declaring `hazards` at all is the act of looking and a pack that declared it
+was asked about both axes; a second list keyed by the same packs would be one fact written twice,
+and two copies of one fact drift. The reading is the same as for the hazards: an empty `fanout`
+under a `hazardsScanned` naming this language means the rules looked and found none, and an empty
+one under an empty `hazardsScanned` means nobody looked.
+
+**A missing key is a third state, and `readGraph` preserves it.** It leaves `fanout` exactly as
+parsed, missing key included, which is the rule `hazards` follows and for the same reason: a graph
+written before the axis existed has no key, and a reader defaulting that to the empty list would
+print "no changed file dispatches from inside a loop" about files nothing ever examined. `empo
+review` prints the absence as the unknown it is and names `empo index` as the repair.
+
+**`schema` goes from 8 to 9 with it**, which is 3's and 5's case rather than 4's. A field that
+arrives announces itself by its absence only where absence and emptiness mean the same thing, and
+here they do not: no key means no run ever looked for a dispatch inside a loop, and an empty list
+means the rules looked and found none. The missing key does carry that difference, and the readers
+in this repository are written to preserve it — but only for a reader that remembers to ask, and the
+bump is what tells every other one. It is also what puts the graph in front of `empo doctor` as
+drift, so a repository that upgraded the binary and not the graph is told, rather than being served
+"no changed file dispatches from inside a loop" about files nothing ever examined.
+
+The one bump that would have been wrong is the one for tidiness. The number is not a changelog: it
+exists for a graph that parses, looks well formed, and answers with arithmetic the reader cannot
+tell has moved under it — a key that keeps its name and counts something else (4), a set of ids that
+starts meaning exports where it meant files (7). A field whose absence is itself an answer belongs
+in the same class only because that absence has to survive the reader's default, which is exactly
+what this one is.
+
+**A fourth axis, `permanentFailures`, arrives on the same terms and takes `schema` from 9 to 10.**
+One record per call that writes a failure off as final, inside a catch of an error the pack's
+`transient` rules say is temporary, carrying the file, the call, its line and the line of the catch.
+It is not a hazard and is kept out of `hazards` for the reason `fanout` is: on its own it is not
+wrong, and a reader who found it in the hazards list would go looking for a defect that may not be
+there.
+
+What makes it worth its own key is where it is read from. Every other axis is printed about a file
+the diff touched; this one is reached through a fan-out site's dispatch target, so `empo review` can
+say what the job a widened loop feeds does with a failure — a fact about a file the diff never
+touched and the author had no reason to open. It carries the file rather than a node id for exactly
+that: the lookup goes from a resolved target to the files it and its parents live in, and files are
+what both ends of that lookup have in common. It rides on `hazardsScanned` rather than carrying a
+second scanned list, since `transient` and `permanentFailures` live under the same pack key as the
+other four.
+
+Fan-out sites are deduplicated across roots exactly as the hazards are, since two overlapping roots
+re-scan one file and one dispatch site read twice is not two of them, and they are sorted by
+`(file, line, job, target)` through the same comparison, so this list is byte-stable like the rest of
+the file.
+
 ## What the graph deliberately does not contain
 
 Documented so nobody mistakes absence for safety:
@@ -775,8 +947,8 @@ graph says, grep and confirm.
 
 `empo index` is deterministic: same source plus same pack versions produce a byte-identical
 `graph.json` (nodes sorted by id, edges sorted by `(from, to, kind, evidence.line)` with the
-evidence file breaking the last tie, since an edge has no id to sort on, hazards sorted by
-`(file, line, job, target)` for the same reason, `names` sorted by family with each
+evidence file breaking the last tie, since an edge has no id to sort on, hazards and `fanout` sorted
+by `(file, line, job, target)` for the same reason, `names` sorted by family with each
 `ambiguousNames` sorted by cost and tie-broken on the name, and no timestamps except
 `builtAgainst` which is a content-derived git sha). This makes the file diffable and makes "did the
 graph actually change" answerable. For very large repos the file can be sharded

@@ -406,7 +406,7 @@ describe("the brief", () => {
     expect(printed).toContain(`${ORDER_TEST_FILE}  asserts a value`);
   });
 
-  test("names both ends of a cross-language join, the way empo query does", () => {
+  test("names both ends of a symbol join, the way empo query does", () => {
     // This line was changed in the same commit that fixed `empo query`'s, for the same reason, and
     // was asserted by nothing: reverting it to the near end alone left the whole suite green. It is
     // executed by the brief above, since the changed calculator's radius holds both bridges, which
@@ -414,9 +414,7 @@ describe("the brief", () => {
     changeCalculator();
 
     const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
-    const row = printed
-      .split("\n")
-      .find((line) => line.trimStart().startsWith("cross-language http-route"));
+    const row = printed.split("\n").find((line) => line.trimStart().startsWith("join http-route"));
 
     expect(row).toBeDefined();
     // Both ends and the separator word, the same three things the query pin holds.
@@ -2263,6 +2261,8 @@ describe("a changed file that holds several exports", () => {
       hazards: [],
       hazardsScanned: [],
       names: [],
+      fanout: [],
+      permanentFailures: [],
     };
   }
 
@@ -2329,5 +2329,531 @@ describe("a changed file that holds several exports", () => {
 
     expect(printed.match(/src\/setup\.test\.ts/g)?.length).toBe(1);
     expect(printed).toContain(`${SETUP_TEST}  asserts a value`);
+  });
+});
+
+/**
+ * The scheduler as an entrypoint, in the brief. Two facts and neither is a finding: this changed
+ * file is reached from a scheduled entry, and it dispatches from inside a loop. Both are printed for
+ * the reviewing model to ask the cardinality question about; neither reaches the author except
+ * through the gate every other finding goes through.
+ *
+ * The command is committed and indexed first and only then edited, because "a changed file that is
+ * reachable from the scheduler" is the case under test and a file that is new in the diff is not
+ * yet in anybody's graph.
+ */
+describe("a changed file the scheduler reaches", () => {
+  const COMMAND_FILE = "apps/api/app/Console/Commands/ReconcileCommand.php";
+
+  function commandSource(body: string): string {
+    return [
+      "<?php",
+      "",
+      "namespace Acme\\Console\\Commands;",
+      "",
+      "class ReconcileCommand",
+      "{",
+      "    protected $signature = 'acme:reconcile {--force}';",
+      "",
+      "    public function handle(): void",
+      "    {",
+      body,
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+  }
+
+  function scheduleTheCommand(): void {
+    mkdirSync(join(repo, "apps/api/app/Console/Commands"), { recursive: true });
+    writeFileSync(
+      join(repo, "apps/api/app/Console/Kernel.php"),
+      [
+        "<?php",
+        "",
+        "namespace Acme\\Console;",
+        "",
+        "class Kernel",
+        "{",
+        "    protected function schedule($schedule): void",
+        "    {",
+        "        $schedule->command('acme:reconcile --force')->dailyAt('03:20');",
+        "    }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(join(repo, COMMAND_FILE), commandSource("        $this->reconcile();"));
+    git(repo, ["add", "-A", "-f"]);
+    commit(repo, "schedule the reconcile command");
+    capture(() => indexCommand(repo));
+  }
+
+  test("the brief names the scheduler entry that reaches it, and cites the scheduled line", () => {
+    scheduleTheCommand();
+    writeFileSync(join(repo, COMMAND_FILE), commandSource("        $this->reconcileEverything();"));
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+    const row = printed
+      .split("\n")
+      .find((line) => line.trimStart().startsWith("join scheduled-command"));
+
+    // The near end is the Kernel and the far end is the command, and the citation is the scheduler
+    // line itself: that is where the cadence is written, which the graph does not carry, so the row
+    // sends the reader to the one line that states it.
+    expect(row).toBeDefined();
+    expect(row ?? "").toContain(
+      "Acme\\Console\\Kernel consumes Acme\\Console\\Commands\\ReconcileCommand",
+    );
+    expect(row ?? "").toMatch(/named at apps\/api\/app\/Console\/Kernel\.php:9$/);
+  });
+
+  /** The loop written into the working tree, and the graph rebuilt over it. */
+  function dispatchInALoop(): void {
+    writeFileSync(
+      join(repo, COMMAND_FILE),
+      commandSource(
+        [
+          "        foreach ($members as $member) {",
+          "            SyncMember::dispatch($member);",
+          "        }",
+        ].join("\n"),
+      ),
+    );
+    // Reindexed, because every fact in the brief is a fact about the indexed graph and this one is
+    // no exception: a loop that exists only in an uncommitted edit no run has read is a loop the
+    // graph does not hold, and the brief prints the staleness of its own source under every section.
+    capture(() => indexCommand(repo));
+  }
+
+  test("a dispatch inside a loop in the changed file is stated, and stated as a question", () => {
+    scheduleTheCommand();
+    dispatchInALoop();
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    expect(printed).toContain("dispatches inside a loop");
+    expect(printed).toContain(`${COMMAND_FILE}:12  dispatches SyncMember  loop opened at line 11`);
+    // The sentence under the coordinate, because the coordinate alone reads as an accusation and
+    // this axis accuses nobody: it is the cardinality question, put where the diff is being read.
+    expect(printed).toContain("How often the loop runs is a property of the data");
+  });
+
+  test("neither fact is worded as a finding, and neither reaches the author on its own", () => {
+    scheduleTheCommand();
+    dispatchInALoop();
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    // The brief is facts and the findings file is where a claim about the pull request goes. Phase 1
+    // writes no finding at all, so a fan-out line can only reach the author by an agent making the
+    // claim itself and putting it through the gate, like every other finding.
+    expect(existsSync(findingsPathOf(repo))).toBe(false);
+    for (const word of ["unbounded", "too many", "risk", "must fix"]) {
+      expect(printed.toLowerCase()).not.toContain(`loop  ${word}`);
+    }
+  });
+
+  test("the consumer row calls a join a join, the word the rest of the block uses", () => {
+    scheduleTheCommand();
+    writeFileSync(join(repo, COMMAND_FILE), commandSource("        $this->reconcileEverything();"));
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+    const row = printed
+      .split("\n")
+      .find((line) => line.trimStart().startsWith("consumer Acme\\Console\\Kernel"));
+
+    // `bridge` is the edge kind on disk and stays one. It is not a word the reader is shown, because
+    // the two lines under this one say `join` about the same edge.
+    expect(row ?? "").toContain("class join");
+    expect(row ?? "").not.toContain("bridge");
+  });
+
+  /**
+   * The hub case. A Kernel schedules every command in the repository, so every one of its joins is
+   * in the radius of any single command, and a print cap applied in graph order buries the only row
+   * that names the file under review.
+   */
+  test("the join that names the changed file is printed, not buried under the hub's siblings", () => {
+    const siblings = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot"];
+    mkdirSync(join(repo, "apps/api/app/Console/Commands"), { recursive: true });
+    for (const name of siblings) {
+      writeFileSync(
+        join(repo, `apps/api/app/Console/Commands/${name}Command.php`),
+        [
+          "<?php",
+          "",
+          "namespace Acme\\Console\\Commands;",
+          "",
+          `class ${name}Command`,
+          "{",
+          `    protected $signature = 'acme:${name.toLowerCase()}';`,
+          "}",
+          "",
+        ].join("\n"),
+      );
+    }
+    writeFileSync(
+      join(repo, "apps/api/app/Console/Kernel.php"),
+      [
+        "<?php",
+        "",
+        "namespace Acme\\Console;",
+        "",
+        "class Kernel",
+        "{",
+        "    protected function schedule($schedule): void",
+        "    {",
+        ...siblings.map((name) => `        $schedule->command('acme:${name.toLowerCase()}');`),
+        "        $schedule->command('acme:reconcile --force')->dailyAt('03:20');",
+        "    }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(join(repo, COMMAND_FILE), commandSource("        $this->reconcile();"));
+    git(repo, ["add", "-A", "-f"]);
+    commit(repo, "schedule seven commands from one kernel");
+    capture(() => indexCommand(repo));
+    writeFileSync(join(repo, COMMAND_FILE), commandSource("        $this->reconcileEverything();"));
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+    const joins = printed
+      .split("\n")
+      .filter((line) => line.trimStart().startsWith("join scheduled-command"));
+
+    // First row, not merely present: the cap is five and there are seven joins, so a row that sorts
+    // on anything but "names the file under review" is a row the reader never sees.
+    expect(joins[0] ?? "").toContain("consumes Acme\\Console\\Commands\\ReconcileCommand");
+    // And the siblings are demoted, never dropped. They are the Kernel's own joins and the Kernel is
+    // in this diff's radius; hiding them would be a different lie from burying the useful one.
+    expect(printed).toContain("more symbol joins");
+  });
+
+  /**
+   * The hop the axis used to stop one short of. What a dispatch does with a failure is written in
+   * the handler, and what else feeds that handler is written in another scheduler entry, so a row
+   * naming only the call site asks the cardinality question with half the answer out of frame.
+   */
+  test("the dispatched job is named as a coordinate, with the other scheduled entries that reach it", () => {
+    mkdirSync(join(repo, "apps/api/app/Jobs"), { recursive: true });
+    mkdirSync(join(repo, "apps/api/app/Console/Commands"), { recursive: true });
+    writeFileSync(
+      join(repo, "apps/api/app/Jobs/SyncMember.php"),
+      ["<?php", "", "namespace Acme\\Jobs;", "", "class SyncMember", "{", "}", ""].join("\n"),
+    );
+    writeFileSync(
+      join(repo, "apps/api/app/Console/Commands/RetryCommand.php"),
+      [
+        "<?php",
+        "",
+        "namespace Acme\\Console\\Commands;",
+        "",
+        "use Acme\\Jobs\\SyncMember;",
+        "",
+        "class RetryCommand",
+        "{",
+        "    protected $signature = 'acme:retry';",
+        "",
+        "    public function handle(): void",
+        "    {",
+        "        SyncMember::dispatch($this->error);",
+        "    }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(repo, "apps/api/app/Console/Kernel.php"),
+      [
+        "<?php",
+        "",
+        "namespace Acme\\Console;",
+        "",
+        "class Kernel",
+        "{",
+        "    protected function schedule($schedule): void",
+        "    {",
+        "        $schedule->command('acme:reconcile --force')->dailyAt('03:20');",
+        "        $schedule->command('acme:retry')->everyFiveMinutes();",
+        "    }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const dispatching = [
+      "<?php",
+      "",
+      "namespace Acme\\Console\\Commands;",
+      "",
+      "use Acme\\Jobs\\SyncMember;",
+      "",
+      "class ReconcileCommand",
+      "{",
+      "    protected $signature = 'acme:reconcile {--force}';",
+      "",
+      "    public function handle(): void",
+      "    {",
+      "        foreach ($members as $member) {",
+      "            SyncMember::dispatch($member);",
+      "        }",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    writeFileSync(join(repo, COMMAND_FILE), dispatching.replace("$members", "$endingToday"));
+    git(repo, ["add", "-A", "-f"]);
+    commit(repo, "dispatch the job from a nightly loop and a five-minute retry");
+    capture(() => indexCommand(repo));
+    writeFileSync(join(repo, COMMAND_FILE), dispatching);
+    capture(() => indexCommand(repo));
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    // The job as a node and a file, so the reader can go and read what it does with a failure.
+    expect(printed).toContain("target Acme\\Jobs\\SyncMember  apps/api/app/Jobs/SyncMember.php");
+    // The other entry that feeds the same queue, cited on ITS scheduled line, which is where its
+    // cadence is written. This is the row that turns a volume change into a loop.
+    expect(printed).toContain(
+      "reached from Acme\\Console\\Commands\\RetryCommand  scheduled at apps/api/app/Console/Kernel.php:10",
+    );
+    // And the changed file's own cadence, which is the half a reader cannot get anywhere else: the
+    // loop they just widened runs nightly. Excluding the dispatch site would have dropped exactly
+    // the row the shape this axis was written for produces.
+    expect(printed).toContain(
+      "reached from Acme\\Console\\Commands\\ReconcileCommand  scheduled at apps/api/app/Console/Kernel.php:9",
+    );
+    // Still not a finding, and still nothing about volume.
+    expect(printed).toContain("says nothing about volume");
+  });
+
+  /**
+   * The far side of the fan-out, and the only fact in the brief about a file the diff never
+   * touched. The handler is reached through the dispatch target, and its error handling lives one
+   * inheritance hop further, which is where a queued job routinely keeps it.
+   */
+  test("names what the dispatched job does with a failure it was told would pass", () => {
+    mkdirSync(join(repo, "apps/api/app/Jobs"), { recursive: true });
+    mkdirSync(join(repo, "apps/api/app/Console/Commands"), { recursive: true });
+    writeFileSync(
+      join(repo, "apps/api/app/Jobs/AbstractSync.php"),
+      [
+        "<?php",
+        "",
+        "namespace Acme\\Jobs;",
+        "",
+        "abstract class AbstractSync",
+        "{",
+        "    public function handle(): void",
+        "    {",
+        "        try {",
+        "            $this->run();",
+        "        } catch (RateLimitException $e) {",
+        "            $this->storeForRetry($e);",
+        "            $this->fail($e);",
+        "        }",
+        "    }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    // No `use` statement, deliberately: the parent is a sibling in the same namespace, which is the
+    // shape php resolves against the current namespace and the `import` rules never see. Without
+    // the `inherit` family this edge does not exist and the line under test cannot be reached.
+    writeFileSync(
+      join(repo, "apps/api/app/Jobs/SyncMember.php"),
+      [
+        "<?php",
+        "",
+        "namespace Acme\\Jobs;",
+        "",
+        "class SyncMember extends AbstractSync",
+        "{",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(repo, "apps/api/app/Console/Kernel.php"),
+      [
+        "<?php",
+        "",
+        "namespace Acme\\Console;",
+        "",
+        "class Kernel",
+        "{",
+        "    protected function schedule($schedule): void",
+        "    {",
+        "        $schedule->command('acme:reconcile --force')->dailyAt('03:20');",
+        "    }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const dispatching = [
+      "<?php",
+      "",
+      "namespace Acme\\Console\\Commands;",
+      "",
+      "use Acme\\Jobs\\SyncMember;",
+      "",
+      "class ReconcileCommand",
+      "{",
+      "    protected $signature = 'acme:reconcile {--force}';",
+      "",
+      "    public function handle(): void",
+      "    {",
+      "        foreach ($members as $member) {",
+      "            SyncMember::dispatch($member);",
+      "        }",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    writeFileSync(join(repo, COMMAND_FILE), dispatching.replace("$members", "$endingToday"));
+    git(repo, ["add", "-A", "-f"]);
+    commit(repo, "dispatch a job whose base class fails on a rate limit");
+    capture(() => indexCommand(repo));
+    writeFileSync(join(repo, COMMAND_FILE), dispatching);
+    capture(() => indexCommand(repo));
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    // The line the diff has no reason to lead anybody to: the job the widened loop feeds records a
+    // rate limit as a final failure, and it is written in neither changed file.
+    expect(printed).toContain(
+      "on failure  apps/api/app/Jobs/AbstractSync.php:13  $this->fail()  inside a catch at line 11",
+    );
+    // And it is still a coordinate, not a verdict: whether the fail is wrong depends on what
+    // storeForRetry arranged, which no rule here can see.
+    expect(printed).not.toMatch(/on failure.*(?:bug|wrong|must|should)/);
+  });
+
+  /**
+   * The other side of "one hop": the hop is an inheritance and nothing else. A job imports a dozen
+   * helpers and none of them run as the job, so a failure written in one of them printed under the
+   * job's name is an attribution to work that never executes it.
+   */
+  test("a failure in a file the job merely imports is not attributed to the job", () => {
+    mkdirSync(join(repo, "apps/api/app/Jobs"), { recursive: true });
+    mkdirSync(join(repo, "apps/api/app/Support"), { recursive: true });
+    mkdirSync(join(repo, "apps/api/app/Console/Commands"), { recursive: true });
+    writeFileSync(
+      join(repo, "apps/api/app/Support/Rescue.php"),
+      [
+        "<?php",
+        "",
+        "namespace Acme\\Support;",
+        "",
+        "class Rescue",
+        "{",
+        "    public function attempt(): void",
+        "    {",
+        "        try {",
+        "            $this->run();",
+        "        } catch (RateLimitException $e) {",
+        "            $this->fail($e);",
+        "        }",
+        "    }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    // An import and not an extends: the only difference between this test and the one above, and
+    // the whole of what decides whether the failure belongs to the job.
+    writeFileSync(
+      join(repo, "apps/api/app/Jobs/SyncMember.php"),
+      [
+        "<?php",
+        "",
+        "namespace Acme\\Jobs;",
+        "",
+        "use Acme\\Support\\Rescue;",
+        "",
+        "class SyncMember",
+        "{",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const dispatching = [
+      "<?php",
+      "",
+      "namespace Acme\\Console\\Commands;",
+      "",
+      "use Acme\\Jobs\\SyncMember;",
+      "",
+      "class ReconcileCommand",
+      "{",
+      "    public function handle(): void",
+      "    {",
+      "        foreach ($members as $member) {",
+      "            SyncMember::dispatch($member);",
+      "        }",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    writeFileSync(join(repo, COMMAND_FILE), dispatching.replace("$members", "$endingToday"));
+    git(repo, ["add", "-A", "-f"]);
+    commit(repo, "dispatch a job that imports a helper which fails on a rate limit");
+    capture(() => indexCommand(repo));
+    writeFileSync(join(repo, COMMAND_FILE), dispatching);
+    capture(() => indexCommand(repo));
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    // The dispatch is found, so the row exists to attribute anything to at all.
+    expect(printed).toContain("dispatches SyncMember");
+    expect(printed).not.toContain("apps/api/app/Support/Rescue.php");
+  });
+
+  /**
+   * The absence the header above cannot carry. A schema 9 graph has `fanout`, so the rows print and
+   * the header says nothing; its failure list was never written, and a blank under every row would
+   * read as "this job records no final failure" off a scan that never ran.
+   */
+  test("a graph built before the failure axis says so instead of printing no failures", () => {
+    mkdirSync(join(repo, "apps/api/app/Jobs"), { recursive: true });
+    mkdirSync(join(repo, "apps/api/app/Console/Commands"), { recursive: true });
+    writeFileSync(
+      join(repo, "apps/api/app/Jobs/SyncMember.php"),
+      ["<?php", "", "namespace Acme\\Jobs;", "", "class SyncMember", "{", "}", ""].join("\n"),
+    );
+    const dispatching = [
+      "<?php",
+      "",
+      "namespace Acme\\Console\\Commands;",
+      "",
+      "use Acme\\Jobs\\SyncMember;",
+      "",
+      "class ReconcileCommand",
+      "{",
+      "    public function handle(): void",
+      "    {",
+      "        foreach ($members as $member) {",
+      "            SyncMember::dispatch($member);",
+      "        }",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    writeFileSync(join(repo, COMMAND_FILE), dispatching.replace("$members", "$endingToday"));
+    git(repo, ["add", "-A", "-f"]);
+    commit(repo, "dispatch a job from a loop");
+    capture(() => indexCommand(repo));
+    writeFileSync(join(repo, COMMAND_FILE), dispatching);
+    capture(() => indexCommand(repo));
+
+    // The graph a schema 9 build wrote: the fanout axis present, the failure axis never scanned.
+    const aged = JSON.parse(readFileSync(graphPath(repo), "utf8")) as Record<string, unknown>;
+    aged.schema = GRAPH_SCHEMA - 1;
+    delete aged.permanentFailures;
+    writeFileSync(graphPath(repo), JSON.stringify(aged));
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    expect(printed).toContain("dispatches SyncMember");
+    expect(printed).toContain("on failure: unknown, this graph predates the axis. Run empo index.");
   });
 });

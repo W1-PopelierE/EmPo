@@ -284,9 +284,13 @@ describe("doctor prose", () => {
       "names      hook     2 of 2 resolved",
       "names      template 1 of 1 resolved",
       "",
-      "bridge http-route  2/3 consumed keys matched against 4 produced",
+      "join http-route  2/3 consumed keys matched against 4 produced",
       '       no producer declares "GET v1/loyalty/points"',
-      "bridge inertia-page  1/1 consumed keys matched against 1 produced",
+      "join inertia-page  1/1 consumed keys matched against 1 produced",
+      // The php pack's own join, run and matched nothing, because this fixture schedules nothing.
+      // Printed anyway: a join that ran and found none is a different answer from one nobody ran,
+      // which is the distinction every axis in this report keeps.
+      "join scheduled-command  0/0 consumed keys matched against 0 produced",
       "",
       "OK  config is valid",
     ]);
@@ -303,8 +307,8 @@ describe("doctor prose", () => {
     expect(lines).toContain("graph      not built yet (run empo index)");
     // The configured count still says there are bridges. What is gone is the match rate.
     expect(lines).toContain("bridges    2");
-    expect(lines.some((line) => line.startsWith("bridge http-route"))).toBe(false);
-    expect(lines.some((line) => line.startsWith("bridge inertia-page"))).toBe(false);
+    expect(lines.some((line) => line.startsWith("join http-route"))).toBe(false);
+    expect(lines.some((line) => line.startsWith("join inertia-page"))).toBe(false);
     // The flow count reads the graph, so with no graph it says so. It must never print a zero here:
     // "0 of 0 non-test files claimed by none" is the best possible answer over no data at all.
     expect(lines).toContain("flows      unknown until the graph is built");

@@ -8,6 +8,7 @@ import {
   compileHazards,
   declaresDeferral,
   findEnclosedDispatches,
+  findPermanentFailures,
 } from "../../src/engine/hazards";
 import type { CommentSyntax, Pack, PackHazards } from "../../src/schema/pack.schema";
 
@@ -29,6 +30,9 @@ const hazards: PackHazards = {
       endPattern: "DB::commit\\(\\)",
     },
   ],
+  loops: [],
+  transient: [],
+  permanentFailures: [],
   dispatches: [{ pattern: "dispatch\\(new ([A-Za-z]+)", job: 1 }],
   deferAtSite: ["->afterCommit\\("],
   deferAtDeclaration: ["\\$afterCommit\\s*=\\s*true"],
@@ -55,6 +59,7 @@ function packWith(block?: PackHazards): Pack {
     node: { id: { strategy: "module-path" }, kindRules: [] },
     comments,
     edges: {},
+    joins: [],
     produces: [],
     consumes: [],
     tests: { paths: [], assertionTerms: [], assertionExcludes: [] },
@@ -80,7 +85,15 @@ describe("compileHazards", () => {
 
   test("compiles a declared but empty block, because found none is not nobody looked", () => {
     const empty = compileHazards(
-      packWith({ transactions: [], dispatches: [], deferAtSite: [], deferAtDeclaration: [] }),
+      packWith({
+        transactions: [],
+        loops: [],
+        transient: [],
+        permanentFailures: [],
+        dispatches: [],
+        deferAtSite: [],
+        deferAtDeclaration: [],
+      }),
     );
 
     expect(empty).not.toBeNull();
@@ -94,6 +107,9 @@ describe("compileHazards", () => {
     // is the safe direction: counting nothing would report every dispatch in the file.
     const lame = compiled({
       transactions: [{ pattern: "DB::transaction\\s*\\(", extent: "balanced" }],
+      loops: [],
+      transient: [],
+      permanentFailures: [],
       dispatches: hazards.dispatches,
       deferAtSite: [],
       deferAtDeclaration: [],
@@ -277,6 +293,9 @@ describe("findEnclosedDispatches, a static-method dispatch spelling", () => {
    */
   const statik: PackHazards = {
     transactions: hazards.transactions,
+    loops: [],
+    transient: [],
+    permanentFailures: [],
     dispatches: [{ pattern: "([A-Za-z\\\\]+)::dispatch\\(", job: 1 }],
     deferAtSite: ["->\\s*afterCommit\\(\\s*\\)"],
     deferAtDeclaration: [],
@@ -459,6 +478,9 @@ describe("declaresDeferral", () => {
   test("is false when the pack declares no declaration-side markers", () => {
     const none = compiled({
       transactions: hazards.transactions,
+      loops: [],
+      transient: [],
+      permanentFailures: [],
       dispatches: hazards.dispatches,
       deferAtSite: [],
       deferAtDeclaration: [],
@@ -485,11 +507,15 @@ const symbolHazardPack: Pack = {
   match: { extensions: [".txt"] },
   node: { id: { strategy: "symbol", symbolPattern: "^export ([A-Za-z]+)$" }, kindRules: [] },
   edges: {},
+  joins: [],
   produces: [],
   consumes: [],
   tests: { paths: [], assertionTerms: [], assertionExcludes: [] },
   hazards: {
     transactions: [{ pattern: "^begin$", extent: "span", endPattern: "^commit$" }],
+    loops: [],
+    transient: [],
+    permanentFailures: [],
     dispatches: [{ pattern: "send\\(([A-Za-z]+)\\)", job: 1 }],
     deferAtSite: [],
     deferAtDeclaration: ["^defer$"],
@@ -556,5 +582,95 @@ describe("resolveHazards, a deferral declared by a file that yields many nodes",
     const built = buildCorpus("export worker\nexport sibling\ndefer\n");
 
     expect(built.hazards).toEqual([]);
+  });
+});
+
+/**
+ * The third pairing of the same walk: a call that writes a failure off as final, inside a catch of
+ * an error the pack says passes. The walk is `enclosedBy` and is proven above; what these prove is
+ * that the pairing is wired to the right two blocks, because a site family crossed with the wrong
+ * extent family reports a defect nobody has.
+ */
+describe("a failure recorded as final inside a catch of a transient error", () => {
+  const block: PackHazards = {
+    transactions: [],
+    loops: [],
+    transient: [
+      {
+        pattern: "catch\\s*\\([^)]*RateLimit[^)]*\\)\\s*(?=\\{)",
+        extent: "balanced",
+        open: "{",
+        close: "}",
+      },
+    ],
+    dispatches: [],
+    permanentFailures: [{ pattern: "(\\$[A-Za-z0-9_]+->fail)\\s*\\(", job: 1 }],
+    deferAtSite: [],
+    deferAtDeclaration: [],
+  };
+
+  function find(source: string) {
+    const compiled = compileHazards(packWith(block)) as CompiledHazards;
+    return findPermanentFailures(compiled, source);
+  }
+
+  test("reports the call, its line and the catch that encloses it", () => {
+    const found = find(
+      [
+        "try {",
+        "    $this->send();",
+        "} catch (RateLimitException $e) {",
+        "    $this->store();",
+        "    $this->fail($e);",
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    expect(found).toEqual([{ call: "$this->fail", line: 5, transientLine: 3 }]);
+  });
+
+  test("says nothing about the same call in a catch of an error the pack never named", () => {
+    // The whole claim is the pairing. A job that fails on an error nobody said was temporary is a
+    // job doing what it is supposed to, and reporting it would make the axis noise on every
+    // codebase that handles its errors at all.
+    const found = find(
+      [
+        "try {",
+        "    $this->send();",
+        "} catch (\\Throwable $e) {",
+        "    $this->fail($e);",
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    expect(found).toEqual([]);
+  });
+
+  test("says nothing about the call outside every catch", () => {
+    const found = find(
+      [
+        "try {",
+        "    $this->send();",
+        "} catch (RateLimitException $e) {",
+        "    $this->store();",
+        "}",
+        "$this->fail($e);",
+        "",
+      ].join("\n"),
+    );
+
+    // The catch closes on line 5 and the call is on 6. A rule whose extent ran to the end of the
+    // file would report it, which is the failure the loops axis shipped and had to repair.
+    expect(found).toEqual([]);
+  });
+
+  test("finds nothing at all for a pack that declares neither block", () => {
+    const compiled = compileHazards(packWith(hazards)) as CompiledHazards;
+
+    expect(
+      findPermanentFailures(compiled, "} catch (RateLimitException $e) {\n$this->fail($e);\n}\n"),
+    ).toEqual([]);
   });
 });

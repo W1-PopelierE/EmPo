@@ -17,13 +17,14 @@ import {
   installedPackVersion,
   type PackDrift,
   type PackVersionReader,
+  packJoins,
   readGraph,
   type SchemaDrift,
   staleness,
   type UnloadablePack,
 } from "./graph";
 import { compareStrings } from "./order";
-import { packAvailable } from "./pack-loader";
+import { loadPack, packAvailable } from "./pack-loader";
 import { loadSpines, type SpineReport, verifySpines } from "./spines";
 
 /**
@@ -564,7 +565,17 @@ export function healthReport(
     bridgeCount: config.bridges.length,
     // Computed from the graph on disk, so this describes the graph as built, at the age the graph
     // section states. It reads nodes only, so no rebuild is needed (engine/bridger.ts).
-    bridges: graph.graph === null ? [] : bridgeRoots(graph.graph.nodes, config.bridges).reports,
+    // The pack's own joins are reported beside the configured bridges, because `empo index` prints
+    // the same lines off the same matcher and the two commands drifting is the failure this module
+    // is written to prevent. A pack that will not load contributes none rather than throwing: a
+    // broken installation is already a finding of its own two blocks up.
+    bridges:
+      graph.graph === null
+        ? []
+        : bridgeRoots(graph.graph.nodes, [
+            ...config.bridges,
+            ...packJoins(graph.graph.roots, joinsOf),
+          ]).reports,
     hooks: hooks.health,
     adapters: adapters.health,
     graph: graph.health,
@@ -575,6 +586,21 @@ export function healthReport(
     findings,
     ok: !findings.some((finding) => finding.level === "error"),
   };
+}
+
+/**
+ * The symbol kinds a language's pack joins inside a root, or none when the pack will not load. Read
+ * off the pack on disk rather than off the graph, which is correct for the reason `kindAxes` reads
+ * `resolvedBy` that way: the join is recomputed here from nodes the graph already holds, so a pack
+ * that gained a join since the build gives the corrected answer with no reindex.
+ */
+function joinsOf(lang: string): string[] {
+  if (!packAvailable(lang)) return [];
+  try {
+    return loadPack(lang).joins;
+  } catch {
+    return [];
+  }
 }
 
 /** Directories that are never expected to be under a root, so they are not worth reporting. */

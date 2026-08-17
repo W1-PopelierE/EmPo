@@ -425,7 +425,45 @@ const hazardDispatchRuleSchema = z
  */
 const hazardsSchema = z.object({
   transactions: z.array(hazardTransactionRuleSchema).default([]),
+  /**
+   * What repeats. Same two extent forms as `transactions` and walked by the same code, because
+   * "what does this construct enclose" is one question whatever opened it.
+   *
+   * It answers a different one, though, and the two are kept apart everywhere downstream. A
+   * dispatch inside a transaction is a hazard: the queue does not roll back and a worker can beat
+   * the commit. A dispatch inside a loop is not wrong at all — it is how a batch is written — and
+   * the graph says nothing about how many times the loop runs, because how many rows a query
+   * returns is not in the source. What it is, is the one place where a change to a query upstream
+   * turns into traffic downstream, and EmPo prints it as a fact so the cardinality question gets
+   * asked out loud while somebody is reading the diff that widened it.
+   */
+  loops: z.array(hazardTransactionRuleSchema).default([]),
+  /**
+   * What handles a failure the caller should expect to pass: a `catch` of an exception whose type
+   * says the condition is temporary. The third extent family, walked by the same code as the other
+   * two, and the only one whose openers name a *kind* of error rather than a construct.
+   *
+   * That is a heuristic and it is written down as one. A pack lists the type names its ecosystem
+   * uses for a retryable condition — rate limits, throttling, timeouts, "too many requests" — and a
+   * codebase that spells its own transient error something else gets nothing here. The rule is
+   * declarative so a repository can read the list in the pack and see exactly what was looked for,
+   * which is the answer a silent axis cannot give.
+   */
+  transient: z.array(hazardTransactionRuleSchema).default([]),
   dispatches: z.array(hazardDispatchRuleSchema).default([]),
+  /**
+   * What records a failure as final: `fail()` on a queued job and whatever else an ecosystem spells
+   * "this work will not be attempted again". A site family and not an extent, matched inside
+   * `transient` exactly as a dispatch is matched inside a transaction.
+   *
+   * On its own it says nothing. Inside a catch of a transient error it says the two halves disagree:
+   * the caller was told the condition passes, and the handler wrote down that it does not. Whether
+   * that is a defect depends on what else the handler does — a job that has already arranged its own
+   * retry and *also* fails is filling a dead-letter store it will never read — and EmPo cannot see
+   * the arrangement, so it prints the coordinate and leaves the conclusion to the reviewer, the same
+   * bargain the loop axis makes about cardinality.
+   */
+  permanentFailures: z.array(hazardDispatchRuleSchema).default([]),
   /** Matched at the dispatch site: this one dispatch waits for the commit. */
   deferAtSite: z.array(regex).default([]),
   /** Matched in the dispatched job's own file: every dispatch of that job waits. */
@@ -697,10 +735,41 @@ export const packSchema = z
         string: z.array(extractRuleSchema).optional(),
         template: z.array(extractRuleSchema).optional(),
         hook: z.array(extractRuleSchema).optional(),
+        /**
+         * A class naming the class it derives from. Its own family because the column that prints
+         * it exists to tell reference kinds apart, and an inheritance is the one reference a reader
+         * cannot route around: every other family names something the file calls, and this one
+         * names where half the file's behaviour is actually written.
+         *
+         * It is also the family a language with namespaces loses silently. A php class extending a
+         * sibling in its own namespace writes no `use` statement, because the language resolves the
+         * bare name against the current namespace, so the `import` rules never see it. On a real
+         * Laravel repository one abstract job had nineteen subclasses and a graph fan-in of three:
+         * the three that lived a namespace deeper and therefore had to import it.
+         */
+        inherit: z.array(extractRuleSchema).optional(),
       })
       .default({}),
     produces: z.array(symbolRuleSchema).default([]),
     consumes: z.array(symbolRuleSchema).default([]),
+    /**
+     * Symbol kinds whose two halves are written in one language and joined inside one root, so the
+     * engine joins them without a `bridge` in config (engine/graph.ts).
+     *
+     * A bridge is a claim only a human can make: that two roots somebody chose to keep apart really
+     * do exchange a symbol, under a normalization only they know. That is why `empo init` writes
+     * none. A Laravel scheduler entry and the command class it names are not that claim. They are
+     * one framework's two spellings of one call, both in this pack's own language, and a repository
+     * of a single language never gets a bridges block at all — so left to config, the edge would
+     * exist only where somebody already knew to ask for it, which is exactly where it teaches
+     * nothing.
+     *
+     * Opt-in per kind and never "every symbol this pack writes both halves of", because the php
+     * pack both produces `http-route` and consumes it from its own feature tests. Joining that one
+     * inside a root would give every route a fan-in edge from its test and quietly move numbers no
+     * one asked to have moved.
+     */
+    joins: z.array(z.string().min(1)).default([]),
     /**
      * Optional, like `hazards` and for the same reason: a pack declaring none says nothing encloses
      * a symbol in this language, which is what every pack said before the block existed.
@@ -888,6 +957,25 @@ export const packSchema = z
             (declared.size === 0 ? " (the pack declares no scopes at all)" : ""),
         });
       }
+    }
+
+    // A join whose symbol only one side of this pack writes matches nothing, forever, and it does it
+    // silently: the join runs, finds no counterpart, and the graph looks exactly like a repository
+    // where nothing is scheduled. A kind named here is a claim that both halves exist in this pack,
+    // so it is checked where the person who wrote the name can still see it.
+    for (const [position, kind] of pack.joins.entries()) {
+      const sides = (["produces", "consumes"] as const).filter((family) =>
+        pack[family].some((rule) => rule.symbol === kind),
+      );
+      if (sides.length === 2) continue;
+      ctx.addIssue({
+        code: "custom",
+        path: ["joins", position],
+        message:
+          sides.length === 0
+            ? `joins "${kind}", which no produces or consumes rule in this pack writes`
+            : `joins "${kind}", which this pack only ${sides[0]}: a join needs both halves`,
+      });
     }
 
     // A kind rule asks the same question of the same masker, so it gets the same answer.

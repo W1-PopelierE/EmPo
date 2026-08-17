@@ -247,8 +247,10 @@ describe("indexCommand", () => {
     // node by an exported symbol rather than by a file, so `nodes[].id`, `edges`, `fanin` and
     // `flows` all keep their names and answer per export. 8 is 3's and 5's case: `nodes[].extents`
     // is added, and its absence means the lines were never recorded where its emptiness would mean
-    // the export spans none, which is a diff narrowed to nothing.
-    expect(graph.schema).toBe(8);
+    // the export spans none, which is a diff narrowed to nothing. 9 is that case a third time:
+    // `fanout` is added, and a graph without the key was built by a run that never looked for a
+    // dispatch inside a loop, where the empty list says the rules looked and found none.
+    expect(graph.schema).toBe(10);
     expect(graph.roots).toEqual([
       { path: "apps/api", lang: "php" },
       { path: "apps/mobile", lang: "typescript" },
@@ -355,6 +357,20 @@ describe("indexCommand", () => {
     // calling it blind would hide a louder problem inside a quieter word.
     expect(coverage.admin?.reaches).toBe(false);
     expect(coverage.admin?.blind).toBe(false);
+  });
+
+  test("the header counts the joined edges under the word the rest of EmPo uses for them", () => {
+    // "bridged" was the word when a config bridge was the only thing that made one. A pack now
+    // joins its own symbols within a root, so the count covers both and the label says the noun
+    // both halves share (docs/06-cli.md).
+    const lines = printedLines(() => {
+      indexCommand(repo);
+    });
+    const { stats } = graphOnDisk();
+
+    expect(lines.join("\n")).toContain(`${stats.edges} edges, ${stats.bridgedEdges} joined`);
+    // A literal denominator would pass over a fixture that joins nothing at all.
+    expect(stats.bridgedEdges).toBeGreaterThan(0);
   });
 
   test("the header states how many flows a test reaches, beside how many are blind", () => {

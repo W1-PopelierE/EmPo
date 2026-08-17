@@ -87,6 +87,8 @@ function graphBuiltAgainst(sha: string): Graph {
     // partial type nothing ever produces.
     hazardsScanned: [],
     names: [],
+    fanout: [],
+    permanentFailures: [],
   };
 }
 
@@ -583,7 +585,13 @@ describe("hazards on the built graph", () => {
     // is what keeps every key above it at the offset the previous schema left it at.
     expect(keys[0]).toBe("schema");
     expect(keys.indexOf("hazards")).toBeGreaterThan(keys.indexOf("coverage"));
-    expect(keys.slice(-3)).toEqual(["hazards", "hazardsScanned", "names"]);
+    expect(keys.slice(-5)).toEqual([
+      "hazards",
+      "hazardsScanned",
+      "names",
+      "fanout",
+      "permanentFailures",
+    ]);
   });
 
   test("a repository whose pack looked and found nothing says so, in the graph", () => {
@@ -677,5 +685,169 @@ describe("readGraph over a graph written before the hazard axis", () => {
     expect(driftLines([], graphDrift(graph, packs({})).schema)).toEqual([
       `drift      graph was written at schema 2, this empo writes schema ${GRAPH_SCHEMA} (run empo index)`,
     ]);
+  });
+});
+
+/**
+ * The pack join: a symbol whose two halves are written in one language and matched inside one root,
+ * with no `bridge` in config. The php pack declares one for `scheduled-command`, which is what turns
+ * a Laravel scheduler entry from a string nobody calls into an edge into the command class.
+ */
+describe("a symbol a pack joins inside its own root", () => {
+  test("the scheduler entry reaches the command, and the command's fan-in is no longer zero", () => {
+    const dir = repoWithSchedule();
+    const { config } = loadConfig(dir);
+    const graph = buildGraph({ repoRoot: dir, config }).graph;
+
+    const joined = graph.edges.filter((edge) => edge.symbol === "scheduled-command");
+
+    // From the scheduler to the command and never the other way. The edge runs from the caller to
+    // the definer everywhere else in this graph, and a join written the other way round would put
+    // the fan-in on the Kernel and leave the changed command reading as a leaf, which is the whole
+    // thing this exists to stop.
+    expect(joined).toEqual([
+      {
+        from: "App\\Console\\Kernel",
+        to: "App\\Console\\Commands\\ReconcileCommand",
+        kind: "bridge",
+        symbol: "scheduled-command",
+        evidence: { file: "app/Console/Kernel.php", line: 7 },
+      },
+    ]);
+    expect(graph.fanin["App\\Console\\Commands\\ReconcileCommand"]).toBe(1);
+  });
+
+  test("a signature carrying arguments and options still joins", () => {
+    const dir = repoWithSchedule({ signature: "app:reconcile {--force} {club?}" });
+    const { config } = loadConfig(dir);
+    const graph = buildGraph({ repoRoot: dir, config }).graph;
+
+    // The scheduler writes the options too, so both sides are normalized to the leading token. A
+    // pack that keyed on the whole string would match here and nowhere else, which is worse than
+    // matching nothing: it would work in the fixture and fail in every repository.
+    expect(graph.edges.filter((edge) => edge.symbol === "scheduled-command")).toHaveLength(1);
+  });
+
+  test("a signature nothing schedules is no edge and no warning", () => {
+    const dir = repoWithSchedule({ schedule: false });
+    const { config } = loadConfig(dir);
+    const built = buildGraph({ repoRoot: dir, config });
+
+    expect(built.graph.edges.filter((edge) => edge.kind === "bridge")).toEqual([]);
+    // A command run by hand is not a defect, so the report says the consume side found nothing to
+    // match rather than naming the produced key as a problem. Absent is not empty.
+    const report = built.bridges.find((entry) => entry.kind === "scheduled-command");
+    expect(report).toEqual({
+      kind: "scheduled-command",
+      produced: 1,
+      consumed: 0,
+      matched: 0,
+      unmatched: [],
+    });
+  });
+
+  test("a repository with no scheduler at all gains nothing", () => {
+    const dir = repoWithHazard();
+    const { config } = loadConfig(dir);
+    const built = buildGraph({ repoRoot: dir, config });
+
+    expect(built.graph.edges.filter((edge) => edge.kind === "bridge")).toEqual([]);
+    expect(built.graph.stats.bridgedEdges).toBe(0);
+  });
+});
+
+/**
+ * A Laravel repository with one scheduled command, one job, and a dispatch inside a foreach.
+ * `signature` is what the command declares, `schedule` says whether the Kernel names it at all.
+ */
+function repoWithSchedule(options: { signature?: string; schedule?: boolean } = {}): string {
+  const signature = options.signature ?? "app:reconcile";
+  const dir = mkdtempSync(join(tmpdir(), "empo-schedule-"));
+  temps.push(dir);
+  mkdirSync(join(dir, ".empo"), { recursive: true });
+  mkdirSync(join(dir, "app", "Console", "Commands"), { recursive: true });
+  mkdirSync(join(dir, "app", "Jobs"), { recursive: true });
+
+  writeFileSync(
+    join(dir, ".empo", "config.json"),
+    JSON.stringify({
+      version: 1,
+      roots: [{ path: ".", lang: "php" }],
+      packs: { php: { version: "^1" } },
+      bridges: [],
+      flows: ".empo/flows.json",
+      spines: ".empo/spines",
+      ignore: [],
+    }),
+  );
+
+  writeFileSync(
+    join(dir, "app", "Console", "Kernel.php"),
+    [
+      "<?php",
+      "namespace App\\Console;",
+      "class Kernel",
+      "{",
+      "    protected function schedule($schedule)",
+      "    {",
+      options.schedule === false
+        ? "        // nothing scheduled"
+        : `        $schedule->command('${signature}')->dailyAt('03:20');`,
+      "    }",
+      "}",
+      "",
+    ].join("\n"),
+  );
+
+  writeFileSync(
+    join(dir, "app", "Console", "Commands", "ReconcileCommand.php"),
+    [
+      "<?php",
+      "namespace App\\Console\\Commands;",
+      "class ReconcileCommand",
+      "{",
+      `    protected $signature = '${signature}';`,
+      "    public function handle()",
+      "    {",
+      "        foreach ($members as $member) {",
+      "            SyncMember::dispatch($member);",
+      "        }",
+      "    }",
+      "}",
+      "",
+    ].join("\n"),
+  );
+
+  writeFileSync(
+    join(dir, "app", "Jobs", "SyncMember.php"),
+    ["<?php", "namespace App\\Jobs;", "class SyncMember implements ShouldQueue", "{", "}", ""].join(
+      "\n",
+    ),
+  );
+
+  return dir;
+}
+
+/**
+ * The fan-out axis on the graph itself: a dispatch inside a loop has to survive into graph.json, and
+ * it has to stay out of `hazards`, where a reader would go looking for a defect that is not there.
+ */
+describe("fan-out on the built graph", () => {
+  test("a dispatch inside a loop is recorded, and is not a hazard", () => {
+    const dir = repoWithSchedule();
+    const { config } = loadConfig(dir);
+    const graph = buildGraph({ repoRoot: dir, config }).graph;
+    const written = JSON.parse(serializeGraph(graph)) as typeof graph;
+
+    expect(written.fanout).toEqual([
+      {
+        file: "app/Console/Commands/ReconcileCommand.php",
+        line: 9,
+        job: "SyncMember",
+        target: "App\\Jobs\\SyncMember",
+        loopLine: 8,
+      },
+    ]);
+    expect(written.hazards).toEqual([]);
   });
 });

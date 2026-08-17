@@ -4,7 +4,7 @@ import { buildRoot } from "../engine/build";
 import { fixturesDir, loadPack } from "../engine/pack-loader";
 import { configError, gateFailure } from "../errors";
 import type { Pack } from "../schema/pack.schema";
-import type { GraphEdge, GraphNode, Hazard, NameResolution } from "../schema/types";
+import type { Fanout, GraphEdge, GraphNode, Hazard, NameResolution } from "../schema/types";
 
 /**
  * `empo pack test <name>`: run a pack against its synthetic fixtures and diff the result against
@@ -23,6 +23,12 @@ export interface FixtureSnapshot {
    * shape a pack with rules and a corpus that trips none writes.
    */
   hazards: Hazard[];
+  /**
+   * Dispatches inside a loop, pinned for the reason the hazards are: the `loops` block is regexes
+   * over source, and a rule that starts calling a method chain a loop, or stops calling a `foreach`
+   * one, changes what every review brief says about fan-out with no line of this repository moving.
+   */
+  fanout: Fanout[];
   /**
    * The fourth axis, and the one a snapshot is the only possible gate for. A pack's name-resolving
    * rules refuse silently by design, so nothing about a corpus whose yield went to zero looks
@@ -57,6 +63,7 @@ export function runPackFixtures(name: string): { pack: Pack; actual: FixtureSnap
       nodes: built.nodes,
       edges: built.edges,
       hazards: built.hazards,
+      fanout: built.fanout,
       names: built.names,
     },
   };
@@ -71,7 +78,7 @@ export function packTestCommand(name: string, options: { update?: boolean } = {}
   console.log(`fixtures   ${join(fixturesDir(name), "src")}`);
   console.log(
     `result     ${actual.nodes.length} nodes, ${actual.edges.length} edges, ` +
-      `${actual.hazards.length} hazards`,
+      `${actual.hazards.length} hazards, ${actual.fanout.length} in a loop`,
   );
   console.log("");
 
@@ -113,6 +120,7 @@ function parseSnapshot(path: string): FixtureSnapshot {
       nodes: parsed.nodes ?? [],
       edges: parsed.edges ?? [],
       hazards: parsed.hazards ?? [],
+      fanout: parsed.fanout ?? [],
       names: parsed.names ?? [],
     };
   } catch (error) {
@@ -179,6 +187,25 @@ function differences(expected: FixtureSnapshot, actual: FixtureSnapshot): string
     }
   }
 
+  // Keyed on the dispatch site for the reason the hazards are, and diffed apart from them because
+  // they are two different claims about one line: a hazard says this dispatch can beat a commit, and
+  // this says it repeats.
+  const expectedFanout = new Map(expected.fanout.map((site) => [fanoutKey(site), site]));
+  const actualFanout = new Map(actual.fanout.map((site) => [fanoutKey(site), site]));
+
+  for (const key of expectedFanout.keys()) {
+    if (!actualFanout.has(key)) lines.push(`missing fanout   ${key}`);
+  }
+  for (const [key, site] of actualFanout) {
+    const counterpart = expectedFanout.get(key);
+    if (counterpart === undefined) lines.push(`unexpected fanout ${key}`);
+    else if (JSON.stringify(counterpart) !== JSON.stringify(site)) {
+      lines.push(`changed fanout   ${key}`);
+      lines.push(`  expected  ${JSON.stringify(counterpart)}`);
+      lines.push(`  actual    ${JSON.stringify(site)}`);
+    }
+  }
+
   // Keyed on the family, because that is the unit the tally has one record of and the unit a reader
   // repairs: the whole record printed on both sides is what says which of the four numbers moved,
   // and a count that moved is the only thing a corpus can report about a refusal.
@@ -214,4 +241,8 @@ function evidenceOf(edge: GraphEdge): string {
 
 function hazardKey(hazard: Hazard): string {
   return `${hazard.file}:${hazard.line} dispatches ${hazard.job}`;
+}
+
+function fanoutKey(site: Fanout): string {
+  return `${site.file}:${site.line} dispatches ${site.job} in a loop`;
 }

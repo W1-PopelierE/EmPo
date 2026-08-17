@@ -35,6 +35,8 @@ function node(id: string, name: string, filePath: string, captures: Capture[] = 
     // omitted them would stop compiling rather than quietly resolve differently.
     symbols: [],
     dispatches: [],
+    loopDispatches: [],
+    permanentFailures: [],
     defersCommit: false,
   };
 }

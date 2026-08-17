@@ -8,7 +8,7 @@
  * statement of the same shape drifts from the parser without TypeScript seeing it.
  */
 
-export type EdgeKind = "import" | "fqcn" | "string" | "template" | "hook" | "bridge";
+export type EdgeKind = "import" | "fqcn" | "string" | "template" | "hook" | "inherit" | "bridge";
 
 export interface SymbolRef {
   symbol: string; // "http-route", "event", ...
@@ -112,6 +112,43 @@ export interface Hazard {
   job: string; // the job as written at the dispatch site
   target: string | null; // resolved node id, null when unresolvable
   transactionLine: number; // the line that opened the enclosing transaction
+}
+
+/**
+ * One dispatch written inside a loop. Not a hazard and deliberately kept out of `Hazard`: nothing
+ * here is wrong, and a reader who found it in the hazards list would go looking for the defect.
+ *
+ * What it is, is the seam where a change somewhere else becomes traffic here. How many times the
+ * loop runs is a property of the data, and EmPo reads source, so the count is not in this record and
+ * never will be. The line is, and that is what puts the question in front of whoever is reading a
+ * diff that widened the query above it.
+ */
+export interface Fanout {
+  file: string; // repo-relative, the dispatch site
+  line: number; // the dispatch
+  job: string; // the job as written at the dispatch site
+  target: string | null; // resolved node id, null when unresolvable
+  loopLine: number; // the line that opened the enclosing loop
+}
+
+/**
+ * One call that records a failure as final, inside a catch of an error whose type says the
+ * condition passes. Kept out of `Hazard` for the reason `Fanout` is: the enclosure alone does not
+ * make it wrong, and a reader who found it in the hazards list would go looking for a defect that
+ * may not be there. A job with no other arrangement SHOULD fail on a rate limit, and this axis
+ * cannot see whether one was made.
+ *
+ * What it is, is the far side of a fan-out. A loop that dispatches per row asks how many rows there
+ * are; this asks what the queue does with the ones that come back rate-limited, and the answer is
+ * written in a file the diff that widened the loop never touches. That is why the record carries
+ * the file: `empo review` reaches it through the dispatch target of a fan-out site, not only
+ * through the changed files.
+ */
+export interface PermanentFailure {
+  file: string; // repo-relative, the file holding the catch
+  line: number; // the call that records the failure as final
+  call: string; // the call as written
+  transientLine: number; // the line of the catch enclosing it
 }
 
 /**
@@ -241,4 +278,18 @@ export interface Graph {
    * every surface prints the absence as an unknown that `empo index` repairs.
    */
   names: NameResolution[];
+  /**
+   * Dispatches written inside a loop, empty when no pack in this repo declares a `loops` block.
+   *
+   * Read by `empo review`, which prints the ones inside a changed file as a fact about that file.
+   * It rides on `hazardsScanned` rather than carrying a second scanned list, because both blocks
+   * live under one pack key and a pack that declares `hazards` at all is a pack that was asked.
+   */
+  fanout: Fanout[];
+  /**
+   * Calls that write a failure off as final inside a catch of an error the pack calls transient,
+   * empty when no pack in this repo declares a `transient` block. Rides on `hazardsScanned` for the
+   * reason `fanout` does.
+   */
+  permanentFailures: PermanentFailure[];
 }

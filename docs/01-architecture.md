@@ -71,9 +71,11 @@ monorepo it misses the two that cause the expensive bugs. EmPo models all three.
 This is the well-understood case. Each language pack declares how imports look in its language,
 the builder runs those rules over that language's files, and produces edges. A PHP pack also
 declares the non-import couplings that language has (an observer registered in a provider couples
-two files that never import each other; a class-name string in `call_user_func` is a real edge).
-The php pack declares five such edge kinds: import, inline FQCN, class-name string, template
-reference, and hook registration.
+two files that never import each other; a class-name string in `call_user_func` is a real edge; a
+class extending a sibling in its own namespace writes no `use` statement at all, so the import rules
+never see the strongest coupling in the file).
+The php pack declares six such edge kinds: import, inline FQCN, class-name string, template
+reference, hook registration, and inheritance.
 
 ### Level 2: inter-language (the differentiator)
 
@@ -95,6 +97,15 @@ first-class, cross-language coupling. It is the same mechanism, aimed across the
 The bridges you want matched are declared in config (`bridges` in [03-config-schema](03-config-schema.md)),
 so the tool does not invent couplings you did not ask for. No bridge declared, and each root is
 treated as an island, which is still useful, just not monorepo-aware.
+
+One kind of match needs no config, and it is not across a boundary at all. A framework sometimes
+spells one call twice in its own language — a Laravel scheduler entry names a command by a string
+the command class declares as its `$signature` — and joining those two is a fact about the framework
+rather than a claim about anybody's layout. A pack lists such symbol kinds in `joins`
+([04-language-packs](04-language-packs.md)) and the same matcher runs them inside a single root. So
+level 2 is symbol matching, and crossing a language is the common case rather than the definition:
+without it a scheduled command is a class nobody calls, and the file that runs against production
+every night reads as a leaf.
 
 ### Level 3: flows
 

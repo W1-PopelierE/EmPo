@@ -210,8 +210,9 @@ assertion terms, and the human approving the diff has no way to see what went mi
 
 ## `empo index`
 
-Rebuilds the graph. Deterministic, seconds, no network. Prints node/edge/bridge counts and the sha
-it built against. Run it whenever the codebase moved. Flags: `--repo <path>`, and `--check` to exit
+Rebuilds the graph. Deterministic, seconds, no network. Prints node/edge/join counts and the sha
+it built against, and a match rate per join, which covers the bridges config declares and the joins
+a pack declares over its own symbols alike. Run it whenever the codebase moved. Flags: `--repo <path>`, and `--check` to exit
 non-zero if the graph would change (a CI staleness gate).
 
 **A names block prints between the flows line and the built line**, one line per edge family whose
@@ -293,15 +294,20 @@ Output (human-readable, and `--json` for machines):
   the two are the same shape. The **order is deliberately untouched**: a consumer that is itself
   widely used is genuinely the one to read first, and the count saying so is in the same row. What
   was missing was never the ranking, it was what each row is. The family is `template`, `import`,
-  `fqcn`, `hook` or `string`, and never the directive: a graph records which rule family matched,
+  `fqcn`, `hook`, `string` or `inherit`, and never the directive: a graph records which rule family matched,
   not whether the php that matched wrote `@extends` or `view(`.
-- **cross-language reach**: any bridge edge, e.g. "a mobile screen calls a route this file
-  defines," so a backend change's mobile blast radius is visible. **Both ends of the join are
-  printed**, the consuming side and the producing side, because either one can be the file you
-  asked about: a bridge edge runs from the caller to the definer, so naming one end alone answers
-  the question from one direction and repeats it back from the other. Where no bridge edge is in
-  the radius, the line says which of the two silences it is in, a graph holding no bridge edges at
-  all or joins that are simply nowhere near this node.
+- **symbol joins**: any bridge edge, e.g. "a mobile screen calls a route this file
+  defines," so a backend change's mobile blast radius is visible. **The heading says "symbol joins"
+  and no longer "cross-language reach"**, because a pack can declare a join over its own symbols
+  inside one root ([04-language-packs](04-language-packs.md)): the php pack joins
+  `scheduled-command`, so a Laravel scheduler entry and the command class it names are two ends of
+  one bridge edge and both of them are php. A heading promising two languages would be a false fact
+  printed above true ones. **Both ends of the join are printed**, the consuming side and the
+  producing side, because either one can be the file you asked about: a join edge runs from the
+  caller to the definer, so naming one end alone answers the question from one direction and repeats
+  it back from the other. Where no join edge is in the radius, the line says which of the two
+  silences it is in, a graph holding no join edges at all or joins that are simply nowhere near this
+  node.
 - **names block**: what the name-resolving rules yielded on this repository, in the same lines
   `empo index` and `empo doctor` print and `empo doctor` documents below.
 - **staleness line**: `built_against` sha and commits-behind-HEAD.
@@ -541,6 +547,42 @@ does not consult the configured forge at all, and prints a note naming the one i
 no pull request for a forge to answer about, so spending the id on a lookup only produced a failure
 against a pull request nobody had named.
 
+**The brief also prints every dispatch a changed file makes from inside a loop**, under the heading
+`dispatches inside a loop  (step 2: what changed files can put on the queue)`, one row per site naming
+the `file:line`, the job it dispatches and the line the loop opened on. Under each row, where the
+resolver matched the job to a node, a `target` line names that node and its file, and a `reached
+from` line names every consumer of the job that a scheduler entry reaches, cited on that entry's own
+scheduled line — the dispatching file included, because a scheduled command dispatching in a loop is
+the commonest shape this axis is for and its own cadence is the one the reader most needs. Both are lookups and neither is new evidence: the job's consumers
+are ordinary edges and a scheduled command is joined to the entry that schedules it. What they add
+is having the two in one place, because what a dispatch does with a failure is written in the
+handler and never at the call site, and a queue that a nightly loop fills and a five-minute entry
+refills is a loop no single one of those three facts states. Only scheduled consumers are listed: the
+row's whole value is the cadence at the far end, so a controller dispatching the same job on a click
+has nothing to say here. An `on failure` line follows where the target's own code, or the code it
+inherits one hop up, records a failure as final inside a catch of an error the pack calls transient:
+what a queue does with the work that comes back rate-limited is the other half of what a widened loop
+means, and it is written in a file the diff has no reason to touch. One hop and not the closure,
+because a job's imports transitively are most of the application and the base class is the hop that
+pays — `handle` on a queued job is routinely inherited, so the subclass holds the work and the parent
+holds the error handling. Inheritance and no other edge kind: an `import` or `fqcn` edge names a file
+the job mentions, not one whose code runs as the job's, and a failure taken from there would be
+printed under the name of work that never executes it. A graph written before the failure axis
+existed says `on failure: unknown` once under the heading rather than leaving every row blank, the
+same rule the heading itself follows for a graph older than `fanout`. The sites come from the
+`loops` rules a language pack declares beside its hazard markers
+([04-language-packs](04-language-packs.md)) and ride on the graph as an axis of their own. **It is a
+fact in the brief and never a finding**, and every non-empty list says so in a sentence underneath:
+how often the loop runs is a property of the data and not of the source. A dispatch inside a loop is
+how a batch is written, and it is wrong only when what the loop iterates is unbounded — EmPo cannot
+know how many rows a query returns, a rule that guessed would fabricate, and the model reading the
+diff is the one that can go and read the query. So the coordinate is stated at the moment the diff
+is read, and the finding, if there is one, comes out through the same verification gate as every
+other. On a graph built before the axis existed the section says exactly that and asks for `empo
+index`, rather than printing an empty list a reader would take for a clean bill of health; under
+`--json` the same list rides at the top level as `fanout`, and is null and not `[]` in that case,
+for the reason `--hazards` and `spinesCurated` are.
+
 **The spines section has three answers, not two.** It prints `spines touched  N of M`, and the
 denominator is there because `N = 0` means two different things. `M = 0` says this repository curates
 no spine, so nothing here is claimed either way; `N = 0` with `M > 0` says no spine claims a file or
@@ -566,6 +608,14 @@ file holds, capped at five with a `+N more` for the rest: the ids all begin with
 printed two columns to the left, so the export names are the only new information the line can
 carry. Where the nodes carry no export name the column falls back to the ids, which under a `fqcn`
 pack is usually the class name and is then the whole answer.
+
+**Inside that block the join rows are labelled by the symbol they matched**, `join <symbol>
+<from> consumes <to>  named at <file:line>`, and not by the word "cross-language" they used to
+carry: a pack can join a symbol inside one root, so a scheduled command joined to the entry that
+schedules it is php on both ends and calling the row cross-language tells a reviewer reading a php
+diff that the php file is on the far side of a language boundary, which is not a fact about
+anything. Both ends print for the reason `empo query` prints both, that the changed file is as often
+the consuming side as the producing one.
 
 **The nodes in that block are the exports the diff's lines touched, not every export the file
 holds.** Each symbol node carries the lines it spans (`nodes[].extents`,
@@ -841,8 +891,8 @@ Health check, and it writes nothing. It does execute one thing, and only one: ea
 wired to run, through a shell, which is a checkout-supplied command line and is why `--skip-hooks`
 exists (the hooks block below states that boundary in full). Reports: graph staleness vs HEAD, config validity (bad roots, unknown
 pack, malformed bridge, uncompilable `keyPattern`, an `aliases` target pointing at a directory that
-is not there), directories under no root, per-bridge match
-rate (a low rate usually means a mis-tuned `normalize`), any pack-version or graph-schema drift
+is not there), directories under no root, a match rate per join,
+both the configured bridges and a pack's own (a low rate usually means a mis-tuned `normalize`), any pack-version or graph-schema drift
 against the binary that would make the graph on disk answer differently from a rebuild, what the
 `adapters` block declares and whether this machine and this checkout can honour it, whether every
 hook the host is wired to run actually runs, and whether the config's `commit` list still describes

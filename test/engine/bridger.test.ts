@@ -382,7 +382,7 @@ describe("bridgeLines", () => {
     const reports = [{ kind: "http-route", produced: 9, consumed: 4, matched: 4, unmatched: [] }];
 
     expect(bridgeLines(reports)).toEqual([
-      "bridge http-route  4/4 consumed keys matched against 9 produced",
+      "join http-route  4/4 consumed keys matched against 9 produced",
     ]);
   });
 
@@ -398,7 +398,7 @@ describe("bridgeLines", () => {
     ];
 
     expect(bridgeLines(reports)).toEqual([
-      "bridge http-route  4/6 consumed keys matched against 9 produced",
+      "join http-route  4/6 consumed keys matched against 9 produced",
       '       no producer declares "GET v1/refunds"',
       '       no producer declares "POST v1/webhooks"',
     ]);
@@ -419,7 +419,7 @@ describe("bridgeLines", () => {
     const reports = [{ kind: "http-route", produced: 9, consumed: 9, matched: 2, unmatched }];
 
     expect(bridgeLines(reports)).toEqual([
-      "bridge http-route  2/9 consumed keys matched against 9 produced",
+      "join http-route  2/9 consumed keys matched against 9 produced",
       '       no producer declares "GET v1/addresses"',
       '       no producer declares "GET v1/invoices"',
       '       no producer declares "GET v1/refunds"',

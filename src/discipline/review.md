@@ -72,10 +72,30 @@ Run `empo query <symbol>` for every changed file and every changed symbol, by pa
 it; that is what the graph is for.
 
 From each answer, carry forward: fan-in, every flow the change can reach, which of those flows are
-blind, the top consumers with their `file:line` evidence, and any cross-language reach (a change in
-`apps/api` that an `apps/mobile` screen consumes through a bridge edge). Report every flow the
+blind, the top consumers with their `file:line` evidence, and any symbol join (a change in
+`apps/api` that an `apps/mobile` screen consumes through a bridge edge, or a command a scheduler
+entry names). Report every flow the
 change reaches, not only the one the ticket talks about, and name the blind flows explicitly,
 because a wrong result ships silently there.
+
+**How often does this run, and did that just change?** Two facts in the brief answer the first half
+and nothing answers the second, so it is yours to ask. A `join scheduled-command` row means the
+changed file is reached from a scheduler entry, and the citation is the scheduled line itself, where
+the cadence is written; open it and read the cadence, because the graph does not carry it. The
+`dispatches inside a loop` section names every dispatch a changed file makes per iteration, the job
+it lands on as a file you can open, and any other scheduler entry that feeds that same job. Open the
+handler: what it does with a failure is written there and never at the dispatch. An `on failure` line
+means that handler records a failure as final inside a catch of an error something called temporary,
+so go and read what else that catch does — a handler that already arranged its own retry and also
+marks the job failed is filling a store nothing drains. And where a second entry feeds the same queue
+on a timer, ask what happens to the work this one dispatches when it fails, because a queue filled
+from two directions is where a volume change stops being a volume change.
+
+None of these is a finding, and none is evidence of one. What they are is the place to ask what bounds
+the loop: how many rows does the query above it return, and did this diff widen it. A dispatch in a
+loop is how a batch is written, and it becomes a defect only against a cardinality that lives in the
+data and not in the source, which is why empo states the coordinate and stops. If you conclude the
+volume changed, that is a finding like any other and it goes through the gate with a citation.
 
 Treat the flow list as a floor, not a ceiling. Absence of evidence is not evidence of absence: the
 graph records the edges it can see, and reflection, dynamic dispatch and configuration-driven

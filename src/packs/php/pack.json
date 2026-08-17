@@ -1,6 +1,6 @@
 {
   "name": "php",
-  "version": "1.11.0",
+  "version": "1.14.0",
 
   "match": {
     "extensions": [".php"],
@@ -122,6 +122,16 @@
         "pattern": "([A-Za-z0-9_]+)::observe\\(\\s*([A-Za-z0-9_]+)::class",
         "resolve": "observer"
       }
+    ],
+    "inherit": [
+      {
+        "pattern": "^[ \\t]*(?:final\\s+|abstract\\s+|readonly\\s+)*class\\s+[A-Za-z0-9_]+\\s+extends\\s+([A-Za-z0-9_]+)\\s*(?:implements\\b|\\{|$)",
+        "resolve": "short-name"
+      },
+      {
+        "pattern": "^[ \\t]*(?:final\\s+|abstract\\s+|readonly\\s+)*class\\s+[A-Za-z0-9_]+\\s+extends\\s+\\\\((?:[A-Za-z0-9_]+\\\\)*[A-Za-z0-9_]+)",
+        "resolve": "fqcn"
+      }
     ]
   },
 
@@ -212,10 +222,36 @@
       ],
       "normalize": { "path": ["strip-leading-slash"] },
       "scopedBy": { "name": "route-prefix", "part": "path", "join": "/" }
+    },
+    {
+      "symbol": "scheduled-command",
+      "pattern": "protected\\s+(?:static\\s+)?(?:string\\s+)?\\$signature\\s*=\\s*['\"]\\s*([^'\"\\s{]+)",
+      "map": { "signature": 1 },
+      "key": "{signature}"
+    },
+    {
+      "symbol": "scheduled-command",
+      "pattern": "#\\[[^\\]]*?AsCommand\\(\\s*['\"]\\s*([^'\"\\s{]+)",
+      "map": { "signature": 1 },
+      "key": "{signature}"
+    },
+    {
+      "symbol": "scheduled-command",
+      "pattern": "#\\[[^\\]]*?AsCommand\\((?:[^)]*?[,(]\\s*)?name:\\s*['\"]\\s*([^'\"\\s{]+)",
+      "map": { "signature": 1 },
+      "key": "{signature}"
     }
   ],
 
+  "joins": ["scheduled-command"],
+
   "consumes": [
+    {
+      "symbol": "scheduled-command",
+      "pattern": "(?:\\$[A-Za-z0-9_]*[Ss]chedule|->\\s*[A-Za-z0-9_]*[Ss]chedule|Schedule)\\s*(?:->|::)\\s*command\\(\\s*['\"]\\s*([^'\"\\s{]+)",
+      "map": { "signature": 1 },
+      "key": "{signature}"
+    },
     {
       "symbol": "http-route",
       "pattern": "\\$this->(get|post|put|patch|delete)\\(\\s*['\"]([^'\"]+)['\"]",
@@ -309,6 +345,48 @@
   },
 
   "hazards": {
+    "loops": [
+      {
+        "pattern": "(?<![A-Za-z0-9_$])(?:foreach|while)\\s*\\([^{;]*\\)\\s*(?=\\{)",
+        "extent": "balanced",
+        "open": "{",
+        "close": "}"
+      },
+      {
+        "pattern": "(?<![A-Za-z0-9_$])for\\s*\\([^{\\n]*\\)\\s*(?=\\{)",
+        "extent": "balanced",
+        "open": "{",
+        "close": "}"
+      },
+      {
+        "pattern": "(?:->|::)\\s*(?:each|eachById|map|chunk|chunkById|chunkMap)\\(\\s*(?:[0-9]+\\s*,\\s*)?(?:static\\s+)?function\\b",
+        "extent": "balanced",
+        "open": "{",
+        "close": "}"
+      },
+      {
+        "pattern": "(?:->|::)\\s*(?:each|eachById|map|chunk|chunkById|chunkMap)(?=\\(\\s*(?:[0-9]+\\s*,\\s*)?(?:static\\s+)?fn\\b)",
+        "extent": "balanced",
+        "open": "(",
+        "close": ")"
+      }
+    ],
+
+    "transient": [
+      {
+        "pattern": "(?<![A-Za-z0-9_$])catch\\s*\\([^)]*(?:RateLimit|Throttl|TooManyRequests|Timeout|Transient|Temporar)[^)]*\\)\\s*(?=\\{)",
+        "extent": "balanced",
+        "open": "{",
+        "close": "}"
+      }
+    ],
+    "permanentFailures": [
+      {
+        "pattern": "(\\$[A-Za-z0-9_]+->fail)\\s*\\(",
+        "job": 1
+      }
+    ],
+
     "transactions": [
       {
         "pattern": "(?:(?<![\\w\\\\])\\\\?DB::|->)transaction\\(\\s*(?:static\\s+)?function\\b",
