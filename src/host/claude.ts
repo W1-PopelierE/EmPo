@@ -657,6 +657,20 @@ function reviewSkill(config: EmpoConfig): string[] {
           "",
         ]
       : []),
+    // Both measured, both cost minutes of a ten-minute review, and both are invocation mechanics
+    // rather than review discipline, which is why they belong in this file and nowhere else.
+    "Redirect the output to a file and read that file in sections. Never pipe it through `head`,",
+    "`more` or anything else that exits early: the reader exits, the write upstream of it takes",
+    "SIGPIPE and dies, and the file keeps only the lines that got through, with nothing said. The",
+    "brief is long by design and every section of it is load-bearing, so page through the file",
+    "rather than cutting the output.",
+    "",
+    "If you dispatch sub-agents, start the ticket fetch, the CI read and the read of",
+    "`.empo/conventions.md` in the same message that runs the command. None of the three needs",
+    "anything the command prints, so holding them until the brief arrives buys nothing. What",
+    "overlaps is the waiting and never the reading order: the discipline still has you read the",
+    "ticket before the diff, and a fetch in flight is not permission to open the diff.",
+    "",
     "## Run what it prints",
     "",
     "The command prints the brief (the facts: the pull request, the ticket and its criteria, the",

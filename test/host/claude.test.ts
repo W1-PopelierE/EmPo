@@ -390,6 +390,35 @@ describe("the generated skills", () => {
     expect(map).toContain("empo init");
   });
 
+  test("send the brief to a file rather than through a pager that exits early", () => {
+    // Measured: `empo review 406 | tee brief.txt | head -200` left brief.txt holding 223 of the
+    // brief's 1057 lines, because head exited and the tee upstream of it took SIGPIPE. Nothing
+    // said so, and the command was paid for twice.
+    for (const config of [FULL, BARE]) {
+      const skill = renderSkill("empo-review", config);
+
+      expect(skill).toContain("Redirect the output to a file and read that file in sections");
+      expect(skill).toContain("SIGPIPE");
+    }
+    // Neither of the other two prints a brief long enough to page, and a line every review pays
+    // for on every run has to earn its place in the one file that needs it.
+    expect(renderSkill("empo-map", FULL)).not.toContain("SIGPIPE");
+    expect(renderSkill("empo-query", FULL)).not.toContain("SIGPIPE");
+  });
+
+  test("start the context fetches beside the command, without moving the diff ahead of the ticket", () => {
+    // Measured: the ticket, the CI result and the conventions were fetched only after the brief and
+    // the diff had been read, though none of the three depends on either. Parallelising the fetch
+    // is not permission to read the diff first, so the file has to say which half overlaps.
+    for (const config of [FULL, BARE]) {
+      const skill = renderSkill("empo-review", config);
+
+      expect(skill).toContain("in the same message that runs the command");
+      expect(skill).toContain("overlaps is the waiting and never the reading order");
+      expect(skill).toContain("ticket before the diff, and a fetch in flight is not permission");
+    }
+  });
+
   test("are byte-identical for the same config, twice", () => {
     // A generated file that changes between runs produces a diff on every run, which trains a team
     // to stop reading the diff.
