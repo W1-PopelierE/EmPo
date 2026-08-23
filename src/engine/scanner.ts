@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { globSync } from "tinyglobby";
 import { normalizeRepoPath } from "../schema/config.schema";
+import { ignoredPaths } from "./git";
 
 /** One source file, with both path forms the rest of the engine needs. */
 export interface ScannedFile {
@@ -40,6 +41,21 @@ export function scanRoot(options: ScanOptions): ScannedFile[] {
     dot: false,
   });
 
+  // A file git ignores is generated or vendored, and reading it is never what the caller meant. The
+  // config's `ignore` cannot carry this on its own: it is a hand-written list, so it holds the
+  // patterns somebody thought of, and what actually blows a repository up is the tree nobody names.
+  // Laravel's `storage/framework/phpstan` is 11k generated `.php` files and a 39MB result cache, all
+  // of it gitignored, none of it matched by the five patterns `empo init` seeds -- and `scanRoot`
+  // holds every source it reads in memory at once, so the graph did not come out wrong, the process
+  // died. Git already knows which files those are, so it is asked rather than guessed at.
+  //
+  // Null means the question had no answer (no checkout, or no git), and then nothing is dropped: a
+  // repository that is not a git checkout still indexes, the way every other call in engine/git.ts
+  // degrades. Note this is the answer git gives *including the index*, so a gitignored file somebody
+  // force-added is tracked and stays.
+  const ignoredByGit = ignoredPaths(cwd, matches);
+  const kept = ignoredByGit === null ? matches : matches.filter((path) => !ignoredByGit.has(path));
+
   // The two path fields below are one configured path written two ways, so they are flattened by one
   // call rather than side by side. Building `file` through `repoRelative` and `root` out of the raw
   // option is how they come to disagree: a caller that builds a root by hand, which commands/pack.ts
@@ -47,7 +63,7 @@ export function scanRoot(options: ScanOptions): ScannedFile[] {
   // then the node carries a normalized `file` next to a `root` that still spells `apps/api/`.
   const root = normalizeRepoPath(options.root.path);
 
-  return matches.sort().map((relPath) => ({
+  return kept.sort().map((relPath) => ({
     root,
     lang: options.root.lang,
     file: repoRelative(root, relPath),
