@@ -227,3 +227,30 @@ function firstLine(text: string): string {
   const line = text.split("\n").find((candidate) => candidate.trim() !== "");
   return line === undefined ? "git reported no reason" : line.trim();
 }
+
+/**
+ * Which of `paths` git ignores, as a set of the same strings, or null where the question has no
+ * answer: no checkout here, or git itself failed. Paths are read relative to `cwd`, and come back
+ * spelled exactly as they went in, so a caller can filter its own list with `has`.
+ *
+ * Batched through `--stdin` rather than looping `ignoresPath`, because the caller asks about every
+ * file a root globbed: a Laravel repository hands this eighteen thousand paths, which is eighteen
+ * thousand subprocesses one at a time and under a second in one.
+ *
+ * `check-ignore` exits 1 when it matched nothing, which is an answer ("none of them") and not a
+ * failure, and 128 when there is no repository, which is the null. That is the same distinction
+ * `ignoresPath` above draws with its `rev-parse` probe, drawn here on the exit code instead.
+ */
+export function ignoredPaths(cwd: string, paths: string[]): Set<string> | null {
+  if (paths.length === 0) return new Set();
+  try {
+    const result = execaSync("git", ["check-ignore", "-z", "--stdin"], {
+      cwd,
+      input: paths.join("\0"),
+    });
+    return new Set(result.stdout.split("\0").filter((path) => path !== ""));
+  } catch (error) {
+    const failure = error as { exitCode?: number };
+    return failure.exitCode === 1 ? new Set() : null;
+  }
+}

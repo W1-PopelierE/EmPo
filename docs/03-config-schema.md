@@ -423,6 +423,14 @@ looks harmless and is not: ignoring test files would leave `empo query --blind` 
 the repository blind, and `empo check` finding no assertion anywhere, which turns both of the answers
 this tool exists to give into noise.
 
+**Whatever git ignores is dropped too, and this list never has to say so.** The five seeded patterns
+are the trees every repository has; the tree that actually breaks a scan is the one only that
+repository has, and nobody thinks to name it. A Laravel checkout keeps eleven thousand generated
+`.php` files under `storage/framework/phpstan`, all gitignored, none of them matched by a seeded
+pattern, and indexing them read 238MB of source into memory at once. So the scan asks git rather
+than guessing: a path `git check-ignore` matches is not indexed. A repository that is not a git
+checkout indexes exactly as before, and a gitignored file somebody force-added is tracked and stays.
+
 ### `commit` (optional)
 
 A record of which `generated` artifacts the team decided to commit. Default is empty, which is what
