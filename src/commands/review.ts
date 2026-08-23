@@ -1660,7 +1660,7 @@ function printTests(graph: Graph, facts: FileFacts[]): void {
   // question a count answers better than a list does.
   const named = graded.filter((entry) => !entry.asserts || direct.has(entry.file));
   for (const entry of named) {
-    const reach = direct.has(entry.file) ? "  reaches a changed file directly" : "";
+    const reach = direct.has(entry.file) ? "  reaches the changed code directly" : "";
     console.log(
       `  ${entry.file}  ${entry.asserts ? "asserts a value" : "ASSERTS NO VALUE"}${reach}`,
     );
@@ -1673,15 +1673,17 @@ function printTests(graph: Graph, facts: FileFacts[]): void {
     perDirectory.set(directory, (perDirectory.get(directory) ?? 0) + 1);
   }
   // Every file, including the ones named above, because the question this answers is where the
-  // coverage sits and a breakdown that silently omitted the named files would not sum to the total
-  // printed one line above it.
+  // coverage sits and a breakdown that omitted the named files would not sum to the total. Which is
+  // why the label below hangs "by directory" off the total and never off the count of what went
+  // unnamed: a reader who adds the rows up has to land on the number the same line just claimed,
+  // and a row for a directory whose every file was named is not the row lying.
   const rows = [...perDirectory].sort(([aDir, aCount], [bDir, bCount]) => {
     return bCount - aCount || compareStrings(aDir, bDir);
   });
 
   console.log(
-    `  ${plural(files.size, "test file")} over ${plural(flows.size, "flow")}.` +
-      ` ${files.size - named.length} not named above, by directory:`,
+    `  ${plural(files.size, "test file")} over ${plural(flows.size, "flow")},` +
+      ` ${files.size - named.length} not named above. All of them by directory:`,
   );
   const width = columnWidth(rows.slice(0, TEST_DIRECTORY_ROWS), ([directory]) => directory);
   for (const [directory, count] of rows.slice(0, TEST_DIRECTORY_ROWS)) {

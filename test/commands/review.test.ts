@@ -2333,7 +2333,9 @@ describe("a changed file that holds several exports", () => {
     // file that neither grades ASSERTS NO VALUE nor names a changed file. setup.test.ts is neither,
     // so the fold is now visible in the counts, and a printer that counted nodes would say two test
     // files and two in src.
-    expect(printed).toContain("1 test file over 1 flow. 1 not named above, by directory:");
+    expect(printed).toContain(
+      "1 test file over 1 flow, 1 not named above. All of them by directory:",
+    );
     expect(printed).toMatch(/^ {4}src {2}1$/m);
   });
 });
@@ -2354,9 +2356,16 @@ describe("a change a large test suite reaches", () => {
   const DIRECT_TEST = "test/direct/money.test.ts";
   const QUIET_TEST = "test/quiet/quiet.test.ts";
   /**
-   * Twelve directories of two files each. With the two singly-occupied directories the other tests
-   * live in that is fourteen, four more than the summary lists, so both the cap and the line that
-   * counts what it cut are exercised.
+   * A test that imports the changed file and sits in no flow at all, which is the case the flow's
+   * `testFiles` cannot reach: it is in nobody's coverage list, so without the blast radius reading
+   * it off the consumers the section would not know it exists, and a change whose only assertion is
+   * this file would be reported as unasserted.
+   */
+  const ORPHAN_TEST = "test/orphan/orphan.test.ts";
+  /**
+   * Twelve directories of two files each. With the three singly-occupied directories the other
+   * tests live in that is fifteen, five more than the summary lists, so both the cap and the line
+   * that counts what it cut are exercised.
    */
   const BULK_TESTS = Array.from({ length: 12 }, (_, area) =>
     Array.from({ length: 2 }, (_, index) => `test/area${area}/case${index}.test.ts`),
@@ -2379,8 +2388,9 @@ describe("a change a large test suite reaches", () => {
   }
 
   /**
-   * One changed export, one test that imports it, one test that asserts nothing, and a suite of
-   * twenty-four that assert and reach the change only through the flow. Every one of the twenty-four
+   * One changed export, one test that imports it, one that imports it from outside every flow, one
+   * that asserts nothing, and a suite of twenty-four that assert and reach the change only through
+   * the flow. Every one of the twenty-four
    * carries an asserting node, because a test file with no node in the graph grades ASSERTS NO VALUE
    * and would be printed in full, which is not the case this fixture is asking about.
    */
@@ -2389,6 +2399,7 @@ describe("a change a large test suite reaches", () => {
       node(MONEY, "formatMoney"),
       node(DIRECT_TEST, "names", true, true),
       node(QUIET_TEST, "runs", true, false),
+      node(ORPHAN_TEST, "alone", true, true),
       ...BULK_TESTS.map((file) => node(file, "asserts", true, true)),
     ];
 
@@ -2398,7 +2409,7 @@ describe("a change a large test suite reaches", () => {
       builtAtCommitSubject: "",
       roots: [{ path: ".", lang: "typescript" }],
       packs: { typescript: loadPack("typescript").version },
-      stats: { files: nodes.length, nodes: nodes.length, edges: 1, bridgedEdges: 0 },
+      stats: { files: nodes.length, nodes: nodes.length, edges: 2, bridgedEdges: 0 },
       nodes,
       edges: [
         {
@@ -2408,9 +2419,16 @@ describe("a change a large test suite reaches", () => {
           symbol: null,
           evidence: { file: DIRECT_TEST, line: 1 },
         },
+        {
+          from: `${ORPHAN_TEST}#alone`,
+          to: `${MONEY}#formatMoney`,
+          kind: "import",
+          symbol: null,
+          evidence: { file: ORPHAN_TEST, line: 1 },
+        },
       ],
       flows: { checkout: [`${MONEY}#formatMoney`] },
-      fanin: { [`${MONEY}#formatMoney`]: 1 },
+      fanin: { [`${MONEY}#formatMoney`]: 2 },
       coverage: {
         checkout: {
           flow: "checkout",
@@ -2462,10 +2480,19 @@ describe("a change a large test suite reaches", () => {
     // The grade is the point of the section and is never summarised away, and the test that names
     // the changed file is the one step 4 asks the reviewer for.
     expect(section).toContain(`  ${QUIET_TEST}  ASSERTS NO VALUE`);
-    expect(section).toContain(`  ${DIRECT_TEST}  asserts a value  reaches a changed file directly`);
+    expect(section).toContain(
+      `  ${DIRECT_TEST}  asserts a value  reaches the changed code directly`,
+    );
+    // The orphan is in no flow, so no `testFiles` list carries it and only the blast radius knows
+    // it exists. It is named for the same reason the other direct test is, and it is in the total.
+    expect(section).toContain(
+      `  ${ORPHAN_TEST}  asserts a value  reaches the changed code directly`,
+    );
     // The other twenty-four reach the change only by sharing a flow with it, and no line names one.
     for (const file of BULK_TESTS) expect(section.join("\n")).not.toContain(file);
-    expect(section).toContain("  26 test files over 1 flow. 24 not named above, by directory:");
+    expect(section).toContain(
+      "  27 test files over 1 flow, 24 not named above. All of them by directory:",
+    );
   });
 
   test("counts every directory it does not list, so a cut list cannot read as the whole", () => {
@@ -2477,12 +2504,13 @@ describe("a change a large test suite reaches", () => {
     const held = section.find((line) => line.trimStart().startsWith("... and"));
 
     expect(rows).toHaveLength(10);
-    // The two directories holding one file each sort below every pair, so what falls past the cap
-    // is two of the twelve pairs and both of them.
-    expect(held).toBe("    ... and 4 more directories holding 6 files");
-    // The listed rows plus the counted ones are the total the summary claims. A row dropped in
-    // silence would leave this short, which is the failure the cap line exists to prevent.
-    expect(rows.reduce((total, row) => total + row.files, 0) + 6).toBe(26);
+    // The three directories holding one file each sort below every pair, so what falls past the cap
+    // is two of the twelve pairs and all three of them.
+    expect(held).toBe("    ... and 5 more directories holding 7 files");
+    // The listed rows plus the counted ones are the total the summary claims, which is every file
+    // and not only the unnamed ones: the header says so, and a reader adding the rows up lands on
+    // it. A row dropped in silence would leave this short, which is what the cap line prevents.
+    expect(rows.reduce((total, row) => total + row.files, 0) + 7).toBe(27);
   });
 });
 
