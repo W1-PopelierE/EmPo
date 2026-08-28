@@ -9,7 +9,7 @@ The whole discipline serves principle 2: **an assertion is true only when someth
 A review produces suspected findings; suspicions are not findings until verified; only survivors
 reach the author.
 
-## Two invariants that govern every review
+## Three invariants that govern every review
 
 1. **A review executes nothing.** No test run, no static analysis, no build, no running app. CI
    already runs the suite and the analyzer when the PR is created. The review reads, traces, and
@@ -18,8 +18,14 @@ reach the author.
 2. **A review disturbs nothing and can run in parallel.** Because it executes nothing, it only
    needs the branch's files. Get them with a detached worktree and no environment setup, so the
    human's checkout is untouched and several reviews can run at once. Remove the worktree when done.
+3. **A review reports only what this pull request introduced or broke.** A defect the branch
+   inherited is real, is sometimes worse than anything in the diff, and is not this author's to fix.
+   A review that reports it anyway never converges, because the backlog it is really reviewing is
+   the whole repository. So every finding names the diff line that caused it, and a finding that
+   cannot is dropped rather than reported. This is not a severity judgement: an inherited blocker is
+   still dropped, and goes to the maintenance line of step 7 instead of into the findings.
 
-Both are enforced regardless of language or forge.
+All three are enforced regardless of language or forge.
 
 ## The pipeline
 
@@ -127,6 +133,25 @@ An automated reviewer's "Critical" carries no more weight than your own hunch un
 confirms it. Every source of suspects funnels through the same verification. This is where
 false positives die.
 
+#### Every finding names the line that introduced it
+
+A survivor carries a second citation beside the one it stands on. `introducedBy` is the same shape
+as `citation` — file, line, anchor — and it names the diff line that introduced or broke the
+finding. It is required, not optional: a finding the pull request did not cause is not this pull
+request's finding (invariant 3), and making the field optional makes the invariant advice.
+
+For a `diff` finding it is usually the citation itself, since the defect is on the changed line. For
+an `impact` or a `coverage` finding the two citations are in different files by construction: the
+claim rests on the file that breaks or on the test that is missing, and `introducedBy` is the hunk
+whose change reaches that far. That pair is what makes an impact finding answerable — the author
+reads a file this pull request never opened, and the first question they ask is what in the diff
+made it theirs.
+
+Deriving the field is a reading task like the rest of step 5, and it is asked of every survivor:
+name the hunk, the line the author added, changed or deleted that made this true. If there is no
+such line the code was already like that before the branch, and it goes to the maintenance line of
+step 7 rather than into the findings.
+
 #### Forbidden phrasings (red flags that you are guessing)
 
 If any of these appears in a **finding** (not in a verification prompt), stop and verify or drop it:
@@ -143,12 +168,34 @@ If any of these appears in a **finding** (not in a verification prompt), stop an
 
 The CLI enforces this funnel mechanically rather than trusting it to be followed. `empo review`
 prints the executable form of this doc, `src/discipline/review.md`, then gates the findings that
-come back: each citation anchor is resolved against the real source in the worktree and the finding
-is dropped if the anchor is not there, and the title and claim of every finding are linted against
-the phrasings above. Only survivors are printed. The last rule is deliberately not in the lint,
+come back, in this order: each citation anchor is resolved against the real source in the worktree
+and the finding is dropped if the anchor is not there; the `introducedBy` anchor is resolved the
+same way and the finding is dropped as `not-introduced` if the line it is really on lies outside
+every hunk of this pull request's diff, or if it is neither in the branch nor among the lines the
+diff removed; and the title and claim of every finding are linted against the phrasings above. The
+citation is checked first because it is the ground truth, and a fabricated finding is worth
+reporting as fabricated rather than as inherited. Only survivors are printed. The last phrasing rule
+is deliberately not in the lint,
 because "does not persist" is exactly what a finding says *after* the callee has been read and no
 regex can tell whether it was; banning the wording would delete true findings. The citation gate
 enforces that one instead, since the claim only ships if it quotes a real line of the callee.
+
+The changed-line half of that needs the diff phase 1 saved, and phase 2 reads it back. If the file
+is gone the containment check alone is skipped and the report says so in a note, because a gate that
+quietly stops checking reads exactly like one that checked and found nothing wrong. The
+`introducedBy` anchor is still resolved against source in that case: a citation nobody checked is
+the failure this gate exists to prevent whether or not a diff is at hand.
+
+An anchor that fails either half is looked for among the lines the diff removed before it is
+dropped, on the same collapsed whitespace a surviving anchor is matched on, so a deleted line is
+held to exactly the anchor rule every other citation is. Either half, and not only the unreadable
+one, because the text of a deleted line commonly recurs in the file it was deleted from, where it
+resolves perfectly well somewhere it was never cited. Deleting a file or a method is how a pull
+request breaks its consumers while leaving nothing in the new source to cite: the consumer's own
+line is untouched, so it is outside every hunk, and the line that broke it is gone, so it resolves
+nowhere. Without the removed side both halves fail and the pull request reviews clean. Such a
+finding is kept, and its `introducedBy` is a coordinate in the base rather than in the branch,
+which every report of it says in as many words.
 
 #### The false-positive register (`conventions.md`)
 
@@ -187,7 +234,17 @@ One report, structured:
 - **Coverage**: which behavioural changes have a test, which do not, whether any assertion was
   weakened. Never claim tests pass or fail; the review did not run them, CI did. Point at the CI
   result if it matters.
+- **Maintenance**: one line for a real defect the branch inherited, where the review found one. No
+  severity, no citation ceremony, and never mixed in with the findings: it is a fact about the
+  repository, offered, and not a change asked of this author. Dropping it on the floor would waste
+  what the review already learned; ranking it beside the findings is how a review stops converging.
 - **Verdict**: approve / request changes / needs discussion.
+
+Every finding, whatever its kind, prints `introduced by file:line` under its claim, and an `impact`
+or `coverage` comment posted to the pull request names it in a sentence of its own. A `diff` comment
+does not, because it lands on the changed line and would be pointing at itself. The author of an
+impact finding is being asked about a file this pull request never opened, so the line that made it
+theirs is part of the finding and not something they should have to reconstruct.
 
 Every `file:line` in the report is **repo-relative**, not worktree-absolute. The author reads it in
 their own checkout; a path into the review's scratch worktree is useless to them.
@@ -201,6 +258,7 @@ Remove the worktree. The human's checkout was never touched.
 | Universal (this doc) | Adapter-supplied |
 |----------------------|------------------|
 | The eight-step pipeline | How to fetch a PR (forge) |
+| Reporting only what the diff introduced, `introducedBy` on every finding | Which hunks the diff has (forge, base branch) |
 | The verification funnel and forbidden phrasings | How to read a ticket (tracker) |
 | Ticket-fit grading as a concept | The ticket-key pattern (`keyPattern`) |
 | Coverage-by-reading, never running | The language's assertion terms (pack) |

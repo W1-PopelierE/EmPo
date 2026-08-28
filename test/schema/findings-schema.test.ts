@@ -23,6 +23,11 @@ const valid = {
         line: 42,
         anchor: "$total = $gross - $discount;",
       },
+      introducedBy: {
+        file: "apps/api/app/Libraries/Price/PriceCalculator.php",
+        line: 42,
+        anchor: "$total = $gross - $discount;",
+      },
       supporting: [
         { file: "apps/api/app/Models/Order.php", line: 12, anchor: "public function total(): int" },
       ],
@@ -54,6 +59,7 @@ describe("parseFindingsFile", () => {
 
     expect(findings).toHaveLength(1);
     expect(findings[0]?.citation.line).toBe(42);
+    expect(findings[0]?.introducedBy.anchor).toBe("$total = $gross - $discount;");
     expect(findings[0]?.supporting?.[0]?.anchor).toBe("public function total(): int");
     expect(findings[0]?.suggestion).toContain("after tax");
   });
@@ -76,6 +82,23 @@ describe("parseFindingsFile", () => {
     );
 
     expect(detail).toContain("findings.0.citation.anchor");
+  });
+
+  // Required, and not optional-with-a-default: a finding the pull request did not cause is not this
+  // pull request's finding, and a gate that cannot tell has nothing to hold the claim to.
+  test("rejects a finding with no introducedBy, naming the field", () => {
+    const { introducedBy, ...withoutOrigin } = valid.findings[0] ?? {};
+    expect(introducedBy).toBeDefined();
+
+    expect(issues({ findings: [withoutOrigin] })).toContain("findings.0.introducedBy");
+  });
+
+  test("rejects an introducedBy with no anchor, naming the field", () => {
+    const detail = issues(
+      withFinding({ introducedBy: { file: "apps/api/app/Models/Order.php", line: 12 } }),
+    );
+
+    expect(detail).toContain("findings.0.introducedBy.anchor");
   });
 
   test("rejects an empty claim, naming the field", () => {
@@ -139,6 +162,7 @@ describe("findingsJsonSchema", () => {
       "citation",
       "claim",
       "id",
+      "introducedBy",
       "kind",
       "severity",
       "suggestion",
@@ -147,5 +171,6 @@ describe("findingsJsonSchema", () => {
     ]);
     expect(finding.required).not.toContain("supporting");
     expect(finding.required).toContain("citation");
+    expect(finding.required).toContain("introducedBy");
   });
 });

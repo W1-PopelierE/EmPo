@@ -520,6 +520,10 @@ discipline:
 - **Findings are shown in chat by default, not posted.** `--post` opts in. A posted comment reads
   as a normal human review: it never names the tooling that produced it (no tool, skill, or agent
   names in the body), and it states the finding on its own merits.
+- **An `impact` or `coverage` comment names the line that introduced it**, as "Introduced by
+  `file:line`." on its own line under the claim. It lands on a file this pull request never opened,
+  and the first question its author asks is what in the diff made it theirs to answer. A `diff`
+  comment says nothing, because it is already on the changed line.
 - **Language and formatting of posted content are a team convention**, configured per adapter (one
   team posts customer-facing notes in Dutch with a specific HTML subset; another posts in English
   markdown). EmPo ships no opinion on this beyond "off unless asked, and never leak the toolchain."

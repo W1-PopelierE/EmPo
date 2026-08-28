@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { changedLines, changedPaths, parseDiff } from "../../src/engine/diff";
+import {
+  changedLines,
+  changedPaths,
+  isChangedLine,
+  parseDiff,
+  removedLine,
+} from "../../src/engine/diff";
 
 /**
  * The parser turns a diff into the two things a review needs: which files changed and which line
@@ -362,6 +368,211 @@ describe("parseDiff", () => {
     );
 
     expect(parseDiff(text)).toMatchObject([{ path: "src/x.ts", hunks: [], addedCount: 0 }]);
+  });
+});
+
+/**
+ * What the findings gate stands on. The whole new-side span of a hunk counts, not only the added
+ * lines: a pull request breaks things by deleting as often as by adding, and a deletion leaves
+ * nothing to cite but the context around it.
+ */
+describe("isChangedLine", () => {
+  // Lines 10..14 on the new side: one context line, one added, one removed, two more context.
+  const CHANGED = parseDiff(
+    diff(
+      "diff --git a/src/x.ts b/src/x.ts",
+      "--- a/src/x.ts",
+      "+++ b/src/x.ts",
+      "@@ -10,4 +10,4 @@",
+      " const a = 1;",
+      "+const b = 2;",
+      "-const c = 3;",
+      " const d = 4;",
+      " const e = 5;",
+    ),
+  );
+
+  test("counts a context line inside the hunk, not only the added ones", () => {
+    expect(changedLines(CHANGED[0] ?? emptyFile())).toEqual([11]);
+    expect(isChangedLine(CHANGED, "src/x.ts", 10)).toBe(true);
+    expect(isChangedLine(CHANGED, "src/x.ts", 13)).toBe(true);
+  });
+
+  test("stops at the end of the hunk", () => {
+    expect(isChangedLine(CHANGED, "src/x.ts", 9)).toBe(false);
+    expect(isChangedLine(CHANGED, "src/x.ts", 14)).toBe(false);
+  });
+
+  test("counts the surviving boundary of a zero-context deletion, which spans no new lines", () => {
+    const deletion = parseDiff(
+      diff(
+        "diff --git a/src/x.ts b/src/x.ts",
+        "--- a/src/x.ts",
+        "+++ b/src/x.ts",
+        "@@ -5 +4,0 @@",
+        "-const gone = 1;",
+      ),
+    );
+
+    expect(isChangedLine(deletion, "src/x.ts", 4)).toBe(true);
+    expect(isChangedLine(deletion, "src/x.ts", 5)).toBe(false);
+  });
+
+  test("knows nothing about a file the diff never named", () => {
+    expect(isChangedLine(CHANGED, "src/y.ts", 11)).toBe(false);
+    expect(isChangedLine([], "src/x.ts", 11)).toBe(false);
+  });
+
+  test("counts every line of a pure rename, which has no hunks and still breaks its importers", () => {
+    const renamed = parseDiff(
+      diff(
+        "diff --git a/src/old.ts b/src/new.ts",
+        "similarity index 100%",
+        "rename from src/old.ts",
+        "rename to src/new.ts",
+      ),
+    );
+
+    expect(renamed).toMatchObject([{ path: "src/new.ts", status: "renamed", hunks: [] }]);
+    expect(isChangedLine(renamed, "src/new.ts", 1)).toBe(true);
+    expect(isChangedLine(renamed, "src/new.ts", 4000)).toBe(true);
+    // The path the graph knew before is not a path a citation can name.
+    expect(isChangedLine(renamed, "src/old.ts", 1)).toBe(false);
+  });
+
+  test("counts no line of an empty file that was only deleted", () => {
+    const deleted = parseDiff(
+      diff(
+        "diff --git a/src/gone.ts b/src/gone.ts",
+        "deleted file mode 100644",
+        "--- a/src/gone.ts",
+        "+++ /dev/null",
+      ),
+    );
+
+    expect(isChangedLine(deleted, "src/gone.ts", 1)).toBe(false);
+  });
+
+  test("counts every line of a rename that also carried an edit", () => {
+    const renamed = parseDiff(
+      diff(
+        "diff --git a/src/old.ts b/src/new.ts",
+        "similarity index 90%",
+        "rename from src/old.ts",
+        "rename to src/new.ts",
+        "--- a/src/old.ts",
+        "+++ b/src/new.ts",
+        "@@ -10,2 +10,2 @@",
+        "-const a = 1;",
+        "+const a = 2;",
+        " const b = 3;",
+      ),
+    );
+
+    // The edit does not narrow the rename: the path moved, and that is what breaks the importers.
+    expect(renamed).toMatchObject([{ path: "src/new.ts", status: "renamed" }]);
+    expect(renamed[0]?.hunks).toHaveLength(1);
+    expect(isChangedLine(renamed, "src/new.ts", 1)).toBe(true);
+    expect(isChangedLine(renamed, "src/new.ts", 4000)).toBe(true);
+  });
+});
+
+/**
+ * The other half of attribution: a line the pull request took away. Nothing of it survives in the
+ * new file, so the diff's removed side is the only source of record left for it.
+ */
+describe("removedLine", () => {
+  const cite = (file: string, line: number, anchor: string) => ({ file, line, anchor });
+
+  const DELETED = parseDiff(
+    diff(
+      "diff --git a/src/gone.ts b/src/gone.ts",
+      "deleted file mode 100644",
+      "--- a/src/gone.ts",
+      "+++ /dev/null",
+      "@@ -1,3 +0,0 @@",
+      "-const a = 1;",
+      "-const b = 2;",
+      "-const c = 3;",
+    ),
+  );
+
+  test("finds a line of a file the diff deleted whole", () => {
+    expect(removedLine(DELETED, cite("src/gone.ts", 2, "const b = 2;"))).toEqual({
+      file: "src/gone.ts",
+      line: 2,
+    });
+  });
+
+  test("matches on collapsed whitespace, as a citation anchor does", () => {
+    const edited = parseDiff(
+      diff(
+        "diff --git a/src/x.ts b/src/x.ts",
+        "--- a/src/x.ts",
+        "+++ b/src/x.ts",
+        "@@ -10,2 +10,1 @@",
+        "-    const   spaced = 1;",
+        " const kept = 2;",
+      ),
+    );
+
+    expect(removedLine(edited, cite("src/x.ts", 10, "const spaced = 1;"))).toEqual({
+      file: "src/x.ts",
+      line: 10,
+    });
+  });
+
+  test("answers at either name of a rename, and names the base in both", () => {
+    const renamed = parseDiff(
+      diff(
+        "diff --git a/src/old.ts b/src/new.ts",
+        "rename from src/old.ts",
+        "rename to src/new.ts",
+        "--- a/src/old.ts",
+        "+++ b/src/new.ts",
+        "@@ -10,2 +10,1 @@",
+        "-const dropped = 1;",
+        " const kept = 2;",
+      ),
+    );
+
+    // Either name finds it, and both answers name the base, because the line number is a base
+    // coordinate and pairing it with the branch's filename points at no tree at all.
+    expect(removedLine(renamed, cite("src/old.ts", 10, "const dropped = 1;"))).toEqual({
+      file: "src/old.ts",
+      line: 10,
+    });
+    expect(removedLine(renamed, cite("src/new.ts", 10, "const dropped = 1;"))).toEqual({
+      file: "src/old.ts",
+      line: 10,
+    });
+  });
+
+  test("takes the deleted occurrence nearest the cited line, ties to the lower", () => {
+    const twice = parseDiff(
+      diff(
+        "diff --git a/src/x.ts b/src/x.ts",
+        "--- a/src/x.ts",
+        "+++ b/src/x.ts",
+        "@@ -10,2 +10,1 @@",
+        "-    $order->save();",
+        " const kept = 1;",
+        "@@ -40,2 +39,1 @@",
+        "-    $order->save();",
+        " const also = 2;",
+      ),
+    );
+
+    expect(removedLine(twice, cite("src/x.ts", 38, "$order->save();"))?.line).toBe(40);
+    expect(removedLine(twice, cite("src/x.ts", 12, "$order->save();"))?.line).toBe(10);
+    // Equidistant from both: the lower line, so the answer never depends on scan order.
+    expect(removedLine(twice, cite("src/x.ts", 25, "$order->save();"))?.line).toBe(10);
+  });
+
+  test("knows nothing about an anchor the diff never removed, or an empty one", () => {
+    expect(removedLine(DELETED, cite("src/gone.ts", 1, "const d = 4;"))).toBeNull();
+    expect(removedLine(DELETED, cite("src/other.ts", 1, "const a = 1;"))).toBeNull();
+    expect(removedLine(DELETED, cite("src/gone.ts", 1, "   "))).toBeNull();
   });
 });
 

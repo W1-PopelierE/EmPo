@@ -4,6 +4,7 @@ import {
   type CitationStatus,
   checkCitation,
 } from "../engine/citations";
+import { type ChangedFile, isChangedLine, removedLine } from "../engine/diff";
 import { compareStrings } from "../engine/order";
 import { forbiddenPhrasings } from "./phrasing";
 
@@ -26,6 +27,11 @@ export interface ReviewFinding {
   claim: string;
   /** The line the finding stands on. Without it there is no finding (docs/05-graph-model.md). */
   citation: Citation;
+  /**
+   * The diff line that introduced or broke this. For a `diff` finding it is usually the citation
+   * itself; for an `impact` or `coverage` one it is the hunk whose change reaches that far.
+   */
+  introducedBy: Citation;
   supporting?: Citation[];
   suggestion?: string;
 }
@@ -35,6 +41,13 @@ export interface VerifiedFinding {
   /** The citation as it survived: corrected to the line the anchor is really on, when it moved. */
   citation: Citation;
   corrected: boolean;
+  /** The attribution as it was verified: the line containment was actually measured on. */
+  introducedBy: Citation;
+  /**
+   * True when that line was verified against the diff's removed side, because the branch deleted
+   * it. The coordinate is then in the base and not in the branch, and every report of it says so.
+   */
+  introducedByDeleted: boolean;
   supporting: SupportingCitation[];
 }
 
@@ -46,7 +59,11 @@ export interface SupportingCitation {
   note: string;
 }
 
-export type DropReason = "citation-unverified" | "forbidden-phrasing" | "duplicate";
+export type DropReason =
+  | "citation-unverified"
+  | "not-introduced"
+  | "forbidden-phrasing"
+  | "duplicate";
 
 export interface DroppedFinding {
   finding: ReviewFinding;
@@ -61,7 +78,16 @@ export interface GateResult {
 
 const SEVERITY_RANK: Record<Severity, number> = { blocker: 0, major: 1, minor: 2, question: 3 };
 
-export function gateFindings(readRoot: string, findings: ReviewFinding[]): GateResult {
+/**
+ * @param changed The pull request's diff, or null when it could not be read. Null skips the
+ * containment check alone: `introducedBy` is still resolved against source, because a citation
+ * nobody checked is the failure this gate exists to prevent whether or not a diff is at hand.
+ */
+export function gateFindings(
+  readRoot: string,
+  findings: ReviewFinding[],
+  changed: ChangedFile[] | null = null,
+): GateResult {
   const kept: VerifiedFinding[] = [];
   const dropped: DroppedFinding[] = [];
 
@@ -103,6 +129,49 @@ export function gateFindings(readRoot: string, findings: ReviewFinding[]): GateR
       continue;
     }
 
+    // The pull request is the subject of the review, so a finding has to name the line in it that
+    // caused the defect. Everything else is a defect the branch inherited: real, sometimes worse
+    // than anything in the diff, and not this author's to fix. A review that reports them anyway
+    // never converges, because the backlog it is really reviewing is the whole repository.
+    const origin = checkCitation(readRoot, finding.introducedBy);
+    const readable = origin.status !== "missing-file" && origin.status !== "anchor-absent";
+    const originLine = origin.actualLine ?? finding.introducedBy.line;
+    const contained =
+      readable &&
+      (changed === null || isChangedLine(changed, finding.introducedBy.file, originLine));
+
+    // A deletion is how a pull request breaks a consumer without leaving anything in the new file
+    // to cite: delete the file and `introducedBy` is unreadable, delete the method and its anchor
+    // is nowhere. The diff still carries the removed text, so it is the source of record for a line
+    // the branch took away, and being in a hunk at all is what proves the branch took it. Asked of
+    // every line that failed containment and not only of the unreadable ones, because a deleted
+    // line whose text recurs elsewhere in the file resolves perfectly well, somewhere it was never
+    // cited, and would otherwise be reported as inherited.
+    const deletedAt =
+      contained || changed === null ? null : removedLine(changed, finding.introducedBy);
+
+    if (!contained && deletedAt === null) {
+      dropped.push({
+        finding,
+        reason: "not-introduced",
+        detail: readable
+          ? [
+              `introducedBy ${finding.introducedBy.file}:${originLine} is outside every hunk of this diff, and is not among the lines it removed.`,
+              "The pull request did not cause this, so it is not a finding against it.",
+            ]
+          : [
+              `introducedBy: ${origin.note}`,
+              // Without the diff the removed side was never looked at, and saying it was would be
+              // the gate claiming a check it skipped.
+              changed === null
+                ? "The line said to have introduced this does not exist, so nothing ties it to the diff."
+                : "The line said to have introduced this is neither in the branch nor among the " +
+                  "lines this diff removed, so nothing ties it to the pull request.",
+            ],
+      });
+      continue;
+    }
+
     const hits = forbiddenPhrasings(`${finding.title} ${finding.claim}`);
     if (hits.length > 0) {
       // Only the title and the claim. A suggestion is allowed to be tentative, since proposing a
@@ -123,6 +192,11 @@ export function gateFindings(readRoot: string, findings: ReviewFinding[]): GateR
       finding,
       citation: correctedCitation(finding.citation, check),
       corrected: check.status === "moved",
+      introducedBy:
+        deletedAt === null
+          ? correctedCitation(finding.introducedBy, origin)
+          : { ...finding.introducedBy, ...deletedAt },
+      introducedByDeleted: deletedAt !== null,
       // A supporting citation is context (the caller, the sibling, the test), not the ground the
       // claim stands on, so a bad one is reported beside the finding instead of killing it.
       // Killing the finding would teach agents to cite no context at all, which costs the author

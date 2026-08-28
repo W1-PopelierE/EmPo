@@ -54,7 +54,7 @@ export function checkCitation(readRoot: string, citation: Citation): CitationChe
 
   // An anchor is the whole point: it is the quoted source the claim stands on. Nothing to check
   // means nothing was checked, which is the failure this module exists to prevent.
-  const anchor = collapse(citation.anchor);
+  const anchor = collapseWhitespace(citation.anchor);
   if (anchor === "") {
     return {
       citation,
@@ -65,7 +65,7 @@ export function checkCitation(readRoot: string, citation: Citation): CitationChe
     };
   }
 
-  if (citedLine !== null && collapse(citedLine).includes(anchor)) {
+  if (citedLine !== null && collapseWhitespace(citedLine).includes(anchor)) {
     return {
       citation,
       status: "verified",
@@ -141,8 +141,11 @@ function unreadable(citation: Citation, note: string): CitationCheck {
  * Whitespace is not evidence. An anchor has to survive a reindent, a tab converted to spaces, and a
  * claim quoted with single spaces from source that is aligned, or the checker would reject true
  * citations and teach agents to stop quoting source at all.
+ *
+ * Exported because a deleted line is checked the same way, against the diff's removed side rather
+ * than against a file (src/engine/diff.ts). Two anchor rules would be one rule too many.
  */
-function collapse(text: string): string {
+export function collapseWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
@@ -157,7 +160,7 @@ function splitLines(contents: string): string[] {
 function matchingLines(lines: string[], anchor: string): number[] {
   const matches: number[] = [];
   for (let index = 0; index < lines.length; index += 1) {
-    if (collapse(lines[index] ?? "").includes(anchor)) matches.push(index + 1);
+    if (collapseWhitespace(lines[index] ?? "").includes(anchor)) matches.push(index + 1);
   }
   return matches;
 }
@@ -182,6 +185,6 @@ function nearest(matches: number[], line: number): number | null {
 
 /** Notes are read in a terminal, so a 400-character minified line does not get quoted whole. */
 function excerpt(line: string): string {
-  const text = collapse(line);
+  const text = collapseWhitespace(line);
   return text.length > 80 ? `${text.slice(0, 80)}...` : text;
 }

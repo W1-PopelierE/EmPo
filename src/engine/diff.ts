@@ -1,3 +1,4 @@
+import { type Citation, collapseWhitespace } from "./citations";
 import { compareStrings } from "./order";
 
 /**
@@ -436,4 +437,75 @@ function splitLines(text: string): string[] {
   const lines = text.split("\n");
   if (text.endsWith("\n")) lines.pop();
   return lines.map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
+}
+
+/**
+ * Is this `file:line` inside a hunk of this diff? The whole new-side span of the hunk counts, not
+ * only the added lines, because a pull request breaks things by deleting as often as by adding and
+ * a deletion leaves nothing to cite but the context around it.
+ *
+ * This is what the findings gate stands on: a finding whose `introducedBy` lands outside every
+ * hunk is a defect the branch inherited, and reporting it as this pull request's is how a review
+ * turns into an audit nobody asked for.
+ */
+export function isChangedLine(files: ChangedFile[], path: string, line: number): boolean {
+  return files.some(
+    (file) =>
+      file.path === path &&
+      // A rename breaks every importer whether or not an edit rode along, so the whole file counts
+      // as changed, hunks or no hunks. An added file is whole for the duller reason that its hunks
+      // already span it. Anywhere else, the hunks are the change.
+      (file.status === "renamed" ||
+        file.status === "added" ||
+        file.hunks.some(
+          // A pure deletion hunk (`@@ -5 +4,0 @@`) spans no new lines, so its range would be
+          // empty and nothing a deletion broke could ever be attributed to it. The surviving
+          // boundary line is what a citation has left to point at, so it counts as changed.
+          (hunk) => line >= hunk.newStart && line < hunk.newStart + Math.max(hunk.newLines, 1),
+        )),
+  );
+}
+
+/**
+ * Where a deleted anchor sat in the base, or null when this diff removed no such line from that
+ * file. Whitespace is collapsed exactly as `checkCitation` collapses it, so a deleted line is held
+ * to the same anchor rule as a surviving one, and where the anchor was deleted more than once the
+ * match nearest the cited line wins, ties going to the lower number, for the same reason and by the
+ * same rule: which occurrence the answer names may not depend on the order a diff was scanned in.
+ *
+ * A deletion is how a pull request breaks a consumer without leaving anything in the new file to
+ * cite: delete the file and its `introducedBy` is unreadable, delete the method and the anchor is
+ * nowhere. The diff still carries the removed text, so it is the source of record for a line that
+ * no longer exists, and attributing to it is checked rather than assumed.
+ *
+ * Both halves of the answer are base coordinates, which is why the path comes back with the line
+ * and is not the caller's to keep. A rename can be cited at either name, and pairing the name the
+ * branch uses with a line number from before it moved would print a coordinate that exists in
+ * neither tree. A caller printing either half says it is in the base.
+ */
+export function removedLine(
+  files: ChangedFile[],
+  citation: Citation,
+): { file: string; line: number } | null {
+  const wanted = collapseWhitespace(citation.anchor);
+  if (wanted === "") return null;
+
+  let best: { file: string; line: number } | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const file of files) {
+    // Either path: a deleted symbol is cited where the reviewer read it, which for a rename is as
+    // often the new name off the diff header as the old one the line actually lived at.
+    if (file.path !== citation.file && file.oldPath !== citation.file) continue;
+    for (const hunk of file.hunks) {
+      for (const removed of hunk.removed) {
+        if (!collapseWhitespace(removed.text).includes(wanted)) continue;
+        const distance = Math.abs(removed.line - citation.line);
+        if (distance < bestDistance) {
+          best = { file: file.oldPath ?? file.path, line: removed.line };
+          bestDistance = distance;
+        }
+      }
+    }
+  }
+  return best;
 }

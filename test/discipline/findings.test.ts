@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { gateFindings, type ReviewFinding } from "../../src/discipline/findings";
+import { type ChangedFile, parseDiff } from "../../src/engine/diff";
 
 /**
  * The gate is the product's promise: nothing reaches the author that was not checked against the
@@ -43,6 +44,13 @@ function finding(overrides: Partial<ReviewFinding> = {}): ReviewFinding {
     claim:
       "total() subtracts the discount from the gross amount, so a taxed line is discounted twice.",
     citation: {
+      file: "app/PriceCalculator.php",
+      line: 7,
+      anchor: "$total = $gross - $discount;",
+    },
+    // The same line for a `diff` finding: the change is the defect. An `impact` finding overrides
+    // it with the hunk whose reach got that far.
+    introducedBy: {
       file: "app/PriceCalculator.php",
       line: 7,
       anchor: "$total = $gross - $discount;",
@@ -264,5 +272,279 @@ describe("gateFindings", () => {
     expect(kept).toEqual([]);
     expect(dropped[0]?.reason).toBe("citation-unverified");
     expect(dropped[0]?.detail[0]).toContain("escapes the read root");
+  });
+});
+
+/**
+ * The pull request is the subject of the review, so a finding has to name the diff line that caused
+ * it. Everything else is a defect the branch inherited: real, and not this author's to fix.
+ */
+describe("gateFindings against the diff", () => {
+  /** Touches lines 6..8 of PriceCalculator, so line 7 is inside the hunk and line 3 is not. */
+  const CHANGED: ChangedFile[] = parseDiff(
+    [
+      "diff --git a/app/PriceCalculator.php b/app/PriceCalculator.php",
+      "--- a/app/PriceCalculator.php",
+      "+++ b/app/PriceCalculator.php",
+      "@@ -6,3 +6,3 @@",
+      "    {",
+      "-        $total = $gross;",
+      "+        $total = $gross - $discount;",
+      "        return $total;",
+      "",
+    ].join("\n"),
+  );
+
+  test("keeps a finding whose introducedBy lands inside a hunk", () => {
+    const { kept, dropped } = gateFindings(root, [finding()], CHANGED);
+
+    expect(dropped).toEqual([]);
+    expect(kept.map((entry) => entry.finding.id)).toEqual(["F1"]);
+  });
+
+  test("drops a finding introduced in a file this diff never touched", () => {
+    const inherited = finding({
+      introducedBy: { file: "app/Order.php", line: 3, anchor: "class Order" },
+    });
+
+    const { kept, dropped } = gateFindings(root, [inherited], CHANGED);
+
+    expect(kept).toEqual([]);
+    expect(dropped[0]?.reason).toBe("not-introduced");
+    expect(dropped[0]?.detail[0]).toContain("app/Order.php:3 is outside every hunk");
+  });
+
+  test("drops a finding introduced on an untouched line of a file that did change", () => {
+    // File-level containment would keep this one, which is the bug: the class declaration is three
+    // lines above the hunk and nothing this branch wrote reaches it.
+    const inherited = finding({
+      introducedBy: { file: "app/PriceCalculator.php", line: 3, anchor: "class PriceCalculator" },
+    });
+
+    const { kept, dropped } = gateFindings(root, [inherited], CHANGED);
+
+    expect(kept).toEqual([]);
+    expect(dropped[0]?.reason).toBe("not-introduced");
+    expect(dropped[0]?.detail[0]).toContain("app/PriceCalculator.php:3 is outside every hunk");
+  });
+
+  test("measures containment on the line the anchor is really on, not the one it was given", () => {
+    const drifted = finding({
+      // Cited on line 3, which is outside the hunk; the anchor itself sits on line 7, inside it.
+      introducedBy: {
+        file: "app/PriceCalculator.php",
+        line: 3,
+        anchor: "$total = $gross - $discount;",
+      },
+    });
+
+    const { kept } = gateFindings(root, [drifted], CHANGED);
+
+    expect(kept).toHaveLength(1);
+    // Reported on the line containment was measured on, not the one the agent guessed.
+    expect(kept[0]?.introducedBy.line).toBe(7);
+    expect(kept[0]?.finding.introducedBy.line).toBe(3);
+  });
+
+  test("drops a finding whose introducedBy anchor is nowhere in the file", () => {
+    const invented = finding({
+      introducedBy: {
+        file: "app/PriceCalculator.php",
+        line: 7,
+        anchor: "$total = $gross * $vat;",
+      },
+    });
+
+    const { kept, dropped } = gateFindings(root, [invented], CHANGED);
+
+    expect(kept).toEqual([]);
+    expect(dropped[0]?.reason).toBe("not-introduced");
+    expect(dropped[0]?.detail[0]).toContain("nowhere in app/PriceCalculator.php");
+  });
+
+  // The citation is checked first, so a finding that is both uncited and uncaused is reported as
+  // uncited: the citation is the ground the claim stands on.
+  test("reports a finding with neither a citation nor an origin as uncited", () => {
+    const neither = finding({
+      citation: { file: "app/PriceCalculator.php", line: 7, anchor: "$tax = floor($net);" },
+      introducedBy: { file: "app/PriceCalculator.php", line: 7, anchor: "$vat = $net * 0.21;" },
+    });
+
+    expect(gateFindings(root, [neither], CHANGED).dropped[0]?.reason).toBe("citation-unverified");
+  });
+
+  test("skips containment when there is no diff, and still checks the anchor", () => {
+    const inherited = finding({
+      introducedBy: { file: "app/Order.php", line: 3, anchor: "class Order" },
+    });
+    const invented = finding({
+      id: "F2",
+      citation: { file: "app/Order.php", line: 3, anchor: "class Order" },
+      introducedBy: { file: "app/Order.php", line: 3, anchor: "class Invoice" },
+    });
+
+    const { kept, dropped } = gateFindings(root, [inherited, invented], null);
+
+    expect(kept.map((entry) => entry.finding.id)).toEqual(["F1"]);
+    expect(dropped.map((entry) => [entry.finding.id, entry.reason])).toEqual([
+      ["F2", "not-introduced"],
+    ]);
+    // Without the diff the removed side was never looked at, so the note does not say it was.
+    expect(dropped[0]?.detail[1]).not.toContain("removed");
+  });
+});
+
+/**
+ * A deletion is how a pull request breaks a consumer without leaving anything in the new file to
+ * cite. The diff still carries the removed text, so it is the source of record for a line the
+ * branch took away, and attributing to it is checked rather than assumed.
+ */
+describe("gateFindings against a line the diff deleted", () => {
+  /** Deletes app/Legacy.php whole, and one line out of a file that survives. */
+  const DELETIONS: ChangedFile[] = parseDiff(
+    [
+      "diff --git a/app/Legacy.php b/app/Legacy.php",
+      "deleted file mode 100644",
+      "--- a/app/Legacy.php",
+      "+++ /dev/null",
+      "@@ -1,3 +0,0 @@",
+      "-<?php",
+      "-",
+      "-class Legacy {}",
+      "diff --git a/app/Order.php b/app/Order.php",
+      "--- a/app/Order.php",
+      "+++ b/app/Order.php",
+      "@@ -40,2 +40,1 @@",
+      "-    public function subtotal(): int",
+      "     public function total(): int",
+      "",
+    ].join("\n"),
+  );
+
+  /** The consumer that broke. It is untouched by the diff, which is what makes it an impact. */
+  const impact = (introducedBy: ReviewFinding["introducedBy"]): ReviewFinding =>
+    finding({
+      kind: "impact",
+      citation: { file: "app/Order.php", line: 5, anchor: "public function total(): int" },
+      introducedBy,
+    });
+
+  test("keeps a finding introduced by the deletion of a whole file", () => {
+    const { kept, dropped } = gateFindings(
+      root,
+      // Cited a line off, as a reviewer reading a diff will: the answer is the line it resolved to.
+      [impact({ file: "app/Legacy.php", line: 9, anchor: "class Legacy {}" })],
+      DELETIONS,
+    );
+
+    expect(dropped).toEqual([]);
+    // The old-side coordinate, and the flag that says the file is gone from the branch.
+    expect(kept[0]?.introducedBy.line).toBe(3);
+    expect(kept[0]?.introducedByDeleted).toBe(true);
+  });
+
+  test("keeps a finding introduced by a line deleted from a file that survives", () => {
+    const { kept } = gateFindings(
+      root,
+      [impact({ file: "app/Order.php", line: 5, anchor: "public function subtotal(): int" })],
+      DELETIONS,
+    );
+
+    // 40 is where the diff removed it. 5 is what the finding said, and is not the answer.
+    expect(kept[0]?.introducedBy.line).toBe(40);
+    expect(kept[0]?.introducedByDeleted).toBe(true);
+  });
+
+  test("drops a finding whose anchor is in neither the branch nor the removed lines", () => {
+    const { kept, dropped } = gateFindings(
+      root,
+      [impact({ file: "app/Legacy.php", line: 3, anchor: "class Invented {}" })],
+      DELETIONS,
+    );
+
+    expect(kept).toEqual([]);
+    expect(dropped[0]?.reason).toBe("not-introduced");
+    expect(dropped[0]?.detail[1]).toContain("nor among the lines this diff removed");
+  });
+
+  // The anchor of a deleted line often recurs in the file it was deleted from, and then it resolves
+  // perfectly well somewhere it was never cited. Attributed by containment alone, the deletion this
+  // pull request made would be reported back to the author as a defect it inherited.
+  test("keeps a deleted line whose text also survives elsewhere in the same file", () => {
+    const recurring = impact({
+      file: "app/PriceCalculator.php",
+      line: 40,
+      anchor: "return $total;",
+    });
+    const removedElsewhere: ChangedFile[] = parseDiff(
+      [
+        "diff --git a/app/PriceCalculator.php b/app/PriceCalculator.php",
+        "--- a/app/PriceCalculator.php",
+        "+++ b/app/PriceCalculator.php",
+        "@@ -40,2 +40,1 @@",
+        "-        return $total;",
+        "    }",
+        "",
+      ].join("\n"),
+    );
+
+    // Line 8 of the branch file reads the same, which is where the anchor resolves.
+    const { kept, dropped } = gateFindings(root, [recurring], removedElsewhere);
+
+    expect(dropped).toEqual([]);
+    expect(kept[0]?.introducedByDeleted).toBe(true);
+    expect(kept[0]?.introducedBy.line).toBe(40);
+  });
+
+  test("names a deleted line at the path it lived at, not the one the branch uses", () => {
+    const renamed: ChangedFile[] = parseDiff(
+      [
+        "diff --git a/app/Legacy.php b/app/Modern.php",
+        "rename from app/Legacy.php",
+        "rename to app/Modern.php",
+        "--- a/app/Legacy.php",
+        "+++ b/app/Modern.php",
+        "@@ -10,2 +10,1 @@",
+        "-    public function subtotal(): int",
+        "    }",
+        "",
+      ].join("\n"),
+    );
+
+    // Cited at the new name, which is what the diff header shows a reviewer.
+    const { kept } = gateFindings(
+      root,
+      [impact({ file: "app/Modern.php", line: 10, anchor: "public function subtotal(): int" })],
+      renamed,
+    );
+
+    // Both halves come from the base, or the pair points at no tree at all.
+    expect(kept[0]?.introducedBy).toMatchObject({ file: "app/Legacy.php", line: 10 });
+    expect(kept[0]?.introducedByDeleted).toBe(true);
+  });
+
+  test("marks a line that survives as not deleted, though its text was deleted elsewhere", () => {
+    const CHANGED: ChangedFile[] = parseDiff(
+      [
+        "diff --git a/app/PriceCalculator.php b/app/PriceCalculator.php",
+        "--- a/app/PriceCalculator.php",
+        "+++ b/app/PriceCalculator.php",
+        "@@ -6,3 +6,3 @@",
+        "    {",
+        "-        $total = $gross;",
+        "+        $total = $gross - $discount;",
+        "        return $total;",
+        "",
+      ].join("\n"),
+    );
+
+    // The anchor matches the removed line as well as the surviving one it is cited on. The
+    // surviving one wins, because it is where the finding says the defect is.
+    const cited = finding({
+      citation: { file: "app/PriceCalculator.php", line: 7, anchor: "$total = $gross" },
+      introducedBy: { file: "app/PriceCalculator.php", line: 7, anchor: "$total = $gross" },
+    });
+
+    expect(gateFindings(root, [cited], CHANGED).kept[0]?.introducedByDeleted).toBe(false);
   });
 });

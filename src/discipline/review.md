@@ -9,6 +9,19 @@ One rule governs all of it: an assertion is true only when something checked it.
 suspected findings; a suspicion is not a finding until an independent check confirms it against the
 source. Only survivors reach the author.
 
+A second rule bounds what the first one is applied to: **the pull request is the subject, so a
+finding is something this pull request introduced or broke.** Every step below runs over code the
+branch inherited as well as code it changed, and everything they turn up there is real: the
+untested helper, the wrong comparison, the flow nobody guarded. None of it is this author's, and a
+review that reports it converges on nothing, because the backlog it is really reviewing is the
+whole repository. So every finding names the diff line that caused it, in an `introducedBy`
+citation, and the gate drops the ones that cannot: a finding whose `introducedBy` lands outside
+every hunk of this diff is not a finding against this pull request.
+
+What to do with a real defect that predates the branch: one maintenance line at the end of the
+report, no severity, no citation ceremony, and never mixed in with the findings. It is a fact about
+the repository, offered, and not a change asked of this author.
+
 ## Two invariants
 
 **A review executes nothing.** No test run, no static analysis, no build, no running app, no
@@ -227,6 +240,13 @@ ANSWER  VERIFIED, FALSE POSITIVE or UNCLEAR, with a file:line and the exact sour
         you read it from. Read and grep only. Do not run tests, analysis or the app.
 ```
 
+**Then ask, of every survivor, what in the diff caused it.** Name the hunk: the line the author
+added, changed or deleted that made this true. A deleted line is named the same way, quoting the
+text the diff removed and its number in the base, because the deletion is the cause and there is
+nothing left in the branch to point at. If you cannot find any such line, the code was already like
+that before the branch, and it goes to the maintenance line, not the findings. This question is the
+whole of the second rule, asked at the one place where every suspect passes through.
+
 **Keep only the survivors.**
 
 - VERIFIED goes into the review, with the evidence the check returned.
@@ -338,6 +358,7 @@ Write the findings you intend to report to a JSON file, then hand it to the gate
       "title": "Discount is applied before tax, reversing the documented order",
       "claim": "PriceCalculator::total() subtracts the discount from the gross amount, so a taxed line is discounted twice.",
       "citation": { "file": "apps/api/app/Libraries/Price/PriceCalculator.php", "line": 42, "anchor": "$total = $gross - $discount;" },
+      "introducedBy": { "file": "apps/api/app/Libraries/Price/PriceCalculator.php", "line": 42, "anchor": "$total = $gross - $discount;" },
       "supporting": [{ "file": "apps/api/app/Models/Order.php", "line": 12, "anchor": "public function total(): int" }],
       "suggestion": "Apply the discount to the net amount, after tax."
     }
@@ -356,6 +377,18 @@ The fields:
   line, copied from the file, not retyped from memory and not reformatted: the gate drops any
   finding whose anchor is not present in the cited file. A citation nobody checked is the failure
   this whole tool exists to prevent, so every one is checked.
+- `introducedBy` is the diff line that introduced or broke this. For a `diff` finding it is
+  usually the citation itself; for an `impact` or `coverage` one it is the hunk whose change
+  reaches that far. Same anchor rule as `citation`, and one more check on top: the gate resolves it
+  and then drops the finding when it lands outside every hunk of this diff. That is how "only what
+  this pull request caused" stops being advice. It also catches the quieter version of the mistake,
+  a `diff` finding cited on an untouched line of a file the diff happens to open.
+- **When the cause is a deletion, cite the line that was deleted**, with its text as the anchor and
+  its file and line as they were in the base. An anchor the gate cannot place in the diff is looked
+  for among the lines this diff removed, so a deleted file, a deleted method and a deleted call are
+  all citable, and the report says the coordinate is in the base. This is the only case where it is
+  not a line the author can open, and it exists because a pull request breaks a consumer by taking
+  something away at least as often as by writing something wrong.
 - `supporting` is optional, for the other lines that back the claim up, same anchor rule.
   `suggestion` is optional too; leave it out rather than guess at a fix.
 - Every path is repo-relative, never worktree-absolute, because the author reads it in their own
