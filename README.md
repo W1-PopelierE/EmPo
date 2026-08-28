@@ -125,9 +125,12 @@ On top of that graph:
   discipline, an agent writes findings, and `--findings` resolves every citation against real source
   and prints only the survivors. A claim standing on text that does not exist is dropped, and so is
   one whose `introducedBy` line falls outside the diff: the pull request is the subject of the
-  review, so a defect the branch inherited is not a finding against it. Among
-  those facts are the two about volume: that a changed file is reached from a scheduler entry, and
-  every dispatch it makes from inside a loop. How often either runs is a property of the data and
+  review, so a defect the branch inherited is not a finding against it. A line the branch deleted
+  counts as the diff's, verified against the removed side and reported as a coordinate in the base,
+  because deleting a file or a method breaks its consumers while leaving nothing in the new source
+  to cite. Among those facts are the two about volume: that a changed file is reached from a
+  scheduler entry, and every dispatch it makes from inside a loop. How often either runs is a
+  property of the data and
   not of the source, so EmPo prints the coordinate and claims nothing; going and reading what bounds
   the loop is the reviewer's job, and a conclusion about it is a finding like any other.
 - **`empo verify` and `empo check`** hold hand-curated critical chains, and `empo hook` makes those

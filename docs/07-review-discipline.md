@@ -170,11 +170,12 @@ The CLI enforces this funnel mechanically rather than trusting it to be followed
 prints the executable form of this doc, `src/discipline/review.md`, then gates the findings that
 come back, in this order: each citation anchor is resolved against the real source in the worktree
 and the finding is dropped if the anchor is not there; the `introducedBy` anchor is resolved the
-same way and the finding is dropped as `not-introduced` if it is nowhere, or if the line it is
-really on lies outside every hunk of this pull request's diff; and the title and claim of every
-finding are linted against the phrasings above. The citation is checked first because it is the
-ground truth, and a fabricated finding is worth reporting as fabricated rather than as inherited.
-Only survivors are printed. The last phrasing rule is deliberately not in the lint,
+same way and the finding is dropped as `not-introduced` if the line it is really on lies outside
+every hunk of this pull request's diff, or if it is neither in the branch nor among the lines the
+diff removed; and the title and claim of every finding are linted against the phrasings above. The
+citation is checked first because it is the ground truth, and a fabricated finding is worth
+reporting as fabricated rather than as inherited. Only survivors are printed. The last phrasing rule
+is deliberately not in the lint,
 because "does not persist" is exactly what a finding says *after* the callee has been read and no
 regex can tell whether it was; banning the wording would delete true findings. The citation gate
 enforces that one instead, since the claim only ships if it quotes a real line of the callee.
@@ -184,6 +185,17 @@ is gone the containment check alone is skipped and the report says so in a note,
 quietly stops checking reads exactly like one that checked and found nothing wrong. The
 `introducedBy` anchor is still resolved against source in that case: a citation nobody checked is
 the failure this gate exists to prevent whether or not a diff is at hand.
+
+An anchor that fails either half is looked for among the lines the diff removed before it is
+dropped, on the same collapsed whitespace a surviving anchor is matched on, so a deleted line is
+held to exactly the anchor rule every other citation is. Either half, and not only the unreadable
+one, because the text of a deleted line commonly recurs in the file it was deleted from, where it
+resolves perfectly well somewhere it was never cited. Deleting a file or a method is how a pull
+request breaks its consumers while leaving nothing in the new source to cite: the consumer's own
+line is untouched, so it is outside every hunk, and the line that broke it is gone, so it resolves
+nowhere. Without the removed side both halves fail and the pull request reviews clean. Such a
+finding is kept, and its `introducedBy` is a coordinate in the base rather than in the branch,
+which every report of it says in as many words.
 
 #### The false-positive register (`conventions.md`)
 

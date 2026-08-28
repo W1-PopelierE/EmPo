@@ -732,10 +732,10 @@ proven before anything depends on it. Order within phase 1:
    audit for what this tool executes.
 
    What it proved: the gate is mechanical. A finding whose anchor is not in the file it cites is
-   dropped, a finding whose `introducedBy` lands outside every hunk of the diff is dropped, and a
-   finding whose text hedges is dropped, all by the same answer on every machine and every run, and
-   all without a model. A large share of the suite is step 6's, all of `test/adapters/`,
-   `test/commands/review.test.ts`, the diff and citation specs and the gate and
+   dropped, a finding whose `introducedBy` is neither in the diff's hunks nor among the lines it
+   removed is dropped, and a finding whose text hedges is dropped, all by the same answer on every
+   machine and every run, and all without a model. A large share of the suite is step 6's, all of
+   `test/adapters/`, `test/commands/review.test.ts`, the diff and citation specs and the gate and
    phrasing specs under `test/discipline/`, and the share is stated rather than counted on purpose:
    a test total written into prose is wrong the week after it is written, and this page carried one
    that was. Every line that interprets what `gh` said is a pure exported function, so the whole
@@ -891,7 +891,7 @@ Two things step 5 changed that were not on anybody's list:
   `vitest.config.ts` needed nothing, because it only collects `test/**`. Any future language whose
   fixtures are written in the same language as this repo will need the same treatment.
 
-Seven things step 6 decided, recorded so none of them is reopened without new facts:
+Eight things step 6 decided, recorded so none of them is reopened without new facts:
 
 - **A review's scratch lives in the OS temp directory, never under `.empo/`.** `session.json`, the
   `pr-<id>.diff` and the detached worktree all sit under `empo-review/<id>` in the system temp
@@ -918,13 +918,26 @@ Seven things step 6 decided, recorded so none of them is reopened without new fa
   inherited never converges: it ends up reviewing the whole repository instead of the diff
   ([07-review-discipline](07-review-discipline.md) invariant 3). The field is required and not
   optional for the reason a schema is enforced at all — an optional invariant is advice — and the
-  gate drops as `not-introduced` both an anchor that resolves nowhere and one whose real line falls
-  outside every hunk. The containment half needs the `pr-<id>.diff` phase 1 saved; when that file is
-  gone the check is skipped and the report says so, rather than printing a clean gate that had
-  stopped checking. The anchor is still resolved in that case, since a citation nobody checked is
+  gate drops as `not-introduced` an anchor whose real line falls outside every hunk, and one that is
+  in neither the branch nor the lines the diff removed. The containment half needs the
+  `pr-<id>.diff` phase 1 saved; when that file is gone the check is skipped and the report says so,
+  rather than printing a clean gate that had stopped checking. The anchor is still resolved in that
+  case, since a citation nobody checked is
   the failure the gate exists to prevent with or without a diff. `isChangedLine` counts context
-  lines inside a hunk, so a deletion counts, and counts a whole file that was added or renamed with
-  no hunks, because a rename with no edit still breaks every importer.
+  lines inside a hunk, so a deletion counts, and counts a whole file that was added or renamed
+  whatever its hunks, because a rename breaks every importer whether or not an edit rode along, and
+  a file renamed and edited in one commit would otherwise count only inside its edits.
+- **An `introducedBy` the branch deleted is verified against the diff's removed side, not
+  dropped.** A pull request that deletes a file or a method breaks its consumers, and neither half
+  of the gate can see it: the consumer's own line is untouched, so it fails containment, and the
+  line that broke it is gone from the branch, so its anchor resolves nowhere, or worse resolves
+  somewhere else in the file that happens to read the same. The whole pull request then reviewed
+  clean. `removedLine` answers from the diff's removed text, which is the source of record for a
+  line the branch took away, on the same collapsed whitespace `checkCitation` matches on, so a
+  deleted line is held to the anchor rule every other citation is rather than taken on trust. The
+  finding is kept with `introducedByDeleted` set and its file and line rewritten to the old side,
+  and every report of it says the coordinate is in the base: printed unqualified it would send the
+  author to whatever now sits on that line.
 - **The forbidden-phrasing lint deliberately omits doc 07's callee-behaviour family.** "X never
   saves", "does not persist", "returns null" is exactly what a *verified* finding says once the
   callee's body has been read, no regex can tell whether it was read, and banning the wording would

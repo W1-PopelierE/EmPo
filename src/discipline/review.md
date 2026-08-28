@@ -241,7 +241,9 @@ ANSWER  VERIFIED, FALSE POSITIVE or UNCLEAR, with a file:line and the exact sour
 ```
 
 **Then ask, of every survivor, what in the diff caused it.** Name the hunk: the line the author
-added, changed or deleted that made this true. If you cannot find one, the code was already like
+added, changed or deleted that made this true. A deleted line is named the same way, quoting the
+text the diff removed and its number in the base, because the deletion is the cause and there is
+nothing left in the branch to point at. If you cannot find any such line, the code was already like
 that before the branch, and it goes to the maintenance line, not the findings. This question is the
 whole of the second rule, asked at the one place where every suspect passes through.
 
@@ -381,6 +383,12 @@ The fields:
   and then drops the finding when it lands outside every hunk of this diff. That is how "only what
   this pull request caused" stops being advice. It also catches the quieter version of the mistake,
   a `diff` finding cited on an untouched line of a file the diff happens to open.
+- **When the cause is a deletion, cite the line that was deleted**, with its text as the anchor and
+  its file and line as they were in the base. An anchor the gate cannot place in the diff is looked
+  for among the lines this diff removed, so a deleted file, a deleted method and a deleted call are
+  all citable, and the report says the coordinate is in the base. This is the only case where it is
+  not a line the author can open, and it exists because a pull request breaks a consumer by taking
+  something away at least as often as by writing something wrong.
 - `supporting` is optional, for the other lines that back the claim up, same anchor rule.
   `suggestion` is optional too; leave it out rather than guess at a fix.
 - Every path is repo-relative, never worktree-absolute, because the author reads it in their own

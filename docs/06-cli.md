@@ -683,17 +683,27 @@ whole product.
 **One of those checks is a scope gate, and it needs the diff.** Every finding carries a required
 `introducedBy` citation naming the diff line that introduced or broke it
 ([07-review-discipline](07-review-discipline.md) invariant 3), and phase 2 reads back the `pr-<id>.diff`
-phase 1 saved to check it: an anchor that is nowhere, or one whose real line falls outside every hunk,
-drops the finding as `not-introduced`. A line counts as changed when it is inside a hunk's new-side
-span, context lines included so a pure deletion counts, and anywhere in a file the diff added or
-renamed without hunks, because a rename with no edit still breaks every importer. Where the saved
-diff is gone that one check is skipped and a note says so in those words; the `introducedBy` anchor is
-still resolved against source, since a gate that silently stops checking reads exactly like one that
-checked and found nothing wrong.
+phase 1 saved to check it: a finding is dropped as `not-introduced` when that anchor is nowhere the
+diff reaches, whether because it resolves to no line at all or because the line it really sits on is
+outside every hunk. A line counts as changed when it is inside a hunk's new-side span, context lines
+included so a pure deletion counts, and anywhere in a file the diff added or renamed, whatever hunks
+it carries, because a rename breaks every importer whether or not an edit rode along. An anchor that
+fails either of those is looked for on the diff's removed side before it is dropped, matched on
+collapsed whitespace exactly as a surviving anchor is. Either failure and not only the unreadable
+one, because the text of a deleted line commonly recurs in the file it was deleted from, where it
+resolves perfectly well somewhere it was never cited.
+Deleting a file or a method is how a pull request breaks its consumers while leaving nothing in the
+new source to cite, so such a finding is kept, with its `introducedBy` file and line taken from the
+base rather than from the branch. Where the saved diff is gone that one check is skipped and a note
+says so in those words; the `introducedBy` anchor is still resolved against source, since a gate
+that silently stops checking reads exactly like one that checked and found nothing wrong.
 
 Every printed finding carries an `introduced by file:line` line under its claim, and with `--post` an
 `impact` or `coverage` comment names "Introduced by file:line" in the body. A `diff` comment does not:
-it lands on the changed line already.
+it lands on the changed line already. Where that line was the one the branch deleted, the printed
+line adds `(deleted by this pull request; the line is in the base)` and the comment says
+"Introduced by the deletion of file:line", because a base coordinate read as a branch coordinate
+sends the author to whatever now sits on that line.
 
 It never executes the target project's tests or static analysis (CI does that); coverage judgement
 is a reading task.

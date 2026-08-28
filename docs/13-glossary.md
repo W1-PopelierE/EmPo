@@ -94,7 +94,10 @@ that introduced or broke it, in the same `file:line:anchor` shape as the finding
 a `diff` finding it is usually that citation; for an `impact` or `coverage` one it is the hunk whose
 change reaches that far. Required, and checked against the pull request's own hunks: a finding the
 branch inherited is dropped as `not-introduced`, because a review that reports inherited defects is
-reviewing the repository and not the diff. See [07-review-discipline](07-review-discipline.md).
+reviewing the repository and not the diff. An anchor that fails is checked against the lines the
+diff removed before it is dropped, since deleting a file or a method breaks its consumers without
+leaving anything in the new source to cite; the file and line are then coordinates in the base, and
+every report of them says so. See [07-review-discipline](07-review-discipline.md).
 
 **Invariant.** A statement that must remain true after a change to a spine (for example, line totals
 sum to the header). Best cited to an executable check in the codebase rather than stated in prose.

@@ -1748,7 +1748,9 @@ function printGate(
         `  ${row.citation.file}:${row.citation.line}${row.corrected ? "  (citation corrected: the anchor had moved)" : ""}`,
       );
       console.log(`  ${row.finding.claim}`);
-      console.log(`  introduced by: ${row.introducedBy.file}:${row.introducedBy.line}`);
+      console.log(
+        `  introduced by: ${row.introducedBy.file}:${row.introducedBy.line}${row.introducedByDeleted ? "  (deleted by this pull request; the line is in the base)" : ""}`,
+      );
       if (row.finding.suggestion !== undefined)
         console.log(`  suggestion: ${row.finding.suggestion}`);
       for (const support of row.supporting) {
@@ -1806,7 +1808,12 @@ function postFindings(repoRoot: string, pr: string | undefined, result: GateResu
     // the diff made it theirs to answer.
     if (row.finding.kind !== "diff") {
       const origin = row.introducedBy;
-      lines.push("", `Introduced by ${origin.file}:${origin.line}.`);
+      lines.push(
+        "",
+        row.introducedByDeleted
+          ? `Introduced by the deletion of ${origin.file}:${origin.line}.`
+          : `Introduced by ${origin.file}:${origin.line}.`,
+      );
     }
     if (row.finding.suggestion !== undefined) lines.push("", row.finding.suggestion);
     forge.adapter.comment(id, scrubTells(lines.join("\n")), {

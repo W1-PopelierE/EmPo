@@ -4,7 +4,7 @@ import {
   type CitationStatus,
   checkCitation,
 } from "../engine/citations";
-import { type ChangedFile, isChangedLine } from "../engine/diff";
+import { type ChangedFile, isChangedLine, removedLine } from "../engine/diff";
 import { compareStrings } from "../engine/order";
 import { forbiddenPhrasings } from "./phrasing";
 
@@ -43,6 +43,11 @@ export interface VerifiedFinding {
   corrected: boolean;
   /** The attribution as it was verified: the line containment was actually measured on. */
   introducedBy: Citation;
+  /**
+   * True when that line was verified against the diff's removed side, because the branch deleted
+   * it. The coordinate is then in the base and not in the branch, and every report of it says so.
+   */
+  introducedByDeleted: boolean;
   supporting: SupportingCitation[];
 }
 
@@ -129,26 +134,40 @@ export function gateFindings(
     // than anything in the diff, and not this author's to fix. A review that reports them anyway
     // never converges, because the backlog it is really reviewing is the whole repository.
     const origin = checkCitation(readRoot, finding.introducedBy);
-    if (origin.status === "missing-file" || origin.status === "anchor-absent") {
-      dropped.push({
-        finding,
-        reason: "not-introduced",
-        detail: [
-          `introducedBy: ${origin.note}`,
-          "The line said to have introduced this does not exist, so nothing ties it to the diff.",
-        ],
-      });
-      continue;
-    }
+    const readable = origin.status !== "missing-file" && origin.status !== "anchor-absent";
     const originLine = origin.actualLine ?? finding.introducedBy.line;
-    if (changed !== null && !isChangedLine(changed, finding.introducedBy.file, originLine)) {
+    const contained =
+      readable &&
+      (changed === null || isChangedLine(changed, finding.introducedBy.file, originLine));
+
+    // A deletion is how a pull request breaks a consumer without leaving anything in the new file
+    // to cite: delete the file and `introducedBy` is unreadable, delete the method and its anchor
+    // is nowhere. The diff still carries the removed text, so it is the source of record for a line
+    // the branch took away, and being in a hunk at all is what proves the branch took it. Asked of
+    // every line that failed containment and not only of the unreadable ones, because a deleted
+    // line whose text recurs elsewhere in the file resolves perfectly well, somewhere it was never
+    // cited, and would otherwise be reported as inherited.
+    const deletedAt =
+      contained || changed === null ? null : removedLine(changed, finding.introducedBy);
+
+    if (!contained && deletedAt === null) {
       dropped.push({
         finding,
         reason: "not-introduced",
-        detail: [
-          `introducedBy ${finding.introducedBy.file}:${originLine} is outside every hunk of this diff.`,
-          "The pull request did not cause this, so it is not a finding against it.",
-        ],
+        detail: readable
+          ? [
+              `introducedBy ${finding.introducedBy.file}:${originLine} is outside every hunk of this diff, and is not among the lines it removed.`,
+              "The pull request did not cause this, so it is not a finding against it.",
+            ]
+          : [
+              `introducedBy: ${origin.note}`,
+              // Without the diff the removed side was never looked at, and saying it was would be
+              // the gate claiming a check it skipped.
+              changed === null
+                ? "The line said to have introduced this does not exist, so nothing ties it to the diff."
+                : "The line said to have introduced this is neither in the branch nor among the " +
+                  "lines this diff removed, so nothing ties it to the pull request.",
+            ],
       });
       continue;
     }
@@ -173,7 +192,11 @@ export function gateFindings(
       finding,
       citation: correctedCitation(finding.citation, check),
       corrected: check.status === "moved",
-      introducedBy: correctedCitation(finding.introducedBy, origin),
+      introducedBy:
+        deletedAt === null
+          ? correctedCitation(finding.introducedBy, origin)
+          : { ...finding.introducedBy, ...deletedAt },
+      introducedByDeleted: deletedAt !== null,
       // A supporting citation is context (the caller, the sibling, the test), not the ground the
       // claim stands on, so a bad one is reported beside the finding instead of killing it.
       // Killing the finding would teach agents to cite no context at all, which costs the author

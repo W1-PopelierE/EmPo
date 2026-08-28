@@ -1551,6 +1551,29 @@ describe("the gate", () => {
     expect(answer.notes.join("\n")).toContain("not checked against the changed lines");
   });
 
+  // A deletion is the one change that leaves nothing in the branch to cite. Without the removed-side
+  // lookup, a pull request that deletes a file and breaks its consumers could report nothing at all.
+  test("keeps a finding introduced by a file this branch deleted", () => {
+    changeCalculator();
+    const deleted = "apps/api/app/Models/Order.php";
+    const line = readFileSync(join(repo, deleted), "utf8").split("\n").indexOf("class Order") + 1;
+    rmSync(join(repo, deleted));
+
+    const printed = gate([
+      {
+        ...realFinding(),
+        kind: "impact",
+        // Cited on the calculator, which survives; caused by the model that no longer exists.
+        introducedBy: { file: deleted, line, anchor: "class Order" },
+      },
+    ]);
+
+    expect(printed).toContain("1 of 1 survived");
+    expect(printed).toContain(
+      `introduced by: ${deleted}:${line}  (deleted by this pull request; the line is in the base)`,
+    );
+  });
+
   test("is a no-op on an empty findings list", () => {
     changeCalculator();
 
