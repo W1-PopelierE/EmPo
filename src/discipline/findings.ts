@@ -4,6 +4,7 @@ import {
   type CitationStatus,
   checkCitation,
 } from "../engine/citations";
+import { type ChangedFile, isChangedLine } from "../engine/diff";
 import { compareStrings } from "../engine/order";
 import { forbiddenPhrasings } from "./phrasing";
 
@@ -26,6 +27,11 @@ export interface ReviewFinding {
   claim: string;
   /** The line the finding stands on. Without it there is no finding (docs/05-graph-model.md). */
   citation: Citation;
+  /**
+   * The diff line that introduced or broke this. For a `diff` finding it is usually the citation
+   * itself; for an `impact` or `coverage` one it is the hunk whose change reaches that far.
+   */
+  introducedBy: Citation;
   supporting?: Citation[];
   suggestion?: string;
 }
@@ -46,7 +52,11 @@ export interface SupportingCitation {
   note: string;
 }
 
-export type DropReason = "citation-unverified" | "forbidden-phrasing" | "duplicate";
+export type DropReason =
+  | "citation-unverified"
+  | "not-introduced"
+  | "forbidden-phrasing"
+  | "duplicate";
 
 export interface DroppedFinding {
   finding: ReviewFinding;
@@ -61,7 +71,16 @@ export interface GateResult {
 
 const SEVERITY_RANK: Record<Severity, number> = { blocker: 0, major: 1, minor: 2, question: 3 };
 
-export function gateFindings(readRoot: string, findings: ReviewFinding[]): GateResult {
+/**
+ * @param changed The pull request's diff, or null when it could not be read. Null skips the
+ * containment check alone: `introducedBy` is still resolved against source, because a citation
+ * nobody checked is the failure this gate exists to prevent whether or not a diff is at hand.
+ */
+export function gateFindings(
+  readRoot: string,
+  findings: ReviewFinding[],
+  changed: ChangedFile[] | null = null,
+): GateResult {
   const kept: VerifiedFinding[] = [];
   const dropped: DroppedFinding[] = [];
 
@@ -99,6 +118,35 @@ export function gateFindings(readRoot: string, findings: ReviewFinding[]): GateR
         finding,
         reason: "citation-unverified",
         detail: [check.note, "A claim standing on text that does not exist is not a finding."],
+      });
+      continue;
+    }
+
+    // The pull request is the subject of the review, so a finding has to name the line in it that
+    // caused the defect. Everything else is a defect the branch inherited: real, sometimes worse
+    // than anything in the diff, and not this author's to fix. A review that reports them anyway
+    // never converges, because the backlog it is really reviewing is the whole repository.
+    const origin = checkCitation(readRoot, finding.introducedBy);
+    if (origin.status === "missing-file" || origin.status === "anchor-absent") {
+      dropped.push({
+        finding,
+        reason: "not-introduced",
+        detail: [
+          `introducedBy: ${origin.note}`,
+          "The line said to have introduced this does not exist, so nothing ties it to the diff.",
+        ],
+      });
+      continue;
+    }
+    const originLine = origin.actualLine ?? finding.introducedBy.line;
+    if (changed !== null && !isChangedLine(changed, finding.introducedBy.file, originLine)) {
+      dropped.push({
+        finding,
+        reason: "not-introduced",
+        detail: [
+          `introducedBy ${finding.introducedBy.file}:${originLine} is outside every hunk of this diff.`,
+          "The pull request did not cause this, so it is not a finding against it.",
+        ],
       });
       continue;
     }

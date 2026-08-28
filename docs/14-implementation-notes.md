@@ -134,7 +134,7 @@ empo  (this repo)
       flows.ts               # assign non-test nodes to flows by longest path-prefix, across roots
       coverage.ts            # cross-ref test nodes -> per-flow coverage (blind detection)
       git.ts                 # sha, refs, worktrees, and the one run() every subprocess goes through
-      diff.ts                # unified-diff parser: which files changed and which line numbers
+      diff.ts                # unified-diff parser: which files changed, which lines, and isChangedLine
       citations.ts           # resolve a file:line:anchor against real source, verified/moved/absent
       spines.ts              # load every spine and enumerate the citations it states
       guard.ts               # does this diff touch a spine's guarded files, and did a test assert
@@ -166,7 +166,7 @@ empo  (this repo)
     discipline/
       review.md              # the shipped, universal review workflow (from doc 07)
       map.md                 # the shipped map workflow empo init prints (from docs 06 and 08)
-      findings.ts            # the verification gate: citations resolved, hedges dropped, survivors
+      findings.ts            # the verification gate: citations resolved, inherited and hedged dropped
       phrasing.ts            # the forbidden-phrasing lint, over a finding's own text and nothing else
       load.ts                # find a discipline file under src/ or beside dist/, as pack-loader does
       prompts/               # UNBUILT: verification prompt templates, ticket-fit template
@@ -732,9 +732,10 @@ proven before anything depends on it. Order within phase 1:
    audit for what this tool executes.
 
    What it proved: the gate is mechanical. A finding whose anchor is not in the file it cites is
-   dropped and a finding whose text hedges is dropped, both by the same answer on every machine and
-   every run, and both without a model. A large share of the suite is step 6's, all of
-   `test/adapters/`, `test/commands/review.test.ts`, the diff and citation specs and the gate and
+   dropped, a finding whose `introducedBy` lands outside every hunk of the diff is dropped, and a
+   finding whose text hedges is dropped, all by the same answer on every machine and every run, and
+   all without a model. A large share of the suite is step 6's, all of `test/adapters/`,
+   `test/commands/review.test.ts`, the diff and citation specs and the gate and
    phrasing specs under `test/discipline/`, and the share is stated rather than counted on purpose:
    a test total written into prose is wrong the week after it is written, and this page carried one
    that was. Every line that interprets what `gh` said is a pure exported function, so the whole
@@ -890,7 +891,7 @@ Two things step 5 changed that were not on anybody's list:
   `vitest.config.ts` needed nothing, because it only collects `test/**`. Any future language whose
   fixtures are written in the same language as this repo will need the same treatment.
 
-Six things step 6 decided, recorded so none of them is reopened without new facts:
+Seven things step 6 decided, recorded so none of them is reopened without new facts:
 
 - **A review's scratch lives in the OS temp directory, never under `.empo/`.** `session.json`, the
   `pr-<id>.diff` and the detached worktree all sit under `empo-review/<id>` in the system temp
@@ -912,6 +913,18 @@ Six things step 6 decided, recorded so none of them is reopened without new fact
   never to swallow a checked one. Found by reading `gateFindings` with the suite green, and fixed
   with tests that fail against the old behaviour. The kind is part of the identity because a defect
   and a missing test citing one line are two claims about it, not one.
+- **`introducedBy` is required, and the changed-line check is skipped out loud.** Every finding
+  names the diff line that introduced or broke it, because a review that reports what the branch
+  inherited never converges: it ends up reviewing the whole repository instead of the diff
+  ([07-review-discipline](07-review-discipline.md) invariant 3). The field is required and not
+  optional for the reason a schema is enforced at all — an optional invariant is advice — and the
+  gate drops as `not-introduced` both an anchor that resolves nowhere and one whose real line falls
+  outside every hunk. The containment half needs the `pr-<id>.diff` phase 1 saved; when that file is
+  gone the check is skipped and the report says so, rather than printing a clean gate that had
+  stopped checking. The anchor is still resolved in that case, since a citation nobody checked is
+  the failure the gate exists to prevent with or without a diff. `isChangedLine` counts context
+  lines inside a hunk, so a deletion counts, and counts a whole file that was added or renamed with
+  no hunks, because a rename with no edit still breaks every importer.
 - **The forbidden-phrasing lint deliberately omits doc 07's callee-behaviour family.** "X never
   saves", "does not persist", "returns null" is exactly what a *verified* finding says once the
   callee's body has been read, no regex can tell whether it was read, and banning the wording would

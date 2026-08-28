@@ -314,6 +314,7 @@ function submittedFindings(): ReviewFinding[] {
       title: "Rounding drops a cent from every order",
       claim: FABRICATED_CLAIM,
       citation: citation("$total = round($gross, 2);", lineOf("intdiv($order->subtotal, 10)")),
+      introducedBy: citation("return intdiv($order->subtotal, 10);"),
     },
     {
       id: "F3",
@@ -322,6 +323,7 @@ function submittedFindings(): ReviewFinding[] {
       title: "Discount rounds down below ten cents",
       claim: HEDGED_CLAIM,
       citation: citation("private function discount(Order $order): int"),
+      introducedBy: citation("private function discount(Order $order): int"),
     },
     {
       id: "F4",
@@ -332,6 +334,9 @@ function submittedFindings(): ReviewFinding[] {
       // Cited six lines below where the constant really is: a drifted coordinate over real source,
       // which the gate repairs rather than drops.
       citation: citation("private const TAX_RATE_BASIS_POINTS = 2100;", movedLine()),
+      // The constant itself is three lines above the diff. What made it this branch's problem is
+      // the new call in total(), which is a changed line.
+      introducedBy: citation("- $this->discount($order)"),
     },
   ];
 }
@@ -345,6 +350,7 @@ function realFinding(): ReviewFinding {
     title: "Discount is applied after tax, on the gross amount",
     claim: REAL_CLAIM,
     citation: citation("- $this->discount($order)"),
+    introducedBy: citation("- $this->discount($order)"),
   };
 }
 
@@ -1488,6 +1494,10 @@ describe("the gate", () => {
       `${CALCULATOR_FILE}:${lineOf("private const TAX_RATE_BASIS_POINTS = 2100;")}` +
         "  (citation corrected: the anchor had moved)",
     );
+    // The line the author has to open to see why this is theirs, printed beside every survivor.
+    expect(printed).toContain(
+      `introduced by: ${CALCULATOR_FILE}:${lineOf("- $this->discount($order)")}`,
+    );
 
     expect(printed).toContain("dropped  2");
     expect(printed).toContain("F2  citation-unverified");
@@ -1498,6 +1508,47 @@ describe("the gate", () => {
     // The point of the gate: neither dropped claim is anywhere in what the author reads.
     expect(printed).not.toContain(FABRICATED_CLAIM);
     expect(printed).not.toContain(HEDGED_CLAIM);
+  });
+
+  // The gate reads the diff phase 1 saved, so a finding blamed on a line the branch never touched
+  // is dropped however true it is. Without this the review is an audit of the whole repository.
+  test("drops a finding introduced on a line outside the diff", () => {
+    changeCalculator();
+
+    const inherited: ReviewFinding = {
+      ...realFinding(),
+      // The constant is three lines above the hunk: real source, untouched by this branch.
+      introducedBy: citation("private const TAX_RATE_BASIS_POINTS = 2100;"),
+    };
+    const answer = JSON.parse(gate([inherited], { json: true }));
+
+    expect(answer.kept).toEqual([]);
+    expect(answer.dropped[0].reason).toBe("not-introduced");
+    expect(answer.dropped[0].detail[0]).toContain(
+      `${CALCULATOR_FILE}:${lineOf("private const TAX_RATE_BASIS_POINTS = 2100;")} is outside every hunk`,
+    );
+  });
+
+  // A gate that silently stops checking reads exactly like one that checked and found nothing.
+  test("says so, and keeps the finding, when the saved diff is gone", () => {
+    changeCalculator();
+
+    capture(() => reviewCommand(repo, undefined, { workflow: false }));
+    const diffPath = join(sessionDirOf(repo), "pr-local.diff");
+    expect(existsSync(diffPath)).toBe(true);
+    rmSync(diffPath);
+
+    const inherited: ReviewFinding = {
+      ...realFinding(),
+      introducedBy: citation("private const TAX_RATE_BASIS_POINTS = 2100;"),
+    };
+    writeFileSync(findingsPathOf(repo), `${JSON.stringify({ findings: [inherited] })}\n`);
+    const answer = JSON.parse(
+      capture(() => reviewCommand(repo, undefined, { findings: findingsPathOf(repo), json: true })),
+    );
+
+    expect(answer.kept.map((row: { finding: { id: string } }) => row.finding.id)).toEqual(["F1"]);
+    expect(answer.notes.join("\n")).toContain("not checked against the changed lines");
   });
 
   test("is a no-op on an empty findings list", () => {

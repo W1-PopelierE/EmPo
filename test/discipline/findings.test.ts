@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { gateFindings, type ReviewFinding } from "../../src/discipline/findings";
+import { type ChangedFile, parseDiff } from "../../src/engine/diff";
 
 /**
  * The gate is the product's promise: nothing reaches the author that was not checked against the
@@ -43,6 +44,13 @@ function finding(overrides: Partial<ReviewFinding> = {}): ReviewFinding {
     claim:
       "total() subtracts the discount from the gross amount, so a taxed line is discounted twice.",
     citation: {
+      file: "app/PriceCalculator.php",
+      line: 7,
+      anchor: "$total = $gross - $discount;",
+    },
+    // The same line for a `diff` finding: the change is the defect. An `impact` finding overrides
+    // it with the hunk whose reach got that far.
+    introducedBy: {
       file: "app/PriceCalculator.php",
       line: 7,
       anchor: "$total = $gross - $discount;",
@@ -264,5 +272,117 @@ describe("gateFindings", () => {
     expect(kept).toEqual([]);
     expect(dropped[0]?.reason).toBe("citation-unverified");
     expect(dropped[0]?.detail[0]).toContain("escapes the read root");
+  });
+});
+
+/**
+ * The pull request is the subject of the review, so a finding has to name the diff line that caused
+ * it. Everything else is a defect the branch inherited: real, and not this author's to fix.
+ */
+describe("gateFindings against the diff", () => {
+  /** Touches lines 6..8 of PriceCalculator, so line 7 is inside the hunk and line 3 is not. */
+  const CHANGED: ChangedFile[] = parseDiff(
+    [
+      "diff --git a/app/PriceCalculator.php b/app/PriceCalculator.php",
+      "--- a/app/PriceCalculator.php",
+      "+++ b/app/PriceCalculator.php",
+      "@@ -6,3 +6,3 @@",
+      "    {",
+      "-        $total = $gross;",
+      "+        $total = $gross - $discount;",
+      "        return $total;",
+      "",
+    ].join("\n"),
+  );
+
+  test("keeps a finding whose introducedBy lands inside a hunk", () => {
+    const { kept, dropped } = gateFindings(root, [finding()], CHANGED);
+
+    expect(dropped).toEqual([]);
+    expect(kept.map((entry) => entry.finding.id)).toEqual(["F1"]);
+  });
+
+  test("drops a finding introduced in a file this diff never touched", () => {
+    const inherited = finding({
+      introducedBy: { file: "app/Order.php", line: 3, anchor: "class Order" },
+    });
+
+    const { kept, dropped } = gateFindings(root, [inherited], CHANGED);
+
+    expect(kept).toEqual([]);
+    expect(dropped[0]?.reason).toBe("not-introduced");
+    expect(dropped[0]?.detail[0]).toContain("app/Order.php:3 is outside every hunk");
+  });
+
+  test("drops a finding introduced on an untouched line of a file that did change", () => {
+    // File-level containment would keep this one, which is the bug: the class declaration is three
+    // lines above the hunk and nothing this branch wrote reaches it.
+    const inherited = finding({
+      introducedBy: { file: "app/PriceCalculator.php", line: 3, anchor: "class PriceCalculator" },
+    });
+
+    const { kept, dropped } = gateFindings(root, [inherited], CHANGED);
+
+    expect(kept).toEqual([]);
+    expect(dropped[0]?.reason).toBe("not-introduced");
+    expect(dropped[0]?.detail[0]).toContain("app/PriceCalculator.php:3 is outside every hunk");
+  });
+
+  test("measures containment on the line the anchor is really on, not the one it was given", () => {
+    const drifted = finding({
+      // Cited on line 3, which is outside the hunk; the anchor itself sits on line 7, inside it.
+      introducedBy: {
+        file: "app/PriceCalculator.php",
+        line: 3,
+        anchor: "$total = $gross - $discount;",
+      },
+    });
+
+    expect(gateFindings(root, [drifted], CHANGED).kept).toHaveLength(1);
+  });
+
+  test("drops a finding whose introducedBy anchor is nowhere in the file", () => {
+    const invented = finding({
+      introducedBy: {
+        file: "app/PriceCalculator.php",
+        line: 7,
+        anchor: "$total = $gross * $vat;",
+      },
+    });
+
+    const { kept, dropped } = gateFindings(root, [invented], CHANGED);
+
+    expect(kept).toEqual([]);
+    expect(dropped[0]?.reason).toBe("not-introduced");
+    expect(dropped[0]?.detail[0]).toContain("nowhere in app/PriceCalculator.php");
+  });
+
+  // The citation is checked first, so a finding that is both uncited and uncaused is reported as
+  // uncited: the citation is the ground the claim stands on.
+  test("reports a finding with neither a citation nor an origin as uncited", () => {
+    const neither = finding({
+      citation: { file: "app/PriceCalculator.php", line: 7, anchor: "$tax = floor($net);" },
+      introducedBy: { file: "app/PriceCalculator.php", line: 7, anchor: "$vat = $net * 0.21;" },
+    });
+
+    expect(gateFindings(root, [neither], CHANGED).dropped[0]?.reason).toBe("citation-unverified");
+  });
+
+  test("skips containment when there is no diff, and still checks the anchor", () => {
+    const inherited = finding({
+      introducedBy: { file: "app/Order.php", line: 3, anchor: "class Order" },
+    });
+    const invented = finding({
+      id: "F2",
+      citation: { file: "app/Order.php", line: 3, anchor: "class Order" },
+      introducedBy: { file: "app/Order.php", line: 3, anchor: "class Invoice" },
+    });
+
+    const { kept, dropped } = gateFindings(root, [inherited, invented], null);
+
+    expect(kept.map((entry) => entry.finding.id)).toEqual(["F1"]);
+    expect(dropped.map((entry) => [entry.finding.id, entry.reason])).toEqual([
+      ["F2", "not-introduced"],
+    ]);
   });
 });

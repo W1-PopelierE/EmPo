@@ -38,6 +38,8 @@ was built against so staleness is visible rather than silent.
 impact claim, and a "this is now fixed" are all assertions, and each must be verified against the
 real code before it reaches a human. In review this takes the shape of a verification funnel:
 every suspected finding is dispatched to an independent check, and only survivors are written up.
+A survivor also has to name the diff line that introduced it, because a defect the branch inherited
+is not this author's and a review that reports it is reviewing the repository instead of the diff.
 In impact analysis it takes the shape of "treat the flow list as a floor, not a ceiling, and grep
 to confirm when a change smells wider than the graph says."
 
@@ -48,8 +50,9 @@ maps every file onto the end-user flows you care about, cross-references your te
 which of those flows actually assert on the values they produce, and exposes that as a query you
 can run from a terminal. On top of that substrate it ships a review discipline: a workflow that
 takes a pull request, grades it against its tracker ticket, finds impact the diff cannot show,
-and refuses to surface any finding it did not verify. For the few chains in a codebase that carry
-irreversible consequences (money movement, auth, tenant isolation), it maintains a hand-curated
+and refuses to surface any finding it did not verify or that the change did not introduce. For the
+few chains in a codebase that carry irreversible consequences (money movement, auth, tenant
+isolation), it maintains a hand-curated
 "spine" of invariants that must still hold after a change, with drift detection so the spine
 cannot quietly rot.
 

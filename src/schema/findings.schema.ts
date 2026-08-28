@@ -27,6 +27,9 @@ export const findingSchema = z.object({
   title: text,
   claim: text,
   citation: citationSchema,
+  /** The diff line that introduced or broke this. Required: a finding the pull request did not
+   * cause is not this pull request's finding. */
+  introducedBy: citationSchema,
   supporting: z.array(citationSchema).optional(),
   suggestion: text.optional(),
 });

@@ -123,7 +123,9 @@ On top of that graph:
   worker can pick the job up before the rows it needs exist.
 - **`empo review`** runs a two-phase verification gate. It prints facts plus the shipped review
   discipline, an agent writes findings, and `--findings` resolves every citation against real source
-  and prints only the survivors. A claim standing on text that does not exist is dropped. Among
+  and prints only the survivors. A claim standing on text that does not exist is dropped, and so is
+  one whose `introducedBy` line falls outside the diff: the pull request is the subject of the
+  review, so a defect the branch inherited is not a finding against it. Among
   those facts are the two about volume: that a changed file is reached from a scheduler entry, and
   every dispatch it makes from inside a loop. How often either runs is a property of the data and
   not of the source, so EmPo prints the coordinate and claims nothing; going and reading what bounds

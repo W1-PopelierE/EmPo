@@ -1075,7 +1075,10 @@ function printBrief(repoRoot: string, graph: Graph, view: BriefView): void {
     `  4. Run: empo review${view.id === "local" ? "" : ` ${view.id}`} --findings ${findingsPath}`,
   );
   console.log(
-    "     A finding whose anchor is not in the cited file is dropped there, not reported.",
+    "     A finding whose anchor is not in the cited file is dropped there, not reported,",
+  );
+  console.log(
+    "     and so is one whose introducedBy is outside this diff: the pull request is the subject.",
   );
 }
 
@@ -1671,12 +1674,25 @@ function gatePhase(repoRoot: string, pr: string | undefined, options: ReviewOpti
     );
   }
 
+  // The diff phase 1 saved, so the gate can hold every finding to a line this pull request
+  // actually touched. Missing, it is skipped rather than guessed at, and said out loud: a gate
+  // that silently stops checking reads exactly like one that checked and found nothing wrong.
+  let changed: ChangedFile[] | null = null;
+  if (session !== null && existsSync(session.diffPath)) {
+    changed = parseDiff(readFileSync(session.diffPath, "utf8"));
+  } else {
+    notes.push(
+      "The diff for this review is gone, so findings were not checked against the changed lines. " +
+        "A finding about code this branch inherited would have survived.",
+    );
+  }
+
   // Teardown is the last action of a review including when it ends early or fails, which is what
   // src/discipline/review.md tells the agent and therefore what this command has to do itself. A
   // worktree left behind because posting failed would be the review disturbing the checkout it
   // promised not to touch (docs/07-review-discipline.md invariant 2 and step 8).
   try {
-    reportAndPost(repoRoot, pr, id, readRoot, notes, findings, options);
+    reportAndPost(repoRoot, pr, id, readRoot, notes, findings, changed, options);
   } finally {
     teardown(repoRoot, id, session);
   }
@@ -1690,9 +1706,10 @@ function reportAndPost(
   readRoot: string,
   notes: string[],
   findings: ReviewFinding[],
+  changed: ChangedFile[] | null,
   options: ReviewOptions,
 ): void {
-  const result = gateFindings(existsSync(readRoot) ? readRoot : repoRoot, findings);
+  const result = gateFindings(existsSync(readRoot) ? readRoot : repoRoot, findings, changed);
 
   if (options.json === true) {
     console.log(
@@ -1731,6 +1748,9 @@ function printGate(
         `  ${row.citation.file}:${row.citation.line}${row.corrected ? "  (citation corrected: the anchor had moved)" : ""}`,
       );
       console.log(`  ${row.finding.claim}`);
+      console.log(
+        `  introduced by: ${row.finding.introducedBy.file}:${row.finding.introducedBy.line}`,
+      );
       if (row.finding.suggestion !== undefined)
         console.log(`  suggestion: ${row.finding.suggestion}`);
       for (const support of row.supporting) {
@@ -1783,6 +1803,13 @@ function postFindings(repoRoot: string, pr: string | undefined, result: GateResu
   const id = pr ?? "local";
   for (const row of result.kept) {
     const lines = [row.finding.title, "", row.finding.claim];
+    // Only where the finding is not on a changed line itself: an impact or coverage comment lands
+    // on a file this pull request never opened, and the first question its author asks is what in
+    // the diff made it theirs to answer.
+    if (row.finding.kind !== "diff") {
+      const origin = row.finding.introducedBy;
+      lines.push("", `Introduced by ${origin.file}:${origin.line}.`);
+    }
     if (row.finding.suggestion !== undefined) lines.push("", row.finding.suggestion);
     forge.adapter.comment(id, scrubTells(lines.join("\n")), {
       file: row.citation.file,

@@ -597,7 +597,8 @@ that the spine lists. The review is wider than the gate on purpose. A gate has t
 commit and may therefore only fail on a rule its author wrote down, while a review is read by a human
 who can weigh a weaker signal, and `guarded` is curated to be gateable while a chain runs through
 files nobody wants gated. None of this adds a flag, and a spine-derived finding is still `impact` or
-`coverage`: the findings schema is unchanged.
+`coverage`: there is no fourth kind. It carries an `introducedBy` like every other finding, so a
+trap the spine warned about but this pull request did not touch is not a finding against it.
 
 **The brief prints one blast radius per changed file, whatever the pack's node-id strategy**, and
 under `symbol` that is a deliberate collapse rather than an oversight. A changed 20-export module
@@ -674,9 +675,25 @@ and [07-review-discipline](07-review-discipline.md) for what a reviewer does wit
 
 **Phase 2, the gate.** The agent writes its suspected findings to that JSON file and runs
 `empo review [<pr>] --findings <path>`. Every citation is resolved against the source phase 1 read,
-at the read root its session recorded, every finding whose text hedges is linted out, only the
-survivors are printed, and the worktree is removed. A finding whose anchor is not in the file it
-cites never reaches the author, which is the whole product.
+at the read root its session recorded, every finding the pull request did not introduce is dropped,
+every finding whose text hedges is linted out, only the survivors are printed, and the worktree is
+removed. A finding whose anchor is not in the file it cites never reaches the author, which is the
+whole product.
+
+**One of those checks is a scope gate, and it needs the diff.** Every finding carries a required
+`introducedBy` citation naming the diff line that introduced or broke it
+([07-review-discipline](07-review-discipline.md) invariant 3), and phase 2 reads back the `pr-<id>.diff`
+phase 1 saved to check it: an anchor that is nowhere, or one whose real line falls outside every hunk,
+drops the finding as `not-introduced`. A line counts as changed when it is inside a hunk's new-side
+span, context lines included so a pure deletion counts, and anywhere in a file the diff added or
+renamed without hunks, because a rename with no edit still breaks every importer. Where the saved
+diff is gone that one check is skipped and a note says so in those words; the `introducedBy` anchor is
+still resolved against source, since a gate that silently stops checking reads exactly like one that
+checked and found nothing wrong.
+
+Every printed finding carries an `introduced by file:line` line under its claim, and with `--post` an
+`impact` or `coverage` comment names "Introduced by file:line" in the body. A `diff` comment does not:
+it lands on the changed line already.
 
 It never executes the target project's tests or static analysis (CI does that); coverage judgement
 is a reading task.

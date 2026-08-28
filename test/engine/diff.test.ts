@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { changedLines, changedPaths, parseDiff } from "../../src/engine/diff";
+import { changedLines, changedPaths, isChangedLine, parseDiff } from "../../src/engine/diff";
 
 /**
  * The parser turns a diff into the two things a review needs: which files changed and which line
@@ -362,6 +362,74 @@ describe("parseDiff", () => {
     );
 
     expect(parseDiff(text)).toMatchObject([{ path: "src/x.ts", hunks: [], addedCount: 0 }]);
+  });
+});
+
+/**
+ * What the findings gate stands on. The whole new-side span of a hunk counts, not only the added
+ * lines: a pull request breaks things by deleting as often as by adding, and a deletion leaves
+ * nothing to cite but the context around it.
+ */
+describe("isChangedLine", () => {
+  // Lines 10..14 on the new side: one context line, one added, one removed, two more context.
+  const CHANGED = parseDiff(
+    diff(
+      "diff --git a/src/x.ts b/src/x.ts",
+      "--- a/src/x.ts",
+      "+++ b/src/x.ts",
+      "@@ -10,4 +10,4 @@",
+      " const a = 1;",
+      "+const b = 2;",
+      "-const c = 3;",
+      " const d = 4;",
+      " const e = 5;",
+    ),
+  );
+
+  test("counts a context line inside the hunk, not only the added ones", () => {
+    expect(changedLines(CHANGED[0] ?? emptyFile())).toEqual([11]);
+    expect(isChangedLine(CHANGED, "src/x.ts", 10)).toBe(true);
+    expect(isChangedLine(CHANGED, "src/x.ts", 13)).toBe(true);
+  });
+
+  test("stops at the end of the hunk", () => {
+    expect(isChangedLine(CHANGED, "src/x.ts", 9)).toBe(false);
+    expect(isChangedLine(CHANGED, "src/x.ts", 14)).toBe(false);
+  });
+
+  test("knows nothing about a file the diff never named", () => {
+    expect(isChangedLine(CHANGED, "src/y.ts", 11)).toBe(false);
+    expect(isChangedLine([], "src/x.ts", 11)).toBe(false);
+  });
+
+  test("counts every line of a pure rename, which has no hunks and still breaks its importers", () => {
+    const renamed = parseDiff(
+      diff(
+        "diff --git a/src/old.ts b/src/new.ts",
+        "similarity index 100%",
+        "rename from src/old.ts",
+        "rename to src/new.ts",
+      ),
+    );
+
+    expect(renamed).toMatchObject([{ path: "src/new.ts", status: "renamed", hunks: [] }]);
+    expect(isChangedLine(renamed, "src/new.ts", 1)).toBe(true);
+    expect(isChangedLine(renamed, "src/new.ts", 4000)).toBe(true);
+    // The path the graph knew before is not a path a citation can name.
+    expect(isChangedLine(renamed, "src/old.ts", 1)).toBe(false);
+  });
+
+  test("counts no line of an empty file that was only deleted", () => {
+    const deleted = parseDiff(
+      diff(
+        "diff --git a/src/gone.ts b/src/gone.ts",
+        "deleted file mode 100644",
+        "--- a/src/gone.ts",
+        "+++ /dev/null",
+      ),
+    );
+
+    expect(isChangedLine(deleted, "src/gone.ts", 1)).toBe(false);
   });
 });
 

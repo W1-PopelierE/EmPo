@@ -437,3 +437,24 @@ function splitLines(text: string): string[] {
   if (text.endsWith("\n")) lines.pop();
   return lines.map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
 }
+
+/**
+ * Is this `file:line` inside a hunk of this diff? The whole new-side span of the hunk counts, not
+ * only the added lines, because a pull request breaks things by deleting as often as by adding and
+ * a deletion leaves nothing to cite but the context around it.
+ *
+ * This is what the findings gate stands on: a finding whose `introducedBy` lands outside every
+ * hunk is a defect the branch inherited, and reporting it as this pull request's is how a review
+ * turns into an audit nobody asked for.
+ */
+export function isChangedLine(files: ChangedFile[], path: string, line: number): boolean {
+  return files.some(
+    (file) =>
+      file.path === path &&
+      // A pure rename has no hunks and still breaks every importer, so the whole file counts as
+      // changed there. Anywhere else, the hunks are the change.
+      (file.hunks.length === 0
+        ? file.status === "renamed" || file.status === "added"
+        : file.hunks.some((hunk) => line >= hunk.newStart && line < hunk.newStart + hunk.newLines)),
+  );
+}

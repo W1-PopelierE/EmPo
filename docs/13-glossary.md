@@ -34,7 +34,8 @@ inside one root for a pack's own `joins`), and flow (an end-user journey spannin
 [01-architecture](01-architecture.md).
 
 **Discipline.** Layer 3: the universal, shipped review workflow. Language- and host-independent. Its
-governing rule is that no finding reaches a human unverified. See [07-review-discipline](07-review-discipline.md).
+governing rule is that no finding reaches a human unverified, and none that this pull request did
+not introduce reaches them at all. See [07-review-discipline](07-review-discipline.md).
 
 **Drift.** A spine `file:line` whose anchor no longer resolves against current source, making the
 claim resting on it fiction. Detected by `empo verify`; warned at session start.
@@ -87,6 +88,13 @@ markers a language pack declares in its optional `hazards` block, carried in the
 `hazards` list and reported by `empo query --hazards`. A pack that declares no such block makes no
 claim about the language, which is a different answer from a pack that looked and found none. See
 [04-language-packs](04-language-packs.md).
+
+**Introduced by (`introducedBy`).** The second citation every review finding carries: the diff line
+that introduced or broke it, in the same `file:line:anchor` shape as the finding's own citation. For
+a `diff` finding it is usually that citation; for an `impact` or `coverage` one it is the hunk whose
+change reaches that far. Required, and checked against the pull request's own hunks: a finding the
+branch inherited is dropped as `not-introduced`, because a review that reports inherited defects is
+reviewing the repository and not the diff. See [07-review-discipline](07-review-discipline.md).
 
 **Invariant.** A statement that must remain true after a change to a spine (for example, line totals
 sum to the header). Best cited to an executable check in the codebase rather than stated in prose.
