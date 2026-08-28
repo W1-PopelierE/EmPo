@@ -41,6 +41,8 @@ export interface VerifiedFinding {
   /** The citation as it survived: corrected to the line the anchor is really on, when it moved. */
   citation: Citation;
   corrected: boolean;
+  /** The attribution as it was verified: the line containment was actually measured on. */
+  introducedBy: Citation;
   supporting: SupportingCitation[];
 }
 
@@ -171,6 +173,7 @@ export function gateFindings(
       finding,
       citation: correctedCitation(finding.citation, check),
       corrected: check.status === "moved",
+      introducedBy: correctedCitation(finding.introducedBy, origin),
       // A supporting citation is context (the caller, the sibling, the test), not the ground the
       // claim stands on, so a bad one is reported beside the finding instead of killing it.
       // Killing the finding would teach agents to cite no context at all, which costs the author

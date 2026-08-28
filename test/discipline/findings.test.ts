@@ -338,7 +338,12 @@ describe("gateFindings against the diff", () => {
       },
     });
 
-    expect(gateFindings(root, [drifted], CHANGED).kept).toHaveLength(1);
+    const { kept } = gateFindings(root, [drifted], CHANGED);
+
+    expect(kept).toHaveLength(1);
+    // Reported on the line containment was measured on, not the one the agent guessed.
+    expect(kept[0]?.introducedBy.line).toBe(7);
+    expect(kept[0]?.finding.introducedBy.line).toBe(3);
   });
 
   test("drops a finding whose introducedBy anchor is nowhere in the file", () => {

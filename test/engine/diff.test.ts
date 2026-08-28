@@ -397,6 +397,21 @@ describe("isChangedLine", () => {
     expect(isChangedLine(CHANGED, "src/x.ts", 14)).toBe(false);
   });
 
+  test("counts the surviving boundary of a zero-context deletion, which spans no new lines", () => {
+    const deletion = parseDiff(
+      diff(
+        "diff --git a/src/x.ts b/src/x.ts",
+        "--- a/src/x.ts",
+        "+++ b/src/x.ts",
+        "@@ -5 +4,0 @@",
+        "-const gone = 1;",
+      ),
+    );
+
+    expect(isChangedLine(deletion, "src/x.ts", 4)).toBe(true);
+    expect(isChangedLine(deletion, "src/x.ts", 5)).toBe(false);
+  });
+
   test("knows nothing about a file the diff never named", () => {
     expect(isChangedLine(CHANGED, "src/y.ts", 11)).toBe(false);
     expect(isChangedLine([], "src/x.ts", 11)).toBe(false);

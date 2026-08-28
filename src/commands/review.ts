@@ -1748,9 +1748,7 @@ function printGate(
         `  ${row.citation.file}:${row.citation.line}${row.corrected ? "  (citation corrected: the anchor had moved)" : ""}`,
       );
       console.log(`  ${row.finding.claim}`);
-      console.log(
-        `  introduced by: ${row.finding.introducedBy.file}:${row.finding.introducedBy.line}`,
-      );
+      console.log(`  introduced by: ${row.introducedBy.file}:${row.introducedBy.line}`);
       if (row.finding.suggestion !== undefined)
         console.log(`  suggestion: ${row.finding.suggestion}`);
       for (const support of row.supporting) {
@@ -1807,7 +1805,7 @@ function postFindings(repoRoot: string, pr: string | undefined, result: GateResu
     // on a file this pull request never opened, and the first question its author asks is what in
     // the diff made it theirs to answer.
     if (row.finding.kind !== "diff") {
-      const origin = row.finding.introducedBy;
+      const origin = row.introducedBy;
       lines.push("", `Introduced by ${origin.file}:${origin.line}.`);
     }
     if (row.finding.suggestion !== undefined) lines.push("", row.finding.suggestion);

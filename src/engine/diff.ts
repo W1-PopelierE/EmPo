@@ -455,6 +455,11 @@ export function isChangedLine(files: ChangedFile[], path: string, line: number):
       // changed there. Anywhere else, the hunks are the change.
       (file.hunks.length === 0
         ? file.status === "renamed" || file.status === "added"
-        : file.hunks.some((hunk) => line >= hunk.newStart && line < hunk.newStart + hunk.newLines)),
+        : file.hunks.some(
+            // A pure deletion hunk (`@@ -5 +4,0 @@`) spans no new lines, so its range would be
+            // empty and nothing a deletion broke could ever be attributed to it. The surviving
+            // boundary line is what a citation has left to point at, so it counts as changed.
+            (hunk) => line >= hunk.newStart && line < hunk.newStart + Math.max(hunk.newLines, 1),
+          )),
   );
 }
