@@ -46,6 +46,9 @@ const SPECULATION =
 const UNREAD_BRANCH =
   "read X: if the call happens, cite the line it happens on; if it cannot happen, there is no finding";
 
+const WISHLIST =
+  "a finding names a break, not work the branch could also have done: state the defect flatly and put the improvement in `suggestion`, or drop it";
+
 const UNTRACED_ACCESS =
   "trace the actual middleware, policy and guard chain and cite the line that grants the access, or drop the finding";
 
@@ -65,6 +68,21 @@ export const FORBIDDEN_PHRASINGS: ForbiddenPhrasing[] = [
     why: UNREAD_BRANCH,
   },
   { pattern: "anyone with access", why: UNTRACED_ACCESS },
+  // "consider" only in its imperative form. A finding that says a callee "does not consider the
+  // null case" is asserting something it read, and is not asking for extra work.
+  { pattern: "consider \\w+ing", why: WISHLIST },
+  { pattern: "(?:recommend|suggest)(?:s|ed|ing)?", why: WISHLIST },
+  {
+    pattern: "(?:it |that )?would be (?:better|good|nice|cleaner|safer|clearer|worth)",
+    why: WISHLIST,
+  },
+  { pattern: "(?:should|could) (?:also|ideally|probably)", why: WISHLIST },
+  {
+    pattern: "for (?:robustness|completeness|consistency|clarity|safety|good measure)",
+    why: WISHLIST,
+  },
+  { pattern: "nice to have", why: WISHLIST },
+  { pattern: "as a follow(?:-| )up", why: WISHLIST },
 ];
 
 /**

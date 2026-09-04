@@ -141,11 +141,24 @@ finding. It is required, not optional: a finding the pull request did not cause 
 request's finding (invariant 3), and making the field optional makes the invariant advice.
 
 For a `diff` finding it is usually the citation itself, since the defect is on the changed line. For
-an `impact` or a `coverage` finding the two citations are in different files by construction: the
-claim rests on the file that breaks or on the test that is missing, and `introducedBy` is the hunk
-whose change reaches that far. That pair is what makes an impact finding answerable — the author
-reads a file this pull request never opened, and the first question they ask is what in the diff
-made it theirs.
+an `impact` finding the two citations are apart by construction: the claim rests on the line that
+breaks and `introducedBy` is the hunk whose change reaches that far. That pair is what makes an
+impact finding answerable — the author reads code this pull request never opened, and the first
+question they ask is what in the diff made it theirs.
+
+#### The kind says where the finding stands, and the gate checks it
+
+`introducedBy` on its own leaves the invariant gameable: an inherited defect reaches the author
+whenever the finding names any hunk in the same file as its cause. So the `citation` is scoped too,
+by kind. `diff` and `coverage` stand on a line the diff changed — the changed behaviour with no
+test, or the test hunk that loosened an assertion — and the gate drops one that stands outside every
+hunk. `impact` stands on a line the diff did not change, and the gate drops one that stands inside a
+hunk, because that is a `diff` finding wearing the one label allowed out of the diff.
+
+The pair is what makes it hold. Alone, either check is escapable: `introducedBy` by citing a
+neighbouring hunk, `citation` by relabelling the kind. Together they say the same thing from both
+ends — the defect is here, the diff caused it — and a review of the whole repository's backlog
+cannot be dressed up as a review of this pull request.
 
 Deriving the field is a reading task like the rest of step 5, and it is asked of every survivor:
 name the hunk, the line the author added, changed or deleted that made this true. If there is no
@@ -160,6 +173,10 @@ If any of these appears in a **finding** (not in a verification prompt), stop an
 - "This may break…" -> grep the callers and read them.
 - "Likely / probably / presumably / I assume…" -> not allowed in a finding.
 - "Anyone with access could…" -> trace the actual middleware/policy/guard chain.
+- "Consider… / would be cleaner / should also / for robustness / as a follow-up…" -> a finding
+  names a break, not work the branch could also have done. Wishlist wording is unbounded by
+  construction and is the shape most scope creep arrives in. State the defect flatly and put the
+  proposal in `suggestion`, which is not linted because proposing a fix is not asserting one.
 - "X never saves / does not persist / fails to validate / returns null / does not fire the event…"
   -> any claim about what a **called** function does or omits internally requires reading that
   function's body first. Never infer a callee's behavior from its name, its caller, or a sibling
@@ -169,7 +186,10 @@ If any of these appears in a **finding** (not in a verification prompt), stop an
 The CLI enforces this funnel mechanically rather than trusting it to be followed. `empo review`
 prints the executable form of this doc, `src/discipline/review.md`, then gates the findings that
 come back, in this order: each citation anchor is resolved against the real source in the worktree
-and the finding is dropped if the anchor is not there; the `introducedBy` anchor is resolved the
+and the finding is dropped if the anchor is not there; the citation is then held to the
+finding's kind, and a `diff` or `coverage` finding standing outside every hunk is dropped as
+`cited-outside-diff` while an `impact` finding standing inside one is dropped as `cited-inside-diff`;
+the `introducedBy` anchor is resolved the
 same way and the finding is dropped as `not-introduced` if the line it is really on lies outside
 every hunk of this pull request's diff, or if it is neither in the branch nor among the lines the
 diff removed; and the title and claim of every finding are linted against the phrasings above. The
@@ -180,8 +200,8 @@ because "does not persist" is exactly what a finding says *after* the callee has
 regex can tell whether it was; banning the wording would delete true findings. The citation gate
 enforces that one instead, since the claim only ships if it quotes a real line of the callee.
 
-The changed-line half of that needs the diff phase 1 saved, and phase 2 reads it back. If the file
-is gone the containment check alone is skipped and the report says so in a note, because a gate that
+The changed-line halves of that need the diff phase 1 saved, and phase 2 reads it back. If the file
+is gone the two containment checks alone are skipped and the report says so in a note, because a gate that
 quietly stops checking reads exactly like one that checked and found nothing wrong. The
 `introducedBy` anchor is still resolved against source in that case: a citation nobody checked is
 the failure this gate exists to prevent whether or not a diff is at hand.
@@ -225,7 +245,7 @@ One report, structured:
 - **Ticket resolution**: each criterion mapped to evidence, marked resolved/partial/missing, with
   an overall status.
 - **Diff-level findings**: issues visible in the diff (`file:line`).
-- **Impact findings**: breakages in files not in the diff (`file:line`), from the blast radius.
+- **Impact findings**: breakages on lines not in the diff (`file:line`), from the blast radius.
 - **Spine**: the curated chains this change is on, what each one says must still hold, and any
   invariant behind which nothing asserts. A finding that comes out of a spine is still a diff,
   impact or coverage finding and is reported as one; the spine is where it came from, not a fourth

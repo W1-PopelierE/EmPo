@@ -61,6 +61,8 @@ export interface SupportingCitation {
 
 export type DropReason =
   | "citation-unverified"
+  | "cited-outside-diff"
+  | "cited-inside-diff"
   | "not-introduced"
   | "forbidden-phrasing"
   | "duplicate";
@@ -125,6 +127,45 @@ export function gateFindings(
         finding,
         reason: "citation-unverified",
         detail: [check.note, "A claim standing on text that does not exist is not a finding."],
+      });
+      continue;
+    }
+
+    // `introducedBy` alone was not enough. It says what caused the defect, and an agent that wants
+    // to report an inherited one only has to name any hunk in the same file to launder it past the
+    // gate. So the citation, the line the finding actually stands on, is scoped too, and the kind
+    // says which way: a `diff` finding is by definition visible in the diff, and a `coverage` one
+    // stands either on the changed behaviour that has no test or on the test hunk that loosened an
+    // assertion, so both are inside it. Only `impact` reaches outside, and it has to: it is a
+    // breakage in a line the diff did not touch, reached through the blast radius. A finding
+    // labelled `impact` that cites a changed line is a `diff` finding wearing the one label that
+    // is allowed out of the diff, so it is dropped rather than quietly counted.
+    const citedLine = check.actualLine ?? finding.citation.line;
+    const citedInDiff =
+      changed !== null &&
+      (isChangedLine(changed, finding.citation.file, citedLine) ||
+        removedLine(changed, finding.citation) !== null);
+
+    if (changed !== null && finding.kind !== "impact" && !citedInDiff) {
+      dropped.push({
+        finding,
+        reason: "cited-outside-diff",
+        detail: [
+          `${finding.citation.file}:${citedLine} is outside every hunk of this diff, and is not among the lines it removed.`,
+          `A ${finding.kind} finding stands on a line this pull request changed. This one the branch inherited, so it belongs in the maintenance line, not the findings.`,
+        ],
+      });
+      continue;
+    }
+
+    if (changed !== null && finding.kind === "impact" && citedInDiff) {
+      dropped.push({
+        finding,
+        reason: "cited-inside-diff",
+        detail: [
+          `${finding.citation.file}:${citedLine} is inside a hunk of this diff.`,
+          'An impact finding is a breakage in a line the diff does not touch. Report this one as kind "diff".',
+        ],
       });
       continue;
     }

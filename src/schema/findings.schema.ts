@@ -22,6 +22,10 @@ export const citationSchema = z.object({
 
 export const findingSchema = z.object({
   id: text,
+  /**
+   * Where the finding stands relative to the diff, checked rather than trusted: `diff` and
+   * `coverage` cite a line this pull request changed, `impact` cites one it did not.
+   */
   kind: z.enum(["diff", "impact", "coverage"]),
   severity: z.enum(["blocker", "major", "minor", "question"]),
   title: text,
