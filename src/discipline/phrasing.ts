@@ -68,19 +68,20 @@ export const FORBIDDEN_PHRASINGS: ForbiddenPhrasing[] = [
     why: UNREAD_BRANCH,
   },
   { pattern: "anyone with access", why: UNTRACED_ACCESS },
-  // "consider" only in its imperative form. A finding that says a callee "does not consider the
-  // null case" is asserting something it read, and is not asking for extra work.
+  // Each of these is the reviewer's own voice asking for work. Two obvious candidates are absent:
+  // "recommends" and "for consistency" are what a document, a README or a code comment does, and a
+  // finding quoting one ("the docs recommend an idempotency key, the client never sends one") is
+  // reporting a real contradiction. No lint can tell a quotation from a wish, so those two stay
+  // legal and the narrower phrasings below carry the rule.
+  //
+  // "consider" only in its imperative form, for the same reason: a finding that says a callee "does
+  // not consider the null case" is asserting something it read, and is not asking for extra work.
   { pattern: "consider \\w+ing", why: WISHLIST },
-  { pattern: "(?:recommend|suggest)(?:s|ed|ing)?", why: WISHLIST },
   {
     pattern: "(?:it |that )?would be (?:better|good|nice|cleaner|safer|clearer|worth)",
     why: WISHLIST,
   },
   { pattern: "(?:should|could) (?:also|ideally|probably)", why: WISHLIST },
-  {
-    pattern: "for (?:robustness|completeness|consistency|clarity|safety|good measure)",
-    why: WISHLIST,
-  },
   { pattern: "nice to have", why: WISHLIST },
   { pattern: "as a follow(?:-| )up", why: WISHLIST },
 ];

@@ -173,10 +173,12 @@ If any of these appears in a **finding** (not in a verification prompt), stop an
 - "This may break…" -> grep the callers and read them.
 - "Likely / probably / presumably / I assume…" -> not allowed in a finding.
 - "Anyone with access could…" -> trace the actual middleware/policy/guard chain.
-- "Consider… / would be cleaner / should also / for robustness / as a follow-up…" -> a finding
-  names a break, not work the branch could also have done. Wishlist wording is unbounded by
+- "Consider extracting… / would be cleaner / should also / nice to have / as a follow-up…" -> a
+  finding names a break, not work the branch could also have done. Wishlist wording is unbounded by
   construction and is the shape most scope creep arrives in. State the defect flatly and put the
-  proposal in `suggestion`, which is not linted because proposing a fix is not asserting one.
+  proposal in `suggestion`, which is not linted because proposing a fix is not asserting one. The
+  lint stays narrow on purpose: "recommends" and "for consistency" are what a document or a code
+  comment does, and a finding quoting one is reporting a contradiction, not making a wish.
 - "X never saves / does not persist / fails to validate / returns null / does not fire the event…"
   -> any claim about what a **called** function does or omits internally requires reading that
   function's body first. Never infer a callee's behavior from its name, its caller, or a sibling
@@ -263,7 +265,7 @@ One report, structured:
 Every finding, whatever its kind, prints `introduced by file:line` under its claim, and an `impact`
 or `coverage` comment posted to the pull request names it in a sentence of its own. A `diff` comment
 does not, because it lands on the changed line and would be pointing at itself. The author of an
-impact finding is being asked about a file this pull request never opened, so the line that made it
+impact finding is being asked about a line this pull request never wrote, so the line that made it
 theirs is part of the finding and not something they should have to reconstruct.
 
 Every `file:line` in the report is **repo-relative**, not worktree-absolute. The author reads it in

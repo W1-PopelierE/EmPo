@@ -261,8 +261,8 @@ There is no third answer, and relabelling to get past the gate is the failure th
 exists to catch: the label is a claim about where the defect is, and the gate reads it as one.
 
 **A finding names a break, never work the branch could also have done.** "Consider extracting",
-"would be cleaner", "should also guard", "for robustness": each is a request for new work dressed
-as a review comment, it is unbounded by construction, and the submission gate drops it. Where you
+"would be cleaner", "should also guard", "nice to have": each is a request for new work dressed as
+a review comment, it is unbounded by construction, and the submission gate drops it. Where you
 have a fix worth proposing, the finding still states the defect flatly and the proposal goes in
 `suggestion`, which is not linted precisely because proposing is not asserting.
 

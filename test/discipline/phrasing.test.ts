@@ -65,10 +65,8 @@ describe("forbiddenPhrasings", () => {
   // same time and the register of what a review may ask for is what keeps a review converging.
   test.each([
     ["consider extracting", "Consider extracting the tax maths into its own class."],
-    ["recommend", "I recommend a guard clause at the top of the handler."],
     ["would be cleaner", "It would be cleaner to fold the two branches together."],
     ["should also", "The controller should also reject a negative quantity."],
-    ["for robustness", "Wrap the call in a retry for robustness."],
     ["nice to have", "A named constant here is nice to have."],
     ["as a follow-up", "Split the migration out as a follow-up."],
   ])("flags the wishlist phrasing %s", (phrase, claim) => {
@@ -80,6 +78,17 @@ describe("forbiddenPhrasings", () => {
     // Each of these reads like a wishlist phrase and is not one: the first asserts what the callee
     // does, the second is the author's own deferral being honoured, the third is a fact.
     expect(forbiddenPhrasings("dispatch() does not consider a failed job.")).toEqual([]);
+    // What a document recommends or a comment claims is for consistency is quoted by half of these
+    // findings, and the contradiction with the code is the finding itself.
+    expect(
+      forbiddenPhrasings("The retry policy suggests three attempts; the handler stops after one."),
+    ).toEqual([]);
+    expect(
+      forbiddenPhrasings("The docs recommend an idempotency key, which the client never sends."),
+    ).toEqual([]);
+    expect(
+      forbiddenPhrasings("The comment says the branch exists for consistency, and it diverges."),
+    ).toEqual([]);
     expect(forbiddenPhrasings("The ticket defers the CSV header to a follow-up ticket.")).toEqual(
       [],
     );
