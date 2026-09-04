@@ -60,6 +60,47 @@ describe("forbiddenPhrasings", () => {
     expect(forbiddenPhrasings(claim)[0]?.why).toContain("middleware");
   });
 
+  // Scope creep is not a hedge: the claim can be perfectly certain and still be asking the author
+  // for work the pull request never owed. It reaches the same gate, because it costs the author the
+  // same time and the register of what a review may ask for is what keeps a review converging.
+  test.each([
+    ["consider extracting", "Consider extracting the tax maths into its own class."],
+    ["consider adding", "Consider adding a regression test for the discount path."],
+    ["would be cleaner", "It would be cleaner to fold the two branches together."],
+    ["should also", "The controller should also reject a negative quantity."],
+    ["nice to have", "A named constant here is nice to have."],
+    ["as a follow-up", "Split the migration out as a follow-up."],
+  ])("flags the wishlist phrasing %s", (phrase, claim) => {
+    expect(matches(claim).join(" ").toLowerCase()).toContain(phrase);
+    expect(forbiddenPhrasings(claim)[0]?.why).toContain("names a break");
+  });
+
+  test("leaves a certain claim about what code does alone, near-miss wording and all", () => {
+    // Each of these reads like a wishlist phrase and is not one: the first asserts what the callee
+    // does, the second is the author's own deferral being honoured, the third is a fact.
+    expect(forbiddenPhrasings("dispatch() does not consider a failed job.")).toEqual([]);
+    // The same word with the same -ing object, and the negation in front of it is the finding.
+    expect(forbiddenPhrasings("The handler does not consider retrying after a timeout.")).toEqual(
+      [],
+    );
+    expect(forbiddenPhrasings("The scheduler fails to consider queueing the retry.")).toEqual([]);
+    // What a document recommends or a comment claims is for consistency is quoted by half of these
+    // findings, and the contradiction with the code is the finding itself.
+    expect(
+      forbiddenPhrasings("The retry policy suggests three attempts; the handler stops after one."),
+    ).toEqual([]);
+    expect(
+      forbiddenPhrasings("The docs recommend an idempotency key, which the client never sends."),
+    ).toEqual([]);
+    expect(
+      forbiddenPhrasings("The comment says the branch exists for consistency, and it diverges."),
+    ).toEqual([]);
+    expect(forbiddenPhrasings("The ticket defers the CSV header to a follow-up ticket.")).toEqual(
+      [],
+    );
+    expect(forbiddenPhrasings("The retry is a robustness measure that never runs.")).toEqual([]);
+  });
+
   test("does not trip on a longer word that contains a forbidden one", () => {
     expect(forbiddenPhrasings("An unlikely path, and an impossibly rare one.")).toEqual([]);
   });

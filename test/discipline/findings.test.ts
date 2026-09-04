@@ -373,6 +373,100 @@ describe("gateFindings against the diff", () => {
     expect(gateFindings(root, [neither], CHANGED).dropped[0]?.reason).toBe("citation-unverified");
   });
 
+  // The half `introducedBy` alone cannot hold: it says what caused the defect, and an agent that
+  // wants an inherited one reported has only to name a hunk in the same file. The kind says where
+  // the finding stands, and the gate holds it to that from the other end.
+  test("drops a diff finding that stands on a line outside every hunk", () => {
+    const inherited = finding({
+      // Real source, real cause on line 7. But the claim itself rests on the class declaration,
+      // which this branch never wrote.
+      citation: { file: "app/PriceCalculator.php", line: 3, anchor: "class PriceCalculator" },
+    });
+
+    const { kept, dropped } = gateFindings(root, [inherited], CHANGED);
+
+    expect(kept).toEqual([]);
+    expect(dropped[0]?.reason).toBe("cited-outside-diff");
+    expect(dropped[0]?.detail[0]).toContain("app/PriceCalculator.php:3 is outside every hunk");
+    expect(dropped[0]?.detail[1]).toContain("maintenance line");
+  });
+
+  test("drops a coverage finding that stands outside the diff, like a diff finding", () => {
+    const inherited = finding({
+      kind: "coverage",
+      title: "No test asserts the class is constructible",
+      claim: "No test in the suite constructs PriceCalculator.",
+      citation: { file: "app/PriceCalculator.php", line: 3, anchor: "class PriceCalculator" },
+    });
+
+    expect(gateFindings(root, [inherited], CHANGED).dropped[0]?.reason).toBe("cited-outside-diff");
+  });
+
+  test("measures the citation's scope on the line the anchor is really on", () => {
+    const drifted = finding({
+      // Cited on line 3, which is outside the hunk; the anchor sits on line 7, inside it.
+      citation: {
+        file: "app/PriceCalculator.php",
+        line: 3,
+        anchor: "$total = $gross - $discount;",
+      },
+    });
+
+    expect(gateFindings(root, [drifted], CHANGED).kept).toHaveLength(1);
+  });
+
+  test("keeps an impact finding standing outside the diff, caused by a line inside it", () => {
+    const impact = finding({
+      kind: "impact",
+      title: "Order::total() is now called with a discounted gross",
+      claim: "Order::total() declares an int return, which the calculator's new subtraction feeds.",
+      citation: { file: "app/Order.php", line: 5, anchor: "public function total(): int" },
+    });
+
+    const { kept, dropped } = gateFindings(root, [impact], CHANGED);
+
+    expect(dropped).toEqual([]);
+    expect(kept).toHaveLength(1);
+  });
+
+  // Relabelling is the escape the first rule would otherwise leave open: `impact` is the one kind
+  // allowed out of the diff, so an inherited defect wearing it would sail through.
+  test("drops an impact finding that stands on a line inside a hunk", () => {
+    const mislabelled = finding({ kind: "impact" });
+
+    const { kept, dropped } = gateFindings(root, [mislabelled], CHANGED);
+
+    expect(kept).toEqual([]);
+    expect(dropped[0]?.reason).toBe("cited-inside-diff");
+    expect(dropped[0]?.detail[1]).toContain('kind "diff"');
+  });
+
+  // The removed side answers "did the branch take this away", which is a question about
+  // `introducedBy` and never about a citation that just resolved against the branch.
+  test("does not pull an inherited line into scope because the diff deleted the same text elsewhere", () => {
+    const alsoDeleted = parseDiff(
+      [
+        "diff --git a/app/PriceCalculator.php b/app/PriceCalculator.php",
+        "--- a/app/PriceCalculator.php",
+        "+++ b/app/PriceCalculator.php",
+        "@@ -20,2 +20,1 @@",
+        "-class PriceCalculator",
+        "     public function old(): void",
+        "",
+      ].join("\n"),
+    );
+    // Line 3 is the surviving class declaration, untouched by that hunk. Its text is also what the
+    // hunk removed twenty lines down, which is the coincidence this must not fall for.
+    const inherited = finding({
+      citation: { file: "app/PriceCalculator.php", line: 3, anchor: "class PriceCalculator" },
+      introducedBy: { file: "app/PriceCalculator.php", line: 3, anchor: "class PriceCalculator" },
+    });
+
+    expect(gateFindings(root, [inherited], alsoDeleted).dropped[0]?.reason).toBe(
+      "cited-outside-diff",
+    );
+  });
+
   test("skips containment when there is no diff, and still checks the anchor", () => {
     const inherited = finding({
       introducedBy: { file: "app/Order.php", line: 3, anchor: "class Order" },
@@ -383,9 +477,16 @@ describe("gateFindings against the diff", () => {
       introducedBy: { file: "app/Order.php", line: 3, anchor: "class Invoice" },
     });
 
-    const { kept, dropped } = gateFindings(root, [inherited, invented], null);
+    const outside = finding({
+      id: "F3",
+      // Outside every hunk, but there are no hunks to be outside of.
+      citation: { file: "app/PriceCalculator.php", line: 3, anchor: "class PriceCalculator" },
+      introducedBy: { file: "app/PriceCalculator.php", line: 3, anchor: "class PriceCalculator" },
+    });
 
-    expect(kept.map((entry) => entry.finding.id)).toEqual(["F1"]);
+    const { kept, dropped } = gateFindings(root, [inherited, invented, outside], null);
+
+    expect(kept.map((entry) => entry.finding.id)).toEqual(["F3", "F1"]);
     expect(dropped.map((entry) => [entry.finding.id, entry.reason])).toEqual([
       ["F2", "not-introduced"],
     ]);

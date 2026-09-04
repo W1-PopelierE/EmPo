@@ -327,15 +327,16 @@ function submittedFindings(): ReviewFinding[] {
     },
     {
       id: "F4",
-      kind: "diff",
+      // The constant is three lines above the diff, so the finding stands on untouched code and
+      // `impact` is the only kind the gate lets stand there. What made it this branch's problem is
+      // the new call in total(), which is a changed line.
+      kind: "impact",
       severity: "major",
       title: "Tax rate cannot vary per flow",
       claim: MOVED_CLAIM,
       // Cited six lines below where the constant really is: a drifted coordinate over real source,
       // which the gate repairs rather than drops.
       citation: citation("private const TAX_RATE_BASIS_POINTS = 2100;", movedLine()),
-      // The constant itself is three lines above the diff. What made it this branch's problem is
-      // the new call in total(), which is a changed line.
       introducedBy: citation("- $this->discount($order)"),
     },
   ];
@@ -1563,7 +1564,10 @@ describe("the gate", () => {
       {
         ...realFinding(),
         kind: "impact",
-        // Cited on the calculator, which survives; caused by the model that no longer exists.
+        claim: MOVED_CLAIM,
+        // Cited on a line of the calculator this diff never touched, which is where an impact
+        // finding stands; caused by the model that no longer exists.
+        citation: citation("private const TAX_RATE_BASIS_POINTS = 2100;"),
         introducedBy: { file: deleted, line, anchor: "class Order" },
       },
     ]);

@@ -46,6 +46,9 @@ const SPECULATION =
 const UNREAD_BRANCH =
   "read X: if the call happens, cite the line it happens on; if it cannot happen, there is no finding";
 
+const WISHLIST =
+  "a finding names a break, not work the branch could also have done: state the defect flatly and put the improvement in `suggestion`, or drop it";
+
 const UNTRACED_ACCESS =
   "trace the actual middleware, policy and guard chain and cite the line that grants the access, or drop the finding";
 
@@ -65,6 +68,24 @@ export const FORBIDDEN_PHRASINGS: ForbiddenPhrasing[] = [
     why: UNREAD_BRANCH,
   },
   { pattern: "anyone with access", why: UNTRACED_ACCESS },
+  // Each of these is the reviewer's own voice asking for work. Two obvious candidates are absent:
+  // "recommends" and "for consistency" are what a document, a README or a code comment does, and a
+  // finding quoting one ("the docs recommend an idempotency key, the client never sends one") is
+  // reporting a real contradiction. No lint can tell a quotation from a wish, so those two stay
+  // legal and the narrower phrasings below carry the rule.
+  //
+  // "consider" only where the reviewer is the one considering. A finding that says a callee "does
+  // not consider retrying" or "fails to consider queueing" is asserting something it read, and the
+  // negation is what separates the two: the lookbehind is the whole difference between reporting a
+  // gap in the code and asking the author to fill one.
+  { pattern: "(?<!(?:not|to) )consider \\w+ing", why: WISHLIST },
+  {
+    pattern: "(?:it |that )?would be (?:better|good|nice|cleaner|safer|clearer|worth)",
+    why: WISHLIST,
+  },
+  { pattern: "(?:should|could) (?:also|ideally|probably)", why: WISHLIST },
+  { pattern: "nice to have", why: WISHLIST },
+  { pattern: "as a follow(?:-| )up", why: WISHLIST },
 ];
 
 /**

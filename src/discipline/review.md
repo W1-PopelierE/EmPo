@@ -18,6 +18,13 @@ whole repository. So every finding names the diff line that caused it, in an `in
 citation, and the gate drops the ones that cannot: a finding whose `introducedBy` lands outside
 every hunk of this diff is not a finding against this pull request.
 
+That field alone was not enough, because naming any hunk in the same file launders an inherited
+defect past it. So the `citation`, the line the finding actually stands on, is scoped too, and the
+`kind` declares which way it points: `diff` and `coverage` stand on a line this diff changed,
+`impact` stands on a line it did not. The gate holds each kind to that, so a defect on untouched
+code is either reported as the impact finding it is, with the flow it breaks named, or it is not
+reported at all.
+
 What to do with a real defect that predates the branch: one maintenance line at the end of the
 report, no severity, no citation ceremony, and never mixed in with the findings. It is a fact about
 the repository, offered, and not a change asked of this author.
@@ -247,6 +254,18 @@ nothing left in the branch to point at. If you cannot find any such line, the co
 that before the branch, and it goes to the maintenance line, not the findings. This question is the
 whole of the second rule, asked at the one place where every suspect passes through.
 
+Then ask the other half: where does the survivor stand? On a line this diff changed, it is a `diff`
+finding, or a `coverage` one when what is missing is the assertion. On a line this diff never
+touched, it is an `impact` finding and it owes the report the flow that carries the change there.
+There is no third answer, and relabelling to get past the gate is the failure this pair of checks
+exists to catch: the label is a claim about where the defect is, and the gate reads it as one.
+
+**A finding names a break, never work the branch could also have done.** "Consider extracting",
+"would be cleaner", "should also guard", "nice to have": each is a request for new work dressed as
+a review comment, it is unbounded by construction, and the submission gate drops it. Where you
+have a fix worth proposing, the finding still states the defect flatly and the proposal goes in
+`suggestion`, which is not linted precisely because proposing is not asserting.
+
 **Keep only the survivors.**
 
 - VERIFIED goes into the review, with the evidence the check returned.
@@ -326,7 +345,7 @@ One report, in this order:
   saying the repository curates none when it curates none.
 - **Ticket resolution**: each criterion with its evidence and its mark, then the overall status.
 - **Diff-level findings**: issues visible in the diff, each with a `file:line`.
-- **Impact findings**: breakages in files the diff does not touch, found through the blast radius,
+- **Impact findings**: breakages on lines the diff does not touch, found through the blast radius,
   each with a `file:line`. Name the flow that breaks.
 - **Coverage**: which behavioural changes have a test, which do not, and whether any assertion was
   weakened. Never write that tests pass or fail. The review did not run them, CI did. Point at the
@@ -368,8 +387,12 @@ Write the findings you intend to report to a JSON file, then hand it to the gate
 
 The fields:
 
-- `kind` is `diff` for something visible in the diff, `impact` for a breakage in a file the diff
+- `kind` is `diff` for something visible in the diff, `impact` for a breakage on a line the diff
   does not touch, found through the blast radius, or `coverage` for a missing or weakened test.
+  It is checked, not taken on trust: the gate resolves the `citation` and drops a `diff` or
+  `coverage` finding that stands outside every hunk, and an `impact` finding that stands inside
+  one. A defect the branch inherited fails the first check, and relabelling it `impact` does not
+  save it unless it really is on untouched code that the diff reaches.
 - `severity` is `blocker`, `major`, `minor` or `question`, the last being where a downgraded
   UNCLEAR goes. `title` is the one-line summary the author reads first, `claim` the verified
   statement, in the declarative, with no hedging.

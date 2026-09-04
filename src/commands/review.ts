@@ -1803,9 +1803,9 @@ function postFindings(repoRoot: string, pr: string | undefined, result: GateResu
   const id = pr ?? "local";
   for (const row of result.kept) {
     const lines = [row.finding.title, "", row.finding.claim];
-    // Only where the finding is not on a changed line itself: an impact or coverage comment lands
-    // on a file this pull request never opened, and the first question its author asks is what in
-    // the diff made it theirs to answer.
+    // Only where the finding is not on the line that caused it: an impact comment lands on code
+    // this pull request never wrote and a coverage one on the gap beside it, and the first question
+    // either author asks is what in the diff made it theirs to answer.
     if (row.finding.kind !== "diff") {
       const origin = row.introducedBy;
       lines.push(
