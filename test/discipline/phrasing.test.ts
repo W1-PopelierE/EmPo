@@ -65,6 +65,7 @@ describe("forbiddenPhrasings", () => {
   // same time and the register of what a review may ask for is what keeps a review converging.
   test.each([
     ["consider extracting", "Consider extracting the tax maths into its own class."],
+    ["consider adding", "Consider adding a regression test for the discount path."],
     ["would be cleaner", "It would be cleaner to fold the two branches together."],
     ["should also", "The controller should also reject a negative quantity."],
     ["nice to have", "A named constant here is nice to have."],
@@ -78,6 +79,11 @@ describe("forbiddenPhrasings", () => {
     // Each of these reads like a wishlist phrase and is not one: the first asserts what the callee
     // does, the second is the author's own deferral being honoured, the third is a fact.
     expect(forbiddenPhrasings("dispatch() does not consider a failed job.")).toEqual([]);
+    // The same word with the same -ing object, and the negation in front of it is the finding.
+    expect(forbiddenPhrasings("The handler does not consider retrying after a timeout.")).toEqual(
+      [],
+    );
+    expect(forbiddenPhrasings("The scheduler fails to consider queueing the retry.")).toEqual([]);
     // What a document recommends or a comment claims is for consistency is quoted by half of these
     // findings, and the contradiction with the code is the finding itself.
     expect(

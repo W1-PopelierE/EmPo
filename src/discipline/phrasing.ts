@@ -74,9 +74,11 @@ export const FORBIDDEN_PHRASINGS: ForbiddenPhrasing[] = [
   // reporting a real contradiction. No lint can tell a quotation from a wish, so those two stay
   // legal and the narrower phrasings below carry the rule.
   //
-  // "consider" only in its imperative form, for the same reason: a finding that says a callee "does
-  // not consider the null case" is asserting something it read, and is not asking for extra work.
-  { pattern: "consider \\w+ing", why: WISHLIST },
+  // "consider" only where the reviewer is the one considering. A finding that says a callee "does
+  // not consider retrying" or "fails to consider queueing" is asserting something it read, and the
+  // negation is what separates the two: the lookbehind is the whole difference between reporting a
+  // gap in the code and asking the author to fill one.
+  { pattern: "(?<!(?:not|to) )consider \\w+ing", why: WISHLIST },
   {
     pattern: "(?:it |that )?would be (?:better|good|nice|cleaner|safer|clearer|worth)",
     why: WISHLIST,
