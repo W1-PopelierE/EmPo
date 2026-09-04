@@ -140,18 +140,28 @@ export function gateFindings(
     // breakage in a line the diff did not touch, reached through the blast radius. A finding
     // labelled `impact` that cites a changed line is a `diff` finding wearing the one label that
     // is allowed out of the diff, so it is dropped rather than quietly counted.
+    //
+    // The removed side is not consulted here, unlike for `introducedBy`. A citation that got this
+    // far resolved against the branch, so the line is still there and the question is only which
+    // side of a hunk it is on. Asking `removedLine` as well would let a generic line ("return
+    // null;") that the diff happens to have deleted elsewhere in the file pull an inherited one
+    // into scope, which is the gate's own failure mode wearing the fix's clothes.
+    //
+    // A drifted citation is scoped on the line its anchor really sits on, which makes the drift
+    // repair load-bearing where it used to be cosmetic: an anchor that occurs twice in one file
+    // resolves to whichever occurrence is nearer the cited line, and a wrong line number can now
+    // land it outside the diff and drop the finding. The drop names the line it measured, so the
+    // remedy is the coordinate the finding should have carried in the first place.
     const citedLine = check.actualLine ?? finding.citation.line;
     const citedInDiff =
-      changed !== null &&
-      (isChangedLine(changed, finding.citation.file, citedLine) ||
-        removedLine(changed, finding.citation) !== null);
+      changed !== null && isChangedLine(changed, finding.citation.file, citedLine);
 
     if (changed !== null && finding.kind !== "impact" && !citedInDiff) {
       dropped.push({
         finding,
         reason: "cited-outside-diff",
         detail: [
-          `${finding.citation.file}:${citedLine} is outside every hunk of this diff, and is not among the lines it removed.`,
+          `${finding.citation.file}:${citedLine} is outside every hunk of this diff.`,
           `A ${finding.kind} finding stands on a line this pull request changed. This one the branch inherited, so it belongs in the maintenance line, not the findings.`,
         ],
       });

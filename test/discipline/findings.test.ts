@@ -441,6 +441,32 @@ describe("gateFindings against the diff", () => {
     expect(dropped[0]?.detail[1]).toContain('kind "diff"');
   });
 
+  // The removed side answers "did the branch take this away", which is a question about
+  // `introducedBy` and never about a citation that just resolved against the branch.
+  test("does not pull an inherited line into scope because the diff deleted the same text elsewhere", () => {
+    const alsoDeleted = parseDiff(
+      [
+        "diff --git a/app/PriceCalculator.php b/app/PriceCalculator.php",
+        "--- a/app/PriceCalculator.php",
+        "+++ b/app/PriceCalculator.php",
+        "@@ -20,2 +20,1 @@",
+        "-class PriceCalculator",
+        "     public function old(): void",
+        "",
+      ].join("\n"),
+    );
+    // Line 3 is the surviving class declaration, untouched by that hunk. Its text is also what the
+    // hunk removed twenty lines down, which is the coincidence this must not fall for.
+    const inherited = finding({
+      citation: { file: "app/PriceCalculator.php", line: 3, anchor: "class PriceCalculator" },
+      introducedBy: { file: "app/PriceCalculator.php", line: 3, anchor: "class PriceCalculator" },
+    });
+
+    expect(gateFindings(root, [inherited], alsoDeleted).dropped[0]?.reason).toBe(
+      "cited-outside-diff",
+    );
+  });
+
   test("skips containment when there is no diff, and still checks the anchor", () => {
     const inherited = finding({
       introducedBy: { file: "app/Order.php", line: 3, anchor: "class Order" },
