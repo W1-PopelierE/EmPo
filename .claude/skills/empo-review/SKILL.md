@@ -37,8 +37,9 @@ that. Do not improvise a review from this file.
 The CLI makes no model call anywhere, so a review is two phases.
 Phase 1 is the brief.
 Phase 2 is the `--findings` command the brief prints, which resolves every citation against
-the source phase 1 read, drops what hedges or cites text that is not there, and prints only
-the survivors. Write the findings file to the path it names and run the line it gives you.
+the source phase 1 read, drops what hedges, what cites text that is not there, and what stands
+outside the lines this branch changed, and prints only the survivors. Write the findings file
+to the path it names and run the line it gives you.
 A finding that has not been through phase 2 has not been verified, whatever it claims.
 
 Read `.empo/conventions.md` before flagging anything. It is the register of what this team has
