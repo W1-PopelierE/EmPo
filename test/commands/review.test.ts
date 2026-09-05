@@ -2399,14 +2399,196 @@ describe("a changed file that holds several exports", () => {
     expect(printed).toContain("fan-in 1 direct, 3 transitive");
   });
 
-  test("names a test file once however many test nodes it exports", () => {
+  test("counts a test file once however many test nodes it exports", () => {
     const dir = symbolRepo();
     writeFileSync(join(dir, MONEY), "export function formatMoney(): string {\n  return '0';\n}\n");
 
     const printed = capture(() => reviewCommand(dir, undefined, { workflow: false }));
 
-    expect(printed.match(/src\/setup\.test\.ts/g)?.length).toBe(1);
-    expect(printed).toContain(`${SETUP_TEST}  asserts a value`);
+    // The assertion this has always protected is the fold: one file on disk counted once, never
+    // once per test case it exports. It used to be spelled as the path appearing on exactly one
+    // line, which stopped being the shape of the answer when the section began summarising every
+    // file that neither grades ASSERTS NO VALUE nor names a changed file. setup.test.ts is neither,
+    // so the fold is now visible in the counts, and a printer that counted nodes would say two test
+    // files and two in src.
+    expect(printed).toContain(
+      "1 test file over 1 flow, 1 not named above. All of them by directory:",
+    );
+    expect(printed).toMatch(/^ {4}src {2}1$/m);
+  });
+});
+
+/**
+ * The tests section on a change a real suite reaches, where listing every file is the defect.
+ *
+ * A thirteen-file pull request in a Laravel and Vue repository put some five hundred of these rows
+ * in one brief: half of it, and near enough the whole test suite, in a shape that decided nothing.
+ * The graph here is written rather than indexed for the reason the symbol graph above is: what is
+ * under test reads a graph and never builds one, so the honest input is the graph, and no fixture
+ * corpus needs twenty-six test files on disk to ask this question.
+ */
+describe("a change a large test suite reaches", () => {
+  const symbolFixture = fileURLToPath(new URL("../../fixtures/symbol-fixture", import.meta.url));
+
+  const MONEY = "src/money.ts";
+  const DIRECT_TEST = "test/direct/money.test.ts";
+  const QUIET_TEST = "test/quiet/quiet.test.ts";
+  /**
+   * A test that imports the changed file and sits in no flow at all, which is the case the flow's
+   * `testFiles` cannot reach: it is in nobody's coverage list, so without the blast radius reading
+   * it off the consumers the section would not know it exists, and a change whose only assertion is
+   * this file would be reported as unasserted.
+   */
+  const ORPHAN_TEST = "test/orphan/orphan.test.ts";
+  /**
+   * Twelve directories of two files each. With the three singly-occupied directories the other
+   * tests live in that is fifteen, five more than the summary lists, so both the cap and the line
+   * that counts what it cut are exercised.
+   */
+  const BULK_TESTS = Array.from({ length: 12 }, (_, area) =>
+    Array.from({ length: 2 }, (_, index) => `test/area${area}/case${index}.test.ts`),
+  ).flat();
+
+  function node(file: string, symbol: string, isTest = false, assertsValue = false): GraphNode {
+    return {
+      id: `${file}#${symbol}`,
+      file,
+      root: ".",
+      lang: "typescript",
+      kind: "module",
+      name: symbol,
+      symbol,
+      produces: [],
+      consumes: [],
+      isTest,
+      assertsValue,
+    };
+  }
+
+  /**
+   * One changed export, one test that imports it, one that imports it from outside every flow, one
+   * that asserts nothing, and a suite of twenty-four that assert and reach the change only through
+   * the flow. Every one of the twenty-four
+   * carries an asserting node, because a test file with no node in the graph grades ASSERTS NO VALUE
+   * and would be printed in full, which is not the case this fixture is asking about.
+   */
+  function suiteGraph(): Graph {
+    const nodes = [
+      node(MONEY, "formatMoney"),
+      node(DIRECT_TEST, "names", true, true),
+      node(QUIET_TEST, "runs", true, false),
+      node(ORPHAN_TEST, "alone", true, true),
+      ...BULK_TESTS.map((file) => node(file, "asserts", true, true)),
+    ];
+
+    return {
+      schema: GRAPH_SCHEMA,
+      builtAgainst: "",
+      builtAtCommitSubject: "",
+      roots: [{ path: ".", lang: "typescript" }],
+      packs: { typescript: loadPack("typescript").version },
+      stats: { files: nodes.length, nodes: nodes.length, edges: 2, bridgedEdges: 0 },
+      nodes,
+      edges: [
+        {
+          from: `${DIRECT_TEST}#names`,
+          to: `${MONEY}#formatMoney`,
+          kind: "import",
+          symbol: null,
+          evidence: { file: DIRECT_TEST, line: 1 },
+        },
+        {
+          from: `${ORPHAN_TEST}#alone`,
+          to: `${MONEY}#formatMoney`,
+          kind: "import",
+          symbol: null,
+          evidence: { file: ORPHAN_TEST, line: 1 },
+        },
+      ],
+      flows: { checkout: [`${MONEY}#formatMoney`] },
+      fanin: { [`${MONEY}#formatMoney`]: 2 },
+      coverage: {
+        checkout: {
+          flow: "checkout",
+          testNodes: [`${DIRECT_TEST}#names`, `${QUIET_TEST}#runs`],
+          testFiles: [DIRECT_TEST, QUIET_TEST, ...BULK_TESTS],
+          reaches: true,
+          assertsValue: true,
+          blind: false,
+        },
+      },
+      hazards: [],
+      hazardsScanned: [],
+      names: [],
+      fanout: [],
+      permanentFailures: [],
+    };
+  }
+
+  function suiteRepo(): string {
+    const dir = mkdtempSync(join(tmpdir(), "empo-review-suite-"));
+    repos.push(dir);
+    cpSync(symbolFixture, dir, { recursive: true });
+    mkdirSync(dirname(graphPath(dir)), { recursive: true });
+    writeFileSync(graphPath(dir), serializeGraph(suiteGraph()));
+
+    git(dir, ["init", "-b", "main"]);
+    git(dir, ["add", "-A", "-f"]);
+    commit(dir, "the fixture as it stands");
+    return dir;
+  }
+
+  function testsSection(printed: string): string[] {
+    const lines = printed.split("\n");
+    const start = lines.findIndex((line) => line.startsWith("tests that reach the changed code"));
+    const rest = lines.slice(start + 1);
+    const end = rest.indexOf("");
+    return rest.slice(0, end === -1 ? rest.length : end);
+  }
+
+  function brief(): string[] {
+    const dir = suiteRepo();
+    writeFileSync(join(dir, MONEY), "export function formatMoney(): string {\n  return '1';\n}\n");
+    return testsSection(capture(() => reviewCommand(dir, undefined, { workflow: false })));
+  }
+
+  test("prints the two kinds of row that decide something and summarises the rest", () => {
+    const section = brief();
+
+    // The grade is the point of the section and is never summarised away, and the test that names
+    // the changed file is the one step 4 asks the reviewer for.
+    expect(section).toContain(`  ${QUIET_TEST}  ASSERTS NO VALUE`);
+    expect(section).toContain(
+      `  ${DIRECT_TEST}  asserts a value  reaches the changed code directly`,
+    );
+    // The orphan is in no flow, so no `testFiles` list carries it and only the blast radius knows
+    // it exists. It is named for the same reason the other direct test is, and it is in the total.
+    expect(section).toContain(
+      `  ${ORPHAN_TEST}  asserts a value  reaches the changed code directly`,
+    );
+    // The other twenty-four reach the change only by sharing a flow with it, and no line names one.
+    for (const file of BULK_TESTS) expect(section.join("\n")).not.toContain(file);
+    expect(section).toContain(
+      "  27 test files over 1 flow, 24 not named above. All of them by directory:",
+    );
+  });
+
+  test("counts every directory it does not list, so a cut list cannot read as the whole", () => {
+    const section = brief();
+    const rows = section.flatMap((line) => {
+      const match = /^ {4}(\S+) +(\d+)$/.exec(line);
+      return match === null ? [] : [{ directory: match[1] as string, files: Number(match[2]) }];
+    });
+    const held = section.find((line) => line.trimStart().startsWith("... and"));
+
+    expect(rows).toHaveLength(10);
+    // The three directories holding one file each sort below every pair, so what falls past the cap
+    // is two of the twelve pairs and all three of them.
+    expect(held).toBe("    ... and 5 more directories holding 7 files");
+    // The listed rows plus the counted ones are the total the summary claims, which is every file
+    // and not only the unnamed ones: the header says so, and a reader adding the rows up lands on
+    // it. A row dropped in silence would leave this short, which is what the cap line prevents.
+    expect(rows.reduce((total, row) => total + row.files, 0) + 7).toBe(27);
   });
 });
 

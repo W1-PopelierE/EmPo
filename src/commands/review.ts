@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createForge, type HostPullRequestInput } from "../adapters/forge/create";
 import { type ForgeAdapter, hasCapability, type PullRequest } from "../adapters/forge/types";
 import { readHostPullRequest, readHostTicket, verifyPullRequest } from "../adapters/host-input";
@@ -35,7 +35,7 @@ import type { EmpoConfig, EmpoForge } from "../schema/config.schema";
 import { parseFindingsFile } from "../schema/findings.schema";
 import type { HostTicket } from "../schema/host-payload.schema";
 import type { Graph, GraphNode, PermanentFailure } from "../schema/types";
-import { columnWidth } from "../term";
+import { columnWidth, plural } from "../term";
 import { describeTouch, wantedPaths, wantedTerms } from "./check";
 import { type BlastRadius, blastRadius, FLOOR_NOT_CEILING, radiusNode } from "./query";
 
@@ -1595,6 +1595,13 @@ function coordinate(
   return `${file}:${line}  ANCHOR NOWHERE: do not trust this coordinate, run empo verify`;
 }
 
+/**
+ * How many directory rows the summary prints before it starts counting instead of listing. Ten, for
+ * the reason the consumer list stops at five: a breakdown is read to decide where to go looking, and
+ * a reader who has to scroll it is back in the wall of paths this section stopped printing.
+ */
+const TEST_DIRECTORY_ROWS = 10;
+
 function printTests(graph: Graph, facts: FileFacts[]): void {
   const flows = new Set(radiiOf(facts).flatMap((radius) => radius.flows.map((flow) => flow.flow)));
   // The files and not the nodes. This block prints one line per test, and a test is something a
@@ -1607,6 +1614,28 @@ function printTests(graph: Graph, facts: FileFacts[]): void {
     for (const file of graph.coverage[flow]?.testFiles ?? []) files.add(file);
   }
 
+  // The tests that reference a changed node themselves, rather than sharing a flow with it. This is
+  // what step 4 asks the reviewer to name per behavioural change, and it is not derivable from the
+  // flow's test files: a flow is a journey and its coverage is every test anywhere along it, so a
+  // changed pricing class arrives with the whole checkout suite and nothing says which of those
+  // files actually names the class. The blast radius already knows, because a test that imports the
+  // changed file is one of its direct consumers. Test-ness is read off the consumer's own node
+  // (`isTest`, set by the pack's `testPaths` at build time) rather than guessed from the path, so
+  // the answer is the same one `empo check` and the blind-flow computation use.
+  const nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const direct = new Set<string>();
+  for (const radius of radiiOf(facts)) {
+    for (const consumer of radius.consumers) {
+      const node = nodesById.get(consumer.id);
+      if (node === undefined || !node.isTest) continue;
+      direct.add(node.file);
+      // A direct test on a changed file that is in no flow is in no `testFiles` list either, and
+      // dropping it would let the section say every behavioural change here is unasserted while a
+      // test naming the change sits on disk. It belongs in the count as much as in the list.
+      files.add(node.file);
+    }
+  }
+
   console.log("");
   console.log(
     "tests that reach the changed code  (step 4 judges these by reading, never by running)",
@@ -1615,13 +1644,64 @@ function printTests(graph: Graph, facts: FileFacts[]): void {
     console.log("  none. Every behavioural change here is unasserted.");
     return;
   }
-  for (const file of [...files].sort(compareStrings)) {
+  const graded = [...files].sort(compareStrings).map((file) => ({
+    file,
     // Any node of the file asserting a value makes the file one that does. The grade is read off
     // the nodes because it is a fact about the code and only the nodes carry it, and folding it
     // with `some` is the same rule coverage.ts applies to a flow: one assertion in a file is what
     // stops that file being the reassuring line beside an unchecked change.
-    const asserts = graph.nodes.some((node) => node.file === file && node.assertsValue);
-    console.log(`  ${file}  ${asserts ? "asserts a value" : "ASSERTS NO VALUE"}`);
+    asserts: graph.nodes.some((node) => node.file === file && node.assertsValue),
+  }));
+
+  // Two kinds of row earn a path, and everything else earns a count. This block printed one line
+  // per file, which on a thirteen-file pull request in a real repository was some five hundred of
+  // them: half the brief, and the whole test suite listed in a shape a reviewer skims past, while
+  // the sections that decide something scrolled off the top. The two kept are the two a reviewer
+  // acts on. A file graded ASSERTS NO VALUE is the entire point of the grade, a suite that reads as
+  // coverage and is not, and it is never summarised away. A file that reaches a changed file
+  // directly is the one step 4 asks for by name. The rest is where the coverage sits, which is a
+  // question a count answers better than a list does.
+  const named = graded.filter((entry) => !entry.asserts || direct.has(entry.file));
+  for (const entry of named) {
+    const reach = direct.has(entry.file) ? "  reaches the changed code directly" : "";
+    console.log(
+      `  ${entry.file}  ${entry.asserts ? "asserts a value" : "ASSERTS NO VALUE"}${reach}`,
+    );
+  }
+  if (named.length === files.size) return;
+
+  const perDirectory = new Map<string, number>();
+  for (const entry of graded) {
+    const directory = dirname(entry.file);
+    perDirectory.set(directory, (perDirectory.get(directory) ?? 0) + 1);
+  }
+  // Every file, including the ones named above, because the question this answers is where the
+  // coverage sits and a breakdown that omitted the named files would not sum to the total. Which is
+  // why the label below hangs "by directory" off the total and never off the count of what went
+  // unnamed: a reader who adds the rows up has to land on the number the same line just claimed,
+  // and a row for a directory whose every file was named is not the row lying.
+  const rows = [...perDirectory].sort(([aDir, aCount], [bDir, bCount]) => {
+    return bCount - aCount || compareStrings(aDir, bDir);
+  });
+
+  console.log(
+    `  ${plural(files.size, "test file")} over ${plural(flows.size, "flow")},` +
+      ` ${files.size - named.length} not named above. All of them by directory:`,
+  );
+  const width = columnWidth(rows.slice(0, TEST_DIRECTORY_ROWS), ([directory]) => directory);
+  for (const [directory, count] of rows.slice(0, TEST_DIRECTORY_ROWS)) {
+    console.log(`    ${directory.padEnd(width)}  ${count}`);
+  }
+  // Never a silent cut. A truncated breakdown that says nothing reads as the whole of the coverage,
+  // which is the same failure the rest of this command exists to avoid, and here it would be read
+  // as "nothing else is tested" rather than as "the list stopped".
+  if (rows.length > TEST_DIRECTORY_ROWS) {
+    const hidden = rows.slice(TEST_DIRECTORY_ROWS);
+    const held = hidden.reduce((total, [, count]) => total + count, 0);
+    console.log(
+      `    ... and ${plural(hidden.length, "more directory", "more directories")}` +
+        ` holding ${plural(held, "file")}`,
+    );
   }
 }
 
