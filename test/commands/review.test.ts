@@ -76,6 +76,14 @@ function watermarkPathOf(repoRoot: string): string {
   return join(tmpdir(), "empo-review", `watermark-${digest}.json`);
 }
 
+/** The rows of the brief's changed files table, which is the one place the review's scope is listed. */
+function changedRows(printed: string): string {
+  return printed
+    .split("\n")
+    .filter((line) => /^ {2}(modified|added|deleted|renamed)\s/.test(line))
+    .join("\n");
+}
+
 function headSha(dir: string): string {
   return run(dir, "git", ["rev-parse", "HEAD"]).stdout.trim();
 }
@@ -2984,5 +2992,74 @@ describe("round awareness", () => {
     const mark = JSON.parse(readFileSync(watermarkPathOf(repo), "utf8"));
     expect(mark.branches.main).toMatchObject({ sha: first, round: 2 });
     expect(mark.branches["feat/other"]).toMatchObject({ sha: headSha(repo), round: 1 });
+  });
+
+  /**
+   * Round 1 on a branch of its own, gated, so the watermark points at a real commit of it. The
+   * round-1 change is a test file on purpose: it is in the graph, and its blast radius shares no
+   * file with the calculator's, so round 2 naming a calculator consumer cannot be round 1 leaking.
+   */
+  function gatedRound(): void {
+    git(repo, ["checkout", "-q", "-b", "feat/rounds"]);
+    writeFileSync(
+      join(repo, ORDER_TEST_FILE),
+      `${readFileSync(join(repo, ORDER_TEST_FILE), "utf8")}\n// round one\n`,
+    );
+    git(repo, ["add", "-f", ORDER_TEST_FILE]);
+    commit(repo, "round one");
+    gate([realFinding()]);
+  }
+
+  test("--since reviews the hunks written since the last round, not the whole branch", () => {
+    gatedRound();
+    changeCalculator();
+
+    const printed = capture(() => reviewCommand(repo, undefined, { since: true, workflow: false }));
+
+    // The rows of the changed files table alone. The scope block above it and the tests block below
+    // both name files too, and a slice of the whole brief would read one of those as the table.
+    expect(changedRows(printed)).toContain(CALCULATOR_FILE);
+    // Round one's file is still in the diff against the base, and that is the whole point: it was
+    // read at the last gate, so a second round that shows it again is the eleven-round loop.
+    expect(changedRows(printed)).not.toContain(ORDER_TEST_FILE);
+  });
+
+  test("says which files are new and which are only in scope because the radius reaches them", () => {
+    gatedRound();
+    changeCalculator();
+
+    const printed = capture(() => reviewCommand(repo, undefined, { since: true, workflow: false }));
+
+    const scope = printed.slice(printed.indexOf("review scope"), printed.indexOf("changed files"));
+    expect(scope).toContain("new since that review");
+    expect(scope).toContain(CALCULATOR_FILE);
+    // The radius is not optional: a fix from round one can break something the diff never names,
+    // and that is exactly what a naive incremental review would miss.
+    expect(scope).toContain("in scope because the blast radius reaches them");
+    expect(scope).toContain("apps/api/app/Http/Controllers/CheckoutController.php");
+  });
+
+  test("falls back to the whole diff, out loud, when no round has been gated yet", () => {
+    changeCalculator();
+
+    const printed = capture(() => reviewCommand(repo, undefined, { since: true, workflow: false }));
+
+    expect(printed).toContain("nothing has been gated against main yet");
+    expect(changedRows(printed)).toContain(CALCULATOR_FILE);
+  });
+
+  test("falls back to the whole diff, out loud, when the watermark's commit is gone", () => {
+    gatedRound();
+    changeCalculator();
+    // What a rebase or an amend does to the commit the last round was reviewed at.
+    const mark = JSON.parse(readFileSync(watermarkPathOf(repo), "utf8"));
+    mark.branches["feat/rounds"].sha = "0".repeat(40);
+    writeFileSync(watermarkPathOf(repo), JSON.stringify(mark));
+
+    const printed = capture(() => reviewCommand(repo, undefined, { since: true, workflow: false }));
+
+    expect(printed).toContain("is no longer in this repository");
+    expect(changedRows(printed)).toContain(CALCULATOR_FILE);
+    expect(changedRows(printed)).toContain(ORDER_TEST_FILE);
   });
 });

@@ -15,11 +15,13 @@ import { type ChangedFile, changedLines, parseDiff } from "../engine/diff";
 import {
   addWorktree,
   currentBranch,
+  diffAgainstBase,
   diffRange,
   fetchRef,
   gitInfo,
   removeWorktree,
   resolveRef,
+  shortSha,
 } from "../engine/git";
 import { readGraph, stalenessLines } from "../engine/graph";
 import { type GuardedTouch, guardedTouches } from "../engine/guard";
@@ -31,7 +33,7 @@ import {
   type SpineReport,
   verifySpine,
 } from "../engine/spines";
-import { canonicalRoot, recordReview } from "../engine/watermark";
+import { canonicalRoot, type ReviewMark, readMark, recordReview } from "../engine/watermark";
 import { configError, type EmpoError, environmentError, readJson } from "../errors";
 import type { EmpoConfig, EmpoForge } from "../schema/config.schema";
 import { parseFindingsFile } from "../schema/findings.schema";
@@ -83,6 +85,12 @@ export interface ReviewOptions {
    * the brief reports it as the agent's answer rather than as an absence.
    */
   ticket?: boolean;
+  /**
+   * `--since`: review what changed since the last gated round on this branch, plus the blast radius
+   * of those hunks, rather than the whole diff against the base. Off by default, because a review
+   * that silently narrowed its own subject would be the worst kind of quiet.
+   */
+  since?: boolean;
 }
 
 /** What phase 1 leaves behind so phase 2 can verify against the same code the review read. */
@@ -231,7 +239,11 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
   // is explicit everywhere downstream rather than assumed to be the default branch.
   const base = options.base ?? prMeta?.baseBranch ?? provisionalBase;
   const session = isolate(repoRoot, id, base, prMeta, forge.adapter, options, notes);
-  const changed = reviewableFiles(parseDiff(readFileSync(session.diffPath, "utf8")));
+  // The diff on disk stays the whole one: it is what phase 2 holds every finding to, and the pull
+  // request is still the subject of the review whatever this round chose to read. `--since` narrows
+  // what the brief is about, and nothing else.
+  const since = options.since === true ? sinceDiff(repoRoot, session, base, notes) : null;
+  const changed = reviewableFiles(parseDiff(since?.diff ?? readFileSync(session.diffPath, "utf8")));
   if (changed.skipped.length > 0) {
     notes.push(
       `${changed.skipped.length} machine-owned file(s) left out of the review: ` +
@@ -322,6 +334,15 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
             spine: entry.loaded.spine,
             drift: entry.report,
           })),
+          since:
+            since === null
+              ? null
+              : {
+                  sha: since.mark.sha,
+                  at: since.mark.at,
+                  round: since.mark.round,
+                  radiusFiles: radiusFiles(graph, facts, changed.files),
+                },
           conventions: conventionsFacts(repoRoot),
           findingsPath: join(sessionDir(repoRoot, id), "findings.json"),
           workflow: options.workflow === false ? null : reviewWorkflow(),
@@ -343,6 +364,7 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
     prMeta,
     ticket,
     facts,
+    since,
     spines,
     curated: curated.length,
     ticketDeclined: options.ticket === false,
@@ -1017,6 +1039,8 @@ interface BriefView {
   prMeta: PullRequest | null;
   ticket: { key: KeyMatch | null; ticket: Ticket | null };
   facts: FileFacts[];
+  /** The last gated round this brief narrowed itself to, or null for the whole diff. */
+  since: SinceScope | null;
   spines: SpineFacts[];
   /** How many spines exist at all, so an empty list can say which kind of empty it is. */
   curated: number;
@@ -1052,6 +1076,7 @@ function printBrief(repoRoot: string, graph: Graph, view: BriefView): void {
 
   printTicket(view);
   printCi(view);
+  printScope(graph, view);
   printChangedFiles(facts);
   printBlastRadius(facts);
   printFanout(graph, facts);
@@ -1156,6 +1181,99 @@ function printCi(view: BriefView): void {
       console.log(`  ${comment.author}  ${where}${firstLine(comment.body)}`);
     }
   }
+}
+
+/**
+ * What `--since` narrowed this round to, or null where it could not and the whole diff stands.
+ *
+ * Both fallbacks are loud, and that is the point rather than a nicety: a review that quietly
+ * re-read everything and a review that quietly read a third of it print the same brief otherwise,
+ * and the reader has no way to tell which one they are holding.
+ */
+function sinceDiff(
+  repoRoot: string,
+  session: ReviewSession,
+  base: string,
+  notes: string[],
+): SinceScope | null {
+  const whole = `the whole diff against ${base} is under review`;
+  const mark = readMark(repoRoot, session.sourceBranch);
+  if (mark === null) {
+    notes.push(
+      `--since: nothing has been gated against ${session.sourceBranch ?? "this checkout"} yet, ` +
+        `so ${whole}. The watermark is written when a review's findings are gated.`,
+    );
+    return null;
+  }
+  if (resolveRef(session.readRoot, mark.sha) === null) {
+    notes.push(
+      `--since: ${shortSha(mark.sha)}, where the last round was reviewed, is no longer in this ` +
+        `repository (a rebase or an amend), so ${whole}.`,
+    );
+    return null;
+  }
+  const diff = diffAgainstBase(session.readRoot, mark.sha);
+  if (diff === null) {
+    notes.push(`--since: git could not diff against ${shortSha(mark.sha)}, so ${whole}.`);
+    return null;
+  }
+  return { mark, diff };
+}
+
+/** The watermark this round narrowed itself to, and the diff since it. */
+interface SinceScope {
+  mark: ReviewMark;
+  diff: string;
+}
+
+/**
+ * Which files came along because the graph says the new hunks can reach them.
+ *
+ * Not optional and never a footnote: a fix written in round two to close round one's finding is
+ * exactly the kind of change that breaks something the diff does not name, and an incremental
+ * review that reads only its own hunks is the one that misses it.
+ */
+function radiusFiles(graph: Graph, facts: FileFacts[], changed: ChangedFile[]): string[] {
+  const already = new Set(changed.map((file) => file.path));
+  const files = new Set<string>();
+  const add = (id: string): void => {
+    const file = graph.nodes.find((node) => node.id === id)?.file;
+    if (file !== undefined && !already.has(file)) files.add(file);
+  };
+  for (const radius of radiiOf(facts)) {
+    for (const consumer of radius.consumers) add(consumer.id);
+    for (const bridge of radius.bridges) {
+      add(bridge.from);
+      add(bridge.to);
+    }
+  }
+  return [...files].sort(compareStrings);
+}
+
+/**
+ * The two halves of an incremental round, named apart. A reader who cannot tell which files are new
+ * from which ones the radius dragged in cannot tell a finding about this round's work from a
+ * finding about code that has been sitting there for ten rounds.
+ */
+function printScope(graph: Graph, view: BriefView): void {
+  if (view.since === null) return;
+  const { mark } = view.since;
+  console.log("");
+  console.log(`review scope  since ${shortSha(mark.sha)}, reviewed ${mark.at}`);
+  console.log("  new since that review");
+  const changed = view.facts.map((entry) => entry.file);
+  if (changed.length === 0) console.log("    nothing: this branch has not moved since that round");
+  for (const file of changed) {
+    console.log(`    ${file.path}  +${file.addedCount} -${file.removedCount}`);
+  }
+  const radius = radiusFiles(graph, view.facts, changed);
+  console.log("  in scope because the blast radius reaches them");
+  if (radius.length === 0) console.log("    none: the graph knows no consumer of these hunks");
+  for (const file of radius.slice(0, 10)) console.log(`    ${file}`);
+  if (radius.length > 10) console.log(`    +${radius.length - 10} more`);
+  console.log(
+    `  Everything else on this branch was reviewed at ${shortSha(mark.sha)} and is not below.`,
+  );
 }
 
 function printChangedFiles(facts: FileFacts[]): void {
