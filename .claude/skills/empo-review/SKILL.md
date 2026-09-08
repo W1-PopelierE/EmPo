@@ -32,6 +32,16 @@ you is the one the verification gate is built around, and a second copy here wou
 it and teach a workflow the gate does not implement. Read what the command prints and run
 that. Do not improvise a review from this file.
 
+## A branch is reviewed more than once
+
+The brief's `round` line says which round this is and how far the branch has moved since the
+one you last gated. `empo review --since` narrows the round to those hunks plus the files the
+graph says they can reach, and names which files are which. The radius is not an extra there:
+a fix written to close the last round's finding is exactly the kind of change that breaks
+something the new hunks do not mention. Without it the whole diff is the subject, which is
+right on a first round and a waste on an eleventh. The gate is what writes the watermark, so a
+round that skipped phase 2 is a round `--since` will not skip over.
+
 ## The second phase is not optional
 
 The CLI makes no model call anywhere, so a review is two phases.
