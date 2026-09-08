@@ -242,7 +242,12 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
   // The diff on disk stays the whole one: it is what phase 2 holds every finding to, and the pull
   // request is still the subject of the review whatever this round chose to read. `--since` narrows
   // what the brief is about, and nothing else.
-  const since = options.since === true ? sinceDiff(repoRoot, session, base, notes) : null;
+  // Read whether or not --since was passed. The round line is what makes the loop visible to the
+  // person inside it, and that person is usually the one running the plain command for the third
+  // time; only the narrowing is behind the flag.
+  const round = roundScope(repoRoot, session, base, notes, options.since === true);
+  const since =
+    options.since === true && round?.diff != null ? { ...round, diff: round.diff } : null;
   const changed = reviewableFiles(parseDiff(since?.diff ?? readFileSync(session.diffPath, "utf8")));
   if (changed.skipped.length > 0) {
     notes.push(
@@ -334,6 +339,15 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
             spine: entry.loaded.spine,
             drift: entry.report,
           })),
+          round:
+            round === null
+              ? null
+              : {
+                  number: round.mark.round + 1,
+                  sha: round.mark.sha,
+                  at: round.mark.at,
+                  linesChanged: linesChanged(round.diff),
+                },
           since:
             since === null
               ? null
@@ -364,6 +378,7 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
     prMeta,
     ticket,
     facts,
+    round,
     since,
     spines,
     curated: curated.length,
@@ -1039,6 +1054,8 @@ interface BriefView {
   prMeta: PullRequest | null;
   ticket: { key: KeyMatch | null; ticket: Ticket | null };
   facts: FileFacts[];
+  /** What the last gated round on this branch left behind, or null where there has been none. */
+  round: RoundScope | null;
   /** The last gated round this brief narrowed itself to, or null for the whole diff. */
   since: SinceScope | null;
   spines: SpineFacts[];
@@ -1063,6 +1080,14 @@ function printBrief(repoRoot: string, graph: Graph, view: BriefView): void {
     `base       ${view.base}${resolveRef(repoRoot, view.base) === null ? "  (does not resolve)" : ""}`,
   );
   console.log(`branch     ${session.sourceBranch ?? "detached"}`);
+  if (view.round !== null) {
+    const { mark, diff } = view.round;
+    const moved =
+      diff === null ? "lines changed since unknown" : `${linesChanged(diff)} lines changed since`;
+    console.log(
+      `round      ${mark.round + 1} against this branch, last reviewed at ${shortSha(mark.sha)}, ${moved}`,
+    );
+  }
   console.log(
     `read root  ${session.readRoot}${session.worktree === null ? "  (your checkout)" : "  (detached worktree, removed when the findings are gated)"}`,
   );
@@ -1184,46 +1209,64 @@ function printCi(view: BriefView): void {
 }
 
 /**
- * What `--since` narrowed this round to, or null where it could not and the whole diff stands.
+ * What the last gated round on this branch left behind: the watermark, and the diff written since
+ * it. Null where no round has been gated at all, which is round one and has nothing to say.
  *
- * Both fallbacks are loud, and that is the point rather than a nicety: a review that quietly
- * re-read everything and a review that quietly read a third of it print the same brief otherwise,
- * and the reader has no way to tell which one they are holding.
+ * `diff` is null where the watermark points at a commit that is gone, which is what a rebase or an
+ * amend does to one. Both of those are loud under `--since`, and that is the point rather than a
+ * nicety: a review that quietly re-read everything and a review that quietly read a third of it
+ * print the same brief otherwise, and the reader cannot tell which one they are holding.
  */
-function sinceDiff(
+function roundScope(
   repoRoot: string,
   session: ReviewSession,
   base: string,
   notes: string[],
-): SinceScope | null {
+  /** Whether the caller asked to narrow by this, and so is owed a note when it cannot be done. */
+  announce: boolean,
+): RoundScope | null {
   const whole = `the whole diff against ${base} is under review`;
   const mark = readMark(repoRoot, session.sourceBranch);
   if (mark === null) {
-    notes.push(
-      `--since: nothing has been gated against ${session.sourceBranch ?? "this checkout"} yet, ` +
-        `so ${whole}. The watermark is written when a review's findings are gated.`,
-    );
+    if (announce) {
+      notes.push(
+        `--since: nothing has been gated against ${session.sourceBranch ?? "this checkout"} yet, ` +
+          `so ${whole}. The watermark is written when a review's findings are gated.`,
+      );
+    }
     return null;
   }
   if (resolveRef(session.readRoot, mark.sha) === null) {
-    notes.push(
-      `--since: ${shortSha(mark.sha)}, where the last round was reviewed, is no longer in this ` +
-        `repository (a rebase or an amend), so ${whole}.`,
-    );
-    return null;
+    if (announce) {
+      notes.push(
+        `--since: ${shortSha(mark.sha)}, where the last round was reviewed, is no longer in this ` +
+          `repository (a rebase or an amend), so ${whole}.`,
+      );
+    }
+    return { mark, diff: null };
   }
   const diff = diffAgainstBase(session.readRoot, mark.sha);
-  if (diff === null) {
+  if (diff === null && announce) {
     notes.push(`--since: git could not diff against ${shortSha(mark.sha)}, so ${whole}.`);
-    return null;
   }
   return { mark, diff };
 }
 
-/** The watermark this round narrowed itself to, and the diff since it. */
-interface SinceScope {
+/** The watermark this branch carries, and the diff since it where there is one to compute. */
+interface RoundScope {
   mark: ReviewMark;
+  diff: string | null;
+}
+
+/** The same, once `--since` has an answer to narrow by. */
+interface SinceScope extends RoundScope {
   diff: string;
+}
+
+/** How far the branch has moved since the last round, in the unit the author writes in. */
+function linesChanged(diff: string | null): number {
+  if (diff === null) return 0;
+  return parseDiff(diff).reduce((total, file) => total + file.addedCount + file.removedCount, 0);
 }
 
 /**

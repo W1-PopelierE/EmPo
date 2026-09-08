@@ -3039,6 +3039,19 @@ describe("round awareness", () => {
     expect(scope).toContain("apps/api/app/Http/Controllers/CheckoutController.php");
   });
 
+  test("the brief says which round this is, so the loop is visible from inside it", () => {
+    gatedRound();
+    changeCalculator();
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    // The header block's own column width, because this line has to read as one of the facts and
+    // not as a note somebody appended. The round is the one about to run, not the one just gated.
+    expect(printed).toMatch(
+      /\nround {6}2 against this branch, last reviewed at [0-9a-f]{7}, \d+ lines changed since\n/,
+    );
+  });
+
   test("falls back to the whole diff, out loud, when no round has been gated yet", () => {
     changeCalculator();
 
