@@ -547,6 +547,27 @@ does not consult the configured forge at all, and prints a note naming the one i
 no pull request for a forge to answer about, so spending the id on a lookup only produced a failure
 against a pull request nobody had named.
 
+**Rounds, and `--since`.** A branch is usually reviewed more than once, and nothing recorded that:
+every round diffed against the base again, so eleven rounds over one branch re-read the same seven
+hundred lines eleven times while each round had changed a few dozen. Phase 2 now records what it
+gated — the commit, the time and the round count, per branch, in the temp directory beside the
+review scratch ([09-adapters](09-adapters.md)) and never in the repository. The brief prints that
+back as one line under `branch`, `round 3 against this branch, last reviewed at 56abad4, 17 lines
+changed since`, which is the loop being visible to the person inside it; a branch nobody has gated
+has no such line.
+
+`empo review --since` reads the same watermark and narrows the round to it: the subject becomes the
+hunks written since that commit **plus the files the graph says those hunks can reach**. The blast
+radius is not an extra there, it is the half a naive incremental review would miss, because a fix
+written to close the last round's finding is exactly the kind of change that breaks something the
+new hunks do not name. The brief says which files are which under `review scope`, so a reader can
+tell this round's work from code that has been sitting there since round one. The diff on disk is
+untouched by all of this: the gate still holds every finding to the whole pull request, which is
+still the subject. Where there is no watermark, or where it points at a commit a rebase or an amend
+has taken away, the whole diff is reviewed and the brief says so in its notes — a review that
+quietly re-read everything and one that quietly read a third of it print the same brief otherwise.
+Without the flag nothing narrows.
+
 **The brief also prints every dispatch a changed file makes from inside a loop**, under the heading
 `dispatches inside a loop  (step 2: what changed files can put on the queue)`, one row per site naming
 the `file:line`, the job it dispatches and the line the loop opened on. Under each row, where the
