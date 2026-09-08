@@ -3052,6 +3052,37 @@ describe("round awareness", () => {
     );
   });
 
+  /**
+   * Point four of the ask, and the reason the other three are behind a flag: a review that narrowed
+   * itself without being told to is a review whose subject nobody chose. These pass by doing
+   * nothing, which is the property; the --since tests above are what proves they have teeth, since
+   * the same two repositories under the flag print the scope block and drop round one's file.
+   */
+  test("without --since the scope is still the whole diff against the base", () => {
+    gatedRound();
+    changeCalculator();
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    expect(changedRows(printed)).toContain(CALCULATOR_FILE);
+    expect(changedRows(printed)).toContain(ORDER_TEST_FILE);
+    expect(printed).not.toContain("review scope");
+  });
+
+  test("a branch nobody has gated prints the brief it always printed", () => {
+    changeCalculator();
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    expect(printed).not.toContain("review scope");
+    expect(printed).not.toMatch(/\nround {2,}/);
+    expect(printed).not.toContain("--since");
+  });
+
+  test("--since is a flag the real CLI accepts", () => {
+    expect(() => parseArgv(argvOf("empo review --since"))).not.toThrow();
+  });
+
   test("falls back to the whole diff, out loud, when no round has been gated yet", () => {
     changeCalculator();
 
