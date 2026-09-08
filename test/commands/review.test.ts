@@ -65,6 +65,21 @@ function findingsPathOf(repoRoot: string): string {
   return join(sessionDirOf(repoRoot), "findings.json");
 }
 
+/**
+ * Where the review watermark lives: outside the repository, beside the scratch, keyed by the same
+ * digest of the resolved root. Outside because `empo review` disturbs nothing in the checkout it
+ * reviews, and beside rather than inside a session directory because a session is torn down at the
+ * end of every gate and the watermark is the one thing that has to outlive it.
+ */
+function watermarkPathOf(repoRoot: string): string {
+  const digest = createHash("sha256").update(realpathSync(repoRoot)).digest("hex").slice(0, 8);
+  return join(tmpdir(), "empo-review", `watermark-${digest}.json`);
+}
+
+function headSha(dir: string): string {
+  return run(dir, "git", ["rev-parse", "HEAD"]).stdout.trim();
+}
+
 /** One line of the shipped workflow, distinctive enough that no line of the brief resembles it. */
 const WORKFLOW_LINE =
   "Read the ticket, its description and every comment, before you open the diff.";
@@ -384,8 +399,10 @@ afterEach(() => {
       const worktree = join(session, "worktree");
       if (existsSync(worktree)) run(dir, "git", ["worktree", "remove", "--force", worktree]);
     }
+    const watermark = watermarkPathOf(dir);
     rmSync(dir, { recursive: true, force: true });
     for (const session of sessions) rmSync(session, { recursive: true, force: true });
+    rmSync(watermark, { force: true });
   }
 });
 
@@ -2933,5 +2950,39 @@ describe("a changed file the scheduler reaches", () => {
 
     expect(printed).toContain("dispatches SyncMember");
     expect(printed).toContain("on failure: unknown, this graph predates the axis. Run empo index.");
+  });
+});
+
+/**
+ * Round awareness: a branch reviewed eleven times re-read the same seven hundred lines eleven
+ * times, because every round diffed against the base and nothing recorded what the last round had
+ * already read. The watermark is that record, and `--since` is what reads it.
+ */
+describe("round awareness", () => {
+  test("the gate records the commit it reviewed, per branch", () => {
+    changeCalculator();
+
+    gate([realFinding()]);
+
+    const mark = JSON.parse(readFileSync(watermarkPathOf(repo), "utf8"));
+    expect(mark.branches.main.sha).toBe(headSha(repo));
+    expect(mark.branches.main.round).toBe(1);
+  });
+
+  test("a second gate counts a second round, and a sibling branch keeps its own", () => {
+    changeCalculator();
+    gate([realFinding()]);
+    gate([realFinding()]);
+
+    const first = headSha(repo);
+    git(repo, ["checkout", "-q", "-b", "feat/other"]);
+    writeCalculator(repo, OTHER_CALCULATOR);
+    git(repo, ["add", "-f", CALCULATOR_FILE]);
+    commit(repo, "a second branch under review");
+    gate([realFinding()]);
+
+    const mark = JSON.parse(readFileSync(watermarkPathOf(repo), "utf8"));
+    expect(mark.branches.main).toMatchObject({ sha: first, round: 2 });
+    expect(mark.branches["feat/other"]).toMatchObject({ sha: headSha(repo), round: 1 });
   });
 });

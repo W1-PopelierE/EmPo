@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { createForge, type HostPullRequestInput } from "../adapters/forge/create";
 import { type ForgeAdapter, hasCapability, type PullRequest } from "../adapters/forge/types";
 import { readHostPullRequest, readHostTicket, verifyPullRequest } from "../adapters/host-input";
@@ -17,6 +17,7 @@ import {
   currentBranch,
   diffRange,
   fetchRef,
+  gitInfo,
   removeWorktree,
   resolveRef,
 } from "../engine/git";
@@ -30,6 +31,7 @@ import {
   type SpineReport,
   verifySpine,
 } from "../engine/spines";
+import { canonicalRoot, recordReview } from "../engine/watermark";
 import { configError, type EmpoError, environmentError, readJson } from "../errors";
 import type { EmpoConfig, EmpoForge } from "../schema/config.schema";
 import { parseFindingsFile } from "../schema/findings.schema";
@@ -1693,6 +1695,16 @@ function gatePhase(repoRoot: string, pr: string | undefined, options: ReviewOpti
   // promised not to touch (docs/07-review-discipline.md invariant 2 and step 8).
   try {
     reportAndPost(repoRoot, pr, id, readRoot, notes, findings, changed, options);
+    // The round is over and a report has been printed, so what this review read is now behind the
+    // author. Written here rather than in the brief because a brief nobody gated read nothing: it
+    // is the facts, and the round that skipped the gate produced no findings for anyone to trust.
+    if (session !== null) {
+      recordReview(
+        repoRoot,
+        session.sourceBranch,
+        gitInfo(existsSync(readRoot) ? readRoot : repoRoot)?.sha ?? null,
+      );
+    }
   } finally {
     teardown(repoRoot, id, session);
   }
@@ -1913,18 +1925,6 @@ function teardown(repoRoot: string, id: string, session: ReviewSession | null): 
 function sessionDir(repoRoot: string, id: string): string {
   const digest = createHash("sha256").update(canonicalRoot(repoRoot)).digest("hex").slice(0, 8);
   return join(tmpdir(), "empo-review", `${slug(id)}-${digest}`);
-}
-
-/**
- * Both phases have to land on the same directory, so the key is the root git and the OS agree on:
- * /var and /private/var are one checkout on macOS, and a relative path is one too.
- */
-function canonicalRoot(repoRoot: string): string {
-  try {
-    return realpathSync(repoRoot);
-  } catch {
-    return resolve(repoRoot);
-  }
 }
 
 function readSession(repoRoot: string, id: string): ReviewSession | null {
