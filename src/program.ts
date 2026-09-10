@@ -114,7 +114,7 @@ export function buildProgram(): Command {
   // somebody's unrelated repository, which is why hookCommand resolves rather than throwing.
   program
     .command("hook")
-    .argument("<event>", "session-start, pre-edit, or pre-commit")
+    .argument("<event>", "session-start, pre-edit, pre-commit, or tool-use")
     .description("Answer a Claude Code hook, reading its payload on stdin")
     .option("--repo <path>", "repository root, which the hook fills from CLAUDE_PROJECT_DIR")
     .action(async (event: string, options: { repo?: string }) => {

@@ -1,10 +1,12 @@
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -16,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { type HookOptions, hookAnswer, hookCommand, isGitCommit } from "../../src/commands/hook";
 import { run } from "../../src/engine/git";
 import { GRAPH_SCHEMA } from "../../src/engine/graph";
+import { activityPath, sessionDir } from "../../src/engine/session";
 
 /**
  * `empo hook`, the first output in this repository a host parses instead of a human reading.
@@ -285,7 +288,7 @@ describe("detecting a git commit", () => {
 describe("every failure mode is silence", () => {
   useRepo();
 
-  const EVENTS = ["session-start", "pre-edit", "pre-commit"];
+  const EVENTS = ["session-start", "pre-edit", "pre-commit", "tool-use"];
 
   test.each(EVENTS)("%s says nothing when stdin is not JSON", (event) => {
     expect(hookAnswer(event, "not json at all", { repo })).toBeNull();
@@ -810,6 +813,78 @@ describe("which repository the hook is answering about", () => {
 
     const blankFlag = hookAnswer("pre-edit", edit(repo, CALCULATOR_FILE), { repo: "   " });
     expect(spoke(blankFlag).hookSpecificOutput?.additionalContext).toContain("pricing");
+  });
+});
+
+describe("the tool-use event", () => {
+  useRepo();
+
+  function toolUse(root: string, tool: string, relPath: string): Record<string, unknown> {
+    return { cwd: root, tool_name: tool, tool_input: { file_path: join(root, relPath) } };
+  }
+
+  function activity(root: string): Record<string, unknown>[] {
+    const path = activityPath(root);
+    if (!existsSync(path)) return [];
+    return readFileSync(path, "utf8")
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+  }
+
+  test("says nothing to the agent, ever", () => {
+    mkdirSync(sessionDir(repo, "local"), { recursive: true });
+    expect(hookAnswer("tool-use", toolUse(repo, "Read", "README.md"), { repo })).toBeNull();
+  });
+
+  test("records the read when a review is running", () => {
+    mkdirSync(sessionDir(repo, "local"), { recursive: true });
+
+    hookAnswer("tool-use", toolUse(repo, "Read", "README.md"), { repo });
+
+    const lines = activity(repo);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.tool).toBe("Read");
+    expect(lines[0]?.path).toBe("README.md");
+    expect(typeof lines[0]?.at).toBe("string");
+  });
+
+  test("writes nothing at all when no review is running", () => {
+    hookAnswer("tool-use", toolUse(repo, "Read", "README.md"), { repo });
+    expect(activity(repo)).toEqual([]);
+  });
+
+  test("keeps a path outside the repository absolute rather than dropping it", () => {
+    mkdirSync(sessionDir(repo, "local"), { recursive: true });
+    const outside = join(tmpdir(), "somewhere-else.ts");
+
+    hookAnswer(
+      "tool-use",
+      { cwd: repo, tool_name: "Read", tool_input: { file_path: outside } },
+      { repo },
+    );
+
+    expect(activity(repo)[0]?.path).toBe(outside);
+  });
+
+  test("ignores a payload with no file path, such as a Bash call", () => {
+    mkdirSync(sessionDir(repo, "local"), { recursive: true });
+    hookAnswer(
+      "tool-use",
+      { cwd: repo, tool_name: "Bash", tool_input: { command: "ls" } },
+      { repo },
+    );
+    expect(activity(repo)).toEqual([]);
+  });
+
+  test("truncates the log rather than letting it grow without bound", () => {
+    mkdirSync(sessionDir(repo, "local"), { recursive: true });
+    writeFileSync(activityPath(repo), "x".repeat(1_100_000), "utf8");
+
+    hookAnswer("tool-use", toolUse(repo, "Read", "README.md"), { repo });
+
+    expect(statSync(activityPath(repo)).size).toBeLessThan(200_000);
+    expect(activity(repo)).toHaveLength(1);
   });
 });
 
