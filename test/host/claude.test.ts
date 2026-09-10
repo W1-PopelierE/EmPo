@@ -378,15 +378,16 @@ describe("the generated skills", () => {
   test("empo-review says a branch gets reviewed more than once, and how to say so", () => {
     // The loop this repairs is invisible from inside a single run: every round diffed against the
     // base again, so an agent asked to review the same branch an eleventh time re-read the same
-    // seven hundred lines. A skill that never names --since leaves it at eleven.
+    // seven hundred lines. A skill that never says the narrowing happens leaves it at eleven.
     const skill = renderSkill("empo-review", FULL);
 
-    expect(skill).toContain("--since");
+    expect(skill).toContain("narrows the next one by itself");
     // The half a naive incremental review drops, which is the half that makes it safe.
     expect(skill).toContain("blast radius");
-    // And it stays behind the flag: a skill that told an agent to narrow by default would be
-    // choosing the subject of somebody else's review.
-    expect(skill).toContain("Without it");
+    // And both escapes, because an agent handed the wrong subject and no way out of it works
+    // around the narrowing instead of stepping past it.
+    expect(skill).toContain("--whole");
+    expect(skill).toContain("--reset");
   });
 
   test("point at the discipline each command prints instead of copying it", () => {

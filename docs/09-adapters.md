@@ -472,17 +472,40 @@ printed the survivors, and starting a new review of the same id clears the previ
 worktree before it begins, so a crashed review costs a stale temp directory and never a dangling
 worktree in the human's checkout.
 
-One file outlives those directories, and it does not live beside them: `~/.empo/watermark-<hash>.json`,
-keyed by the same digest of the canonical root, holding one entry per branch with the commit its last
-gated round was reviewed at, the timestamp and the round count. Outside a session directory because a
-session is torn down at the end of every gate, and the watermark is the one thing that has to survive
-that in order to say anything about the next round. Outside the temp directory the scratch uses
-because `/tmp` is world-writable and this path is predictable: a symlink planted there ahead of time
-would hand the write to a file of the attacker's choosing, or forge the commit `--since` is told it
-can skip. Not in `.empo/generated/` either, for the reason everything else here is not: that directory
-is machine-owned by `empo index` alone, and a review disturbs nothing in the checkout it reads. A lost
-watermark stays cheap — `empo review --since` reports a full review out loud instead of pretending it
-narrowed one.
+One tree outlives those directories, and it does not live beside them. It is the round log, and its
+shape is a path rather than a file: `<base>/empo-review/rounds/<repo-slug>-<repo-hash>/<branch-slug>-<branch-hash>/001.json`,
+then `002.json`, one file per gated round, appended and never rewritten. Each of them holds the round
+number, the commit that round was read at, the timestamp, and the findings that round got through the
+gate. That last field is the whole reason this is a log and not a number on disk: a counter can say
+this is round five, and only a log can say what round two found and whether the fix for it is the
+thing round five is now looking at.
+
+`<base>` is `process.env.XDG_RUNTIME_DIR` where the environment sets it and `os.tmpdir()` otherwise.
+Both are the same idea reached by two routes: on Linux `XDG_RUNTIME_DIR` is per user, created mode
+0700 and emptied when the session ends, and on macOS `os.tmpdir()` is already the private
+`/var/folders/...` directory the OS hands each user. What that buys is the periodic sweeping of a
+temp directory without the world-writable `/tmp` underneath it, and the distinction matters because
+this path is predictable: a predictable name in a directory anyone can write is a name somebody can
+plant a symlink at ahead of time, and then the review writes its findings into a file of the
+attacker's choosing, or forges the commit a narrowed round is told it may skip past (CWE-59). The
+code does not lean on the directory alone either. The tree is created mode 0700, one `lstat` on the
+leaf directory checks that it is a real directory, not a symlink, and owned by the current user, and
+every round file is written with `flag: "wx"` — `O_EXCL` refuses to follow a symlink, and an
+append-only log has nothing to overwrite in the first place.
+
+Repository and branch are both in the path because neither identifies a round on its own. Branch
+names are not unique across checkouts, and two checkouts of one repository must not read each other's
+rounds or, worse, gate against each other's commits. The readable slug is in each name so a human
+can find the directory a brief just named, and the hash behind it is what keeps `feat/x` and `feat-x`
+from landing in the same directory after slugging has flattened the difference away.
+
+The log is outside a session directory because a session is torn down at the end of every gate, and
+the rounds are the one thing that has to survive that in order for the next round to say anything.
+It is not in `.empo/generated/` either, for the reason everything else here is not: that directory is
+machine-owned by `empo index` alone, and a review disturbs nothing in the checkout it reads. And the
+honest cost is that a temp sweep or a logout takes the history with it. A branch whose log has gone
+is a branch nobody has gated as far as EmPo can tell, so the next round reads the whole diff — and
+says out loud in the brief that it did, rather than presenting a full re-read as a narrowed one.
 
 A payload therefore lives exactly as long as the review that asked for it. Rerunning a command that
 worked once finds its own `--pr-payload` path gone, which is why the request block treats a

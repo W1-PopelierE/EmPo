@@ -4,12 +4,13 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -66,15 +67,34 @@ function findingsPathOf(repoRoot: string): string {
 }
 
 /**
- * Where the review watermark lives: in the user's own `~/.empo/`, keyed by a digest of the resolved
- * root. Outside the repository because `empo review` disturbs nothing in the checkout it reviews,
- * and outside the temp scratch because a session is torn down at the end of every gate while the
- * watermark has to outlive it — and because a predictable path under a world-writable `/tmp` is one
- * anyone can plant a symlink at. Each test's repo digest is its own, and cleanup removes it.
+ * Where a branch's gated rounds live, worked out here rather than imported so that the layout on
+ * disk is a thing the tests assert and not a thing they inherit from the code under test. Keyed by
+ * the repository and then the branch, under the temp root that is the user's own where the platform
+ * has one, which is the same reasoning src/engine/rounds.ts sets out.
  */
-function watermarkPathOf(repoRoot: string): string {
-  const digest = createHash("sha256").update(realpathSync(repoRoot)).digest("hex").slice(0, 8);
-  return join(homedir(), ".empo", `watermark-${digest}.json`);
+function roundsRepoDirOf(repoRoot: string): string {
+  const root = realpathSync(repoRoot);
+  const base = process.env.XDG_RUNTIME_DIR ?? tmpdir();
+  return join(base, "empo-review", "rounds", roundKeyOf(basename(root), root));
+}
+
+function roundsDirOf(repoRoot: string, branch: string): string {
+  return join(roundsRepoDirOf(repoRoot), roundKeyOf(branch, branch));
+}
+
+function roundKeyOf(readable: string, material: string): string {
+  const digest = createHash("sha256").update(material).digest("hex").slice(0, 8);
+  const slug = readable.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 40);
+  return `${slug === "" ? "x" : slug}-${digest}`;
+}
+
+/** Every round file for a branch, oldest first, as the log wrote them. */
+function roundsOf(repoRoot: string, branch: string) {
+  const dir = roundsDirOf(repoRoot, branch);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .sort()
+    .map((name) => JSON.parse(readFileSync(join(dir, name), "utf8")));
 }
 
 /** The rows of the brief's changed files table, which is the one place the review's scope is listed. */
@@ -408,10 +428,10 @@ afterEach(() => {
       const worktree = join(session, "worktree");
       if (existsSync(worktree)) run(dir, "git", ["worktree", "remove", "--force", worktree]);
     }
-    const watermark = watermarkPathOf(dir);
+    const rounds = roundsRepoDirOf(dir);
     rmSync(dir, { recursive: true, force: true });
     for (const session of sessions) rmSync(session, { recursive: true, force: true });
-    rmSync(watermark, { force: true });
+    rmSync(rounds, { recursive: true, force: true });
   }
 });
 
@@ -2965,7 +2985,8 @@ describe("a changed file the scheduler reaches", () => {
 /**
  * Round awareness: a branch reviewed eleven times re-read the same seven hundred lines eleven
  * times, because every round diffed against the base and nothing recorded what the last round had
- * already read. The watermark is that record, and `--since` is what reads it.
+ * already read. The round log is that record, and after the first gated round the plain command
+ * reads it by itself.
  */
 describe("round awareness", () => {
   test("the gate records the commit it reviewed, per branch", () => {
@@ -2973,14 +2994,12 @@ describe("round awareness", () => {
 
     gate([realFinding()]);
 
-    const mark = JSON.parse(readFileSync(watermarkPathOf(repo), "utf8"));
-    expect(mark.branches.main.sha).toBe(headSha(repo));
-    expect(mark.branches.main.round).toBe(1);
+    expect(roundsOf(repo, "main")).toMatchObject([{ round: 1, sha: headSha(repo) }]);
   });
 
   /**
-   * The one that bites locally: commit or amend between the brief and the gate and a watermark
-   * taken at gate time names a commit nobody reviewed, so the next `--since` skips it unread.
+   * The one that bites locally: commit or amend between the brief and the gate and a round taken at
+   * gate time names a commit nobody reviewed, so the next round skips past it unread.
    */
   test("the gate records what phase 1 read, not where HEAD moved to after it", () => {
     changeCalculator();
@@ -2993,12 +3012,30 @@ describe("round awareness", () => {
     writeFileSync(path, `${JSON.stringify({ findings: [realFinding()] }, null, 2)}\n`);
     capture(() => reviewCommand(repo, undefined, { findings: path }));
 
-    const mark = JSON.parse(readFileSync(watermarkPathOf(repo), "utf8"));
-    expect(mark.branches.main.sha).toBe(reviewed);
-    expect(mark.branches.main.sha).not.toBe(headSha(repo));
+    const [round] = roundsOf(repo, "main");
+    expect(round.sha).toBe(reviewed);
+    expect(round.sha).not.toBe(headSha(repo));
   });
 
-  test("a second gate counts a second round, and a sibling branch keeps its own", () => {
+  /**
+   * What a log has that a counter does not. A round that only knew its own number could not tell
+   * round four what round two already said, which is half the reason the history is kept at all.
+   */
+  test("a round keeps the findings that came through the gate", () => {
+    changeCalculator();
+
+    gate([realFinding()]);
+
+    const [round] = roundsOf(repo, "main");
+    expect(round.findings).toHaveLength(1);
+    expect(round.findings[0]).toMatchObject({
+      id: realFinding().id,
+      kind: realFinding().kind,
+      file: CALCULATOR_FILE,
+    });
+  });
+
+  test("a second gate is a second round file, and a sibling branch keeps its own", () => {
     changeCalculator();
     gate([realFinding()]);
     gate([realFinding()]);
@@ -3010,15 +3047,17 @@ describe("round awareness", () => {
     commit(repo, "a second branch under review");
     gate([realFinding()]);
 
-    const mark = JSON.parse(readFileSync(watermarkPathOf(repo), "utf8"));
-    expect(mark.branches.main).toMatchObject({ sha: first, round: 2 });
-    expect(mark.branches["feat/other"]).toMatchObject({ sha: headSha(repo), round: 1 });
+    expect(roundsOf(repo, "main")).toMatchObject([
+      { round: 1, sha: first },
+      { round: 2, sha: first },
+    ]);
+    expect(roundsOf(repo, "feat/other")).toMatchObject([{ round: 1, sha: headSha(repo) }]);
   });
 
   /**
-   * Round 1 on a branch of its own, gated, so the watermark points at a real commit of it. The
-   * round-1 change is a test file on purpose: it is in the graph, and its blast radius shares no
-   * file with the calculator's, so round 2 naming a calculator consumer cannot be round 1 leaking.
+   * Round 1 on a branch of its own, gated, so the log points at a real commit of it. The round-1
+   * change is a test file on purpose: it is in the graph, and its blast radius shares no file with
+   * the calculator's, so round 2 naming a calculator consumer cannot be round 1 leaking.
    */
   function gatedRound(): void {
     git(repo, ["checkout", "-q", "-b", "feat/rounds"]);
@@ -3031,11 +3070,11 @@ describe("round awareness", () => {
     gate([realFinding()]);
   }
 
-  test("--since reviews the hunks written since the last round, not the whole branch", () => {
+  test("the next round reviews the hunks written since the last one, without being asked", () => {
     gatedRound();
     changeCalculator();
 
-    const printed = capture(() => reviewCommand(repo, undefined, { since: true, workflow: false }));
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
 
     // The rows of the changed files table alone. The scope block above it and the tests block below
     // both name files too, and a slice of the whole brief would read one of those as the table.
@@ -3049,7 +3088,7 @@ describe("round awareness", () => {
     gatedRound();
     changeCalculator();
 
-    const printed = capture(() => reviewCommand(repo, undefined, { since: true, workflow: false }));
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
 
     const scope = printed.slice(printed.indexOf("review scope"), printed.indexOf("changed files"));
     expect(scope).toContain("new since that review");
@@ -3074,54 +3113,58 @@ describe("round awareness", () => {
   });
 
   /**
-   * Point four of the ask, and the reason the other three are behind a flag: a review that narrowed
-   * itself without being told to is a review whose subject nobody chose. These pass by doing
-   * nothing, which is the property; the --since tests above are what proves they have teeth, since
-   * the same two repositories under the flag print the scope block and drop round one's file.
+   * The escape, and the reason it has to say so out loud: the subject of the review used to be
+   * chosen by typing a flag or not typing it, and now that it is chosen by what is on disk, the
+   * only place a reader can learn which of the two they are holding is the brief itself.
    */
-  test("without --since the scope is still the whole diff against the base", () => {
+  test("--whole reads the whole diff again, and says that is what it did", () => {
     gatedRound();
     changeCalculator();
 
-    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+    const printed = capture(() => reviewCommand(repo, undefined, { whole: true, workflow: false }));
 
     expect(changedRows(printed)).toContain(CALCULATOR_FILE);
     expect(changedRows(printed)).toContain(ORDER_TEST_FILE);
     expect(printed).not.toContain("review scope");
+    expect(printed).toContain("--whole: round 2");
   });
 
-  test("a branch nobody has gated prints the brief it always printed", () => {
+  test("a branch nobody has gated reads the whole diff, and says round 1 out loud", () => {
     changeCalculator();
 
     const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
 
     expect(printed).not.toContain("review scope");
-    expect(printed).not.toMatch(/\nround {2,}/);
-    expect(printed).not.toContain("--since");
-  });
-
-  test("--since is a flag the real CLI accepts", () => {
-    expect(() => parseArgv(argvOf("empo review --since"))).not.toThrow();
-  });
-
-  test("falls back to the whole diff, out loud, when no round has been gated yet", () => {
-    changeCalculator();
-
-    const printed = capture(() => reviewCommand(repo, undefined, { since: true, workflow: false }));
-
-    expect(printed).toContain("nothing has been gated against main yet");
+    expect(printed).toContain("round 1 against main: nothing has been gated here yet");
     expect(changedRows(printed)).toContain(CALCULATOR_FILE);
   });
 
-  test("falls back to the whole diff, out loud, when the watermark's commit is gone", () => {
+  test("--whole and --reset are flags the real CLI accepts", () => {
+    expect(() => parseArgv(argvOf("empo review --whole"))).not.toThrow();
+    expect(() => parseArgv(argvOf("empo review --reset"))).not.toThrow();
+  });
+
+  test("--reset forgets the branch's rounds, so the next review is round 1 again", () => {
+    gatedRound();
+
+    const printed = capture(() => reviewCommand(repo, undefined, { reset: true }));
+
+    expect(printed).toContain("Forgot 1 gated round(s) on feat/rounds");
+    expect(roundsOf(repo, "feat/rounds")).toHaveLength(0);
+    expect(capture(() => reviewCommand(repo, undefined, { workflow: false }))).toContain(
+      "round 1 against feat/rounds: nothing has been gated here yet",
+    );
+  });
+
+  test("falls back to the whole diff, out loud, when the round's commit is gone", () => {
     gatedRound();
     changeCalculator();
-    // What a rebase or an amend does to the commit the last round was reviewed at.
-    const mark = JSON.parse(readFileSync(watermarkPathOf(repo), "utf8"));
-    mark.branches["feat/rounds"].sha = "0".repeat(40);
-    writeFileSync(watermarkPathOf(repo), JSON.stringify(mark));
+    // What a rebase followed by a garbage collect does to the commit the last round was reviewed at.
+    const file = join(roundsDirOf(repo, "feat/rounds"), "001.json");
+    const round = JSON.parse(readFileSync(file, "utf8"));
+    writeFileSync(file, JSON.stringify({ ...round, sha: "0".repeat(40) }));
 
-    const printed = capture(() => reviewCommand(repo, undefined, { since: true, workflow: false }));
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
 
     expect(printed).toContain("is no longer in this repository");
     expect(changedRows(printed)).toContain(CALCULATOR_FILE);

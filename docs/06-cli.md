@@ -547,26 +547,43 @@ does not consult the configured forge at all, and prints a note naming the one i
 no pull request for a forge to answer about, so spending the id on a lookup only produced a failure
 against a pull request nobody had named.
 
-**Rounds, and `--since`.** A branch is usually reviewed more than once, and nothing recorded that:
-every round diffed against the base again, so eleven rounds over one branch re-read the same seven
-hundred lines eleven times while each round had changed a few dozen. Phase 2 now records what it
-gated — the commit phase 1 read, the time and the round count, per branch, in the user's own
-`~/.empo/` ([09-adapters](09-adapters.md)) and never in the repository. The brief prints that
-back as one line under `branch`, `round 3 against this branch, last reviewed at 56abad4, 17 lines
+**Rounds, `--whole` and `--reset`.** A branch is usually reviewed more than once, and nothing
+recorded that: every round diffed against the base again, so eleven rounds over one branch re-read
+the same seven hundred lines eleven times while each round had changed a few dozen. Phase 2 now
+appends to a round log — one file per gated round, holding that round's number, the commit phase 1
+read, the time, and the findings that round got through the gate — in a directory keyed to this
+repository and this branch, outside the repository entirely ([09-adapters](09-adapters.md)) and
+never in it. A log and not a counter, because a counter answers how many rounds there have been and
+never what round two found, and a reader on round five has the second question far more often than
+the first. The brief prints the head of it back as one line under `branch`, `round 3 against this branch, last reviewed at 56abad4, 17 lines
 changed since`, which is the loop being visible to the person inside it; a branch nobody has gated
 has no such line.
 
-`empo review --since` reads the same watermark and narrows the round to it: the subject becomes the
-hunks written since that commit **plus the files the graph says those hunks can reach**. The blast
-radius is not an extra there, it is the half a naive incremental review would miss, because a fix
-written to close the last round's finding is exactly the kind of change that breaks something the
-new hunks do not name. The brief says which files are which under `review scope`, so a reader can
-tell this round's work from code that has been sitting there since round one. The diff on disk is
-untouched by all of this: the gate still holds every finding to the whole pull request, which is
-still the subject. Where there is no watermark, or where it points at a commit a rebase or an amend
-has taken away, the whole diff is reviewed and the brief says so in its notes — a review that
-quietly re-read everything and one that quietly read a third of it print the same brief otherwise.
-Without the flag nothing narrows.
+Narrowing is what a round does by default now. Where a log exists for this branch the subject
+becomes the hunks written since the last gated round **plus the files the graph says those hunks can
+reach**. The blast radius is not an extra there, it is the half a naive incremental review would
+miss, because a fix written to close the last round's finding is exactly the kind of change that
+breaks something the new hunks do not name. The brief says which files are which under `review
+scope`, so a reader can tell this round's work from code that has been sitting there since round
+one. The diff on disk is untouched by all of this: the gate still holds every finding to the whole
+pull request, which is still the subject.
+
+`empo review --whole` is the way out, and reads the entire diff against the base as every round
+before the log existed did. The brief states which of the two subjects it has in either case, in
+words and never by omission, and that statement is load-bearing in a way it was not when narrowing
+was opt-in: back then the command line said it — a reader could tell what had been read from whether
+the flag had been typed — and now that nothing in the invocation carries it, the brief has to. The
+same sentence covers the cases where narrowing was wanted and could not happen: no log for this
+branch, or a log pointing at a commit a rebase or an amend has taken away. Those read the whole diff
+and say so out loud, because a review that quietly re-read everything and one that quietly read a
+third of it are otherwise the same brief.
+
+`empo review --reset` forgets every gated round on this branch, deleting the branch's directory and
+printing what it threw away — the rounds, and the commit each was reviewed at. It is the clean start
+there was no command for until now: a branch whose history has been rewritten under it, or a review
+whose narrowing has drifted somewhere a reader no longer trusts, gets to begin again at round one
+rather than living with a log nobody believes, and the print is there because deleting history
+silently is the one thing a command about forgetting must not do.
 
 **The brief also prints every dispatch a changed file makes from inside a loop**, under the heading
 `dispatches inside a loop  (step 2: what changed files can put on the queue)`, one row per site naming
@@ -809,7 +826,10 @@ and ticket an `mcp` host fetched, as JSON, at the paths the request block named)
 verified findings to the PR, off by default, and unavailable on an `mcp` forge, which declares no
 `post` capability), `--readonly` (no posting, no mutating forge action: passing it together with
 `--post` is a config error, and nothing else in a review writes anything), `--json`, `--no-workflow`
-(leave the discipline out of the brief, for a reader who already has it), and `--repo <path>`.
+(leave the discipline out of the brief, for a reader who already has it), `--whole` (read the entire
+diff against the base instead of narrowing to what has changed since the last gated round),
+`--reset` (forget every gated round on this branch and print what was thrown away), and
+`--repo <path>`.
 
 ## `empo update`
 
