@@ -99,7 +99,14 @@ beforeEach(() => {
 
 afterEach(() => {
   roots.home = "";
-  for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const dir of temps.splice(0)) {
+    // The activity log lives beside the sessions in the OS temp root, keyed on the repository path
+    // and never deleted by anything in `src`, so a test repo that is not swept here leaks one file
+    // per run into a directory `sessionDirs` enumerates on every Read the hook sees. Computed while
+    // the directory still exists, since the key runs through `realpathSync`.
+    rmSync(activityPath(dir), { force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 describe("with no review running", () => {
@@ -178,6 +185,45 @@ describe("once phase 1 has written the brief", () => {
   });
 });
 
+// A pull request is reviewed out of a detached worktree under the OS temp directory, so the hook —
+// which knows the repository and not the session — cannot make those reads repo-relative and logs
+// them absolute. Without resolving them against the session's read root, `opened` and the diff's
+// repo-relative paths never intersect: every changed file reads as unread forever and every one of
+// them also shows up under "read outside the diff".
+describe("on a pull request, whose read root is a worktree outside the repository", () => {
+  test("counts a worktree read as the changed file the diff names", () => {
+    const root = repo();
+    const dir = startReview(root);
+    const readRoot = join(dir, "worktree");
+    mkdirSync(readRoot, { recursive: true });
+    writeSession(dir, root, { readRoot, worktree: readRoot });
+    log(root, [
+      { tool: "Read", path: join(readRoot, "src/a.ts") },
+      { tool: "Read", path: join(readRoot, "src/elsewhere.ts") },
+    ]);
+
+    const state = readReviewState(root, emptySnapshot());
+
+    expect(state.files.find((one) => one.path === "src/a.ts")?.read).toBe(true);
+    expect(state.files.find((one) => one.path === "src/b.ts")?.read).toBe(false);
+    expect(state.readOutsideDiff).toEqual(["src/elsewhere.ts"]);
+    expect(state.activity.map((one) => one.path)).toEqual(["src/a.ts", "src/elsewhere.ts"]);
+  });
+
+  test("leaves a path under neither root alone rather than mangling it", () => {
+    const root = repo();
+    const dir = startReview(root);
+    const readRoot = join(dir, "worktree");
+    mkdirSync(readRoot, { recursive: true });
+    writeSession(dir, root, { readRoot, worktree: readRoot });
+    log(root, [{ tool: "Read", path: "/etc/hosts" }]);
+
+    const state = readReviewState(root, emptySnapshot());
+
+    expect(state.readOutsideDiff).toEqual(["/etc/hosts"]);
+  });
+});
+
 describe("once the reviewer has written findings", () => {
   function writeFindings(dir: string, ids: string[]): void {
     writeFileSync(
@@ -230,7 +276,7 @@ describe("once the reviewer has written findings", () => {
     expect(state.findings.find((one) => one.id === "f2")?.claim).toBe("f2 claim");
   });
 
-  test("keeps showing the last review after the gate deleted the session", () => {
+  test("keeps showing the last review after the session directory went away", () => {
     const root = repo();
     const dir = startReview(root);
     writeFindings(dir, ["f1"]);
@@ -239,7 +285,8 @@ describe("once the reviewer has written findings", () => {
     rmSync(dir, { recursive: true, force: true });
     const after = readReviewState(root, before);
 
-    expect(after.phase).toBe("gated");
+    // No round was recorded, so this is a review that stopped, not one that was judged.
+    expect(after.phase).toBe("findings");
     expect(after.files.map((one) => one.path)).toEqual(["src/a.ts", "src/b.ts"]);
     expect(after.note).toContain("session finished");
   });
@@ -338,5 +385,40 @@ describe("once the reviewer has written findings", () => {
 
     expect(state.phase).toBe("idle");
     expect(state.findings).toEqual([]);
+  });
+});
+
+// The session directory disappearing is not a verdict. `empo review --reset` deletes it, and so
+// does an abort, and calling that "gated" tells the reader a gate judged findings it never saw.
+describe("when the session went away without a gate", () => {
+  test("carries the last live phase forward instead of claiming a gate ran", () => {
+    const root = repo();
+    const dir = startReview(root);
+    log(root, [{ tool: "Read", path: "src/a.ts" }]);
+    const before = readReviewState(root, emptySnapshot());
+    expect(before.phase).toBe("reading");
+
+    rmSync(dir, { recursive: true, force: true });
+    const after = readReviewState(root, before);
+
+    expect(after.phase).toBe("reading");
+    expect(after.round).toBeNull();
+    expect(after.note).toContain("session finished");
+  });
+
+  // The sibling case, and the one that must keep saying "gated": a gate that dropped everything
+  // records a round with no findings, which is a verdict and not an absence of one.
+  test("still reads as gated when the round it crossed found nothing", () => {
+    const root = repo();
+    const dir = startReview(root);
+    const before = readReviewState(root, emptySnapshot());
+
+    recordRound(root, "feat/x", "abc123", "def456", "local", []);
+    rmSync(dir, { recursive: true, force: true });
+    const after = readReviewState(root, before);
+
+    expect(after.phase).toBe("gated");
+    expect(after.round).toBe(1);
+    expect(after.findings).toEqual([]);
   });
 });

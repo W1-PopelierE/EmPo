@@ -121,6 +121,58 @@ describe("the viewer's host check", () => {
   });
 });
 
+// The timer only broadcasts when the freshly polled state differs from the copy it last sent, so
+// anything else that advances that copy swallows a frame nobody received. `/api/state` is the one
+// other reader of it, and the page polls that route after any SSE blip — so a request landing
+// between two ticks used to cost a live tab the transition permanently.
+describe("the event stream against a request that reads the same state", () => {
+  /** The `data:` payloads an SSE client has received so far. */
+  function listen(base: string): { frames: string[]; close(): void } {
+    const frames: string[] = [];
+    const call = httpRequest(`${base}/events`, (response) => {
+      let buffer = "";
+      response.on("data", (chunk: Buffer) => {
+        buffer += chunk.toString("utf8");
+        let end = buffer.indexOf("\n\n");
+        while (end !== -1) {
+          frames.push(buffer.slice(0, end).replace(/^data: /, ""));
+          buffer = buffer.slice(end + 2);
+          end = buffer.indexOf("\n\n");
+        }
+      });
+    });
+    call.end();
+    return { frames, close: () => call.destroy() };
+  }
+
+  async function until(check: () => boolean): Promise<void> {
+    for (let tries = 0; tries < 100; tries++) {
+      if (check()) return;
+      await new Promise((done) => setTimeout(done, 20));
+    }
+  }
+
+  test("still tells a listener the review started after an /api/state request read it first", async () => {
+    const root = repo();
+    const base = await serve(root);
+    const client = listen(base);
+    await until(() => client.frames.length >= 1);
+    expect(JSON.parse(client.frames[0] ?? "{}").phase).toBe("idle");
+
+    startReview(root);
+    // The request that used to eat the frame: it reads the new state and answers with it, and the
+    // stream must still deliver that same change on the next tick.
+    const polled = (await (await fetch(`${base}/api/state`)).json()) as Snapshot;
+    expect(polled.phase).toBe("brief");
+
+    await until(() => client.frames.length >= 2);
+    client.close();
+
+    expect(client.frames.length).toBeGreaterThanOrEqual(2);
+    expect(JSON.parse(client.frames.at(-1) ?? "{}").phase).toBe("brief");
+  });
+});
+
 describe("the command", () => {
   test("reports a port it cannot bind as an environment error", async () => {
     const blocker = createServer();

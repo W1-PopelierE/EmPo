@@ -50,9 +50,11 @@ export function createViewer(repoRoot: string): { server: Server; stop(): void }
 
     if (url.pathname === "/") return send(response, 200, "text/html; charset=utf-8", page());
 
+    // Read fresh, and left there: advancing `snapshot` from here would make the timer compare its
+    // next poll against a state it never broadcast, so one request would swallow the frame every
+    // SSE client was owed. The timer keeps `snapshot` current on its own.
     if (url.pathname === "/api/state") {
       const state = readReviewState(repoRoot, snapshot);
-      snapshot = state;
       return send(response, 200, "application/json", JSON.stringify(state));
     }
 
@@ -87,16 +89,24 @@ export async function webCommand(repoRoot: string, options: WebOptions = {}): Pr
     ]);
   }
 
-  const { server } = createViewer(repoRoot);
+  const viewer = createViewer(repoRoot);
   const first = options.port ?? DEFAULT_PORT;
   const last = options.port === undefined ? first + PORT_ATTEMPTS - 1 : first;
 
-  for (let port = first; port <= last; port++) {
-    const bound = await listen(server, port);
-    if (bound) {
-      console.log(`empo web  http://127.0.0.1:${port}`);
-      return;
+  // Bound is the only outcome that keeps the poll timer: every way out of here that is not a live
+  // server leaves an interval running for the life of the process, which in a test run is the rest
+  // of the suite.
+  let bound = false;
+  try {
+    for (let port = first; port <= last; port++) {
+      bound = await listen(viewer.server, port);
+      if (bound) {
+        console.log(`empo web  http://127.0.0.1:${port}`);
+        return;
+      }
     }
+  } finally {
+    if (!bound) viewer.stop();
   }
 
   throw environmentError(

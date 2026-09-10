@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { isAbsolute, join, relative, sep } from "node:path";
 import type { ReviewFinding } from "../discipline/findings";
 import { parseFindingsFile } from "../schema/findings.schema";
 import { type ChangedFile, type ChangeStatus, parseDiff } from "./diff";
@@ -49,8 +49,6 @@ export interface SnapshotFinding {
   suggestion: string | null;
   /** null until the gate has run. */
   survived: boolean | null;
-  /** The gate's reason, when it dropped this one. */
-  dropped: string | null;
 }
 
 export interface Snapshot {
@@ -90,7 +88,10 @@ export function readReviewState(repoRoot: string, previous: Snapshot): Snapshot 
   const { session, startedAt } = found;
 
   const changed = readDiff(session);
-  const activity = readActivity(repoRoot, startedAt);
+  const activity = readActivity(repoRoot, startedAt).map((one) => ({
+    ...one,
+    path: repoRelative(one.path, session.readRoot, repoRoot),
+  }));
   const opened = new Set(activity.map((one) => one.path));
   const inDiff = new Set(changed.map((one) => one.path));
 
@@ -164,7 +165,6 @@ function readFindings(
         anchor: "",
         suggestion: null,
         survived: true,
-        dropped: null,
       });
     }
   }
@@ -183,7 +183,6 @@ function toSnapshotFinding(finding: ReviewFinding, survived: boolean | null): Sn
     anchor: finding.citation.anchor,
     suggestion: finding.suggestion ?? null,
     survived,
-    dropped: null,
   };
 }
 
@@ -293,9 +292,44 @@ function readActivity(repoRoot: string, startedAt: number): ActivityLine[] {
 }
 
 /**
+ * An activity path as the diff spells it. The hook writes `repoRelative(repoRoot, …) ?? filePath`
+ * and knows nothing about the session, so a PR review — whose read root is a worktree under the OS
+ * temp directory, entirely outside the repository — logs absolute paths that match no diff entry at
+ * all. Relativizing against `readRoot` here is what lands a worktree read on the same repo-relative
+ * path the diff uses; on a local review the two roots are the same and nothing changes.
+ *
+ * The realpath pass is the one `src/commands/hook.ts` makes for the same reason: on macOS the temp
+ * root arrives as a symlink and the file below it does not, so the raw comparison misses.
+ */
+function repoRelative(path: string, readRoot: string, repoRoot: string): string {
+  if (!isAbsolute(path)) return path;
+  for (const root of [readRoot, realRoot(readRoot), repoRoot, realRoot(repoRoot)]) {
+    if (root === null) continue;
+    const rel = relative(root, path);
+    if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) continue;
+    return rel.split(sep).join("/");
+  }
+  return path;
+}
+
+function realRoot(root: string): string | null {
+  try {
+    const real = realpathSync(root);
+    return real === root ? null : real;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * What to show once no session directory survives. A review that ran in this process's lifetime
  * left its last snapshot behind, so that carries forward with a note explaining why it is frozen; a
  * viewer that never saw a session has nothing to carry and stays idle.
+ *
+ * The session directory vanishing is not by itself a gate: `empo review --reset` deletes it, and so
+ * does an aborted run. Only a round record actually crossed here turns the phase to "gated"; without
+ * one the last live phase carries forward, so a review that was killed mid-read is not reported as
+ * judged with every finding tagged "suspected".
  *
  * The gate's verdict is read here rather than only in `readReviewState`, because the two things it
  * needs never coexist for long: `recordRound` and the teardown that deletes the session directory
@@ -305,12 +339,8 @@ function readActivity(repoRoot: string, startedAt: number): ActivityLine[] {
  */
 function afterTeardown(repoRoot: string, previous: Snapshot): Snapshot {
   if (previous.session === null) return emptySnapshot();
-  const frozen: Snapshot = {
-    ...previous,
-    phase: "gated",
-    note: "session finished; showing its last state",
-  };
-  if (previous.round !== null) return frozen;
+  const frozen: Snapshot = { ...previous, note: "session finished; showing its last state" };
+  if (previous.round !== null) return { ...frozen, phase: "gated" };
 
   // Matched on the tree phase 1 read, not on time: that is exactly what the gate writes down about
   // the review it gated, so an older round on the same branch cannot be mistaken for this verdict.
@@ -342,8 +372,7 @@ function afterTeardown(repoRoot: string, previous: Snapshot): Snapshot {
       anchor: "",
       suggestion: null,
       survived: true,
-      dropped: null,
     });
   }
-  return { ...frozen, round: round.round, findings };
+  return { ...frozen, phase: "gated", round: round.round, findings };
 }

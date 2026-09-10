@@ -212,7 +212,6 @@ function findingBlock(f) {
     + '<span class="t">' + esc(f.title) + "</span>"
     + '<p class="dim">' + esc(f.file) + ":" + Number(f.line) + "</p>"
     + (f.claim ? "<p>" + esc(f.claim) + "</p>" : "")
-    + (f.dropped ? '<p class="dim">dropped: ' + esc(f.dropped) + "</p>" : "")
     + (f.suggestion ? '<p class="dim">' + esc(f.suggestion) + "</p>" : "")
     + "</div>";
 }
