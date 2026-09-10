@@ -232,8 +232,10 @@ describe("the viewer's session selection", () => {
   function twoReviews(root: string): { older: string; newer: string } {
     const older = startReview(root, "one", "feat/one");
     const newer = startReview(root, "two", "feat/two");
+    // session.json, not the directory: `sessionDirs` sorts on that file's mtime, and the
+    // filesystem bumps the directory for anything written beside it.
     const past = Date.now() / 1000 - 60;
-    utimesSync(older, past, past);
+    utimesSync(join(older, "session.json"), past, past);
     return { older: basename(older), newer: basename(newer) };
   }
 

@@ -55,13 +55,13 @@ function startReview(root: string, id = "local"): string {
 }
 
 /**
- * Makes a session look older than the one beside it. `sessionDirs` sorts on the directory's mtime,
+ * Makes a session look older than the one beside it. `sessionDirs` sorts on session.json's mtime,
  * and two sessions a test creates land in the same millisecond, so "newest" would otherwise be
- * whichever order readdir happened to return. Call it last: writing anything inside the directory
- * afterwards stamps the mtime back to now.
+ * whichever order readdir happened to return. Call it after the session has been written: rewriting
+ * session.json afterwards stamps the mtime back to now.
  */
 function backdate(dir: string, ms: number): void {
-  utimesSync(dir, new Date(), new Date(Date.now() - ms));
+  utimesSync(join(dir, "session.json"), new Date(), new Date(Date.now() - ms));
 }
 
 /** The session file phase 1 leaves, with whichever field a test needs to say differently. */
@@ -385,6 +385,17 @@ describe("with a second review live in the same repository", () => {
     backdate(findings, 30_000);
 
     const state = readReviewState(root, emptySnapshot(), basename(brief));
+
+    console.log(
+      "DIAG " +
+        JSON.stringify({
+          mtimes: [brief, reading, findings, gated].map((d) => [
+            basename(d),
+            statSync(join(d, "session.json")).mtimeMs,
+          ]),
+          got: state.sessions.map((one) => one.id),
+        }),
+    );
 
     expect(state.phase).toBe("brief");
     expect(state.sessions.map((one) => [one.id, one.phase])).toEqual([
