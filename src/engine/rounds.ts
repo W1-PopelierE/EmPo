@@ -98,7 +98,7 @@ export function canonicalRoot(repoRoot: string): string {
 /** Where this branch's rounds are kept. Named readably, keyed by digest: see the type above. */
 export function roundsDir(repoRoot: string, branch: string): string {
   const root = canonicalRoot(repoRoot);
-  return join(roundsRoot(), key(basename(root), root), key(branch, branch));
+  return join(roundsRoot(), pathKey(basename(root), root), pathKey(branch, branch));
 }
 
 /**
@@ -237,7 +237,7 @@ export function recordRound(
  */
 export function branchesGatedUnder(repoRoot: string, id: string): string[] {
   const root = canonicalRoot(repoRoot);
-  const dir = join(roundsRoot(), key(basename(root), root));
+  const dir = join(roundsRoot(), pathKey(basename(root), root));
   try {
     return (
       readdirSync(dir)
@@ -270,9 +270,16 @@ export function resetRounds(repoRoot: string, branch: string | null): RoundRecor
 /**
  * A readable name a human can find in a directory listing, and a digest that makes it a key: two
  * branches slug to `feat-x` and only one of them is `feat/x`.
+ *
+ * The whole digest and not a prefix of it. What the digest is standing in for is repository
+ * identity, and a truncation makes that a guess: two checkouts landing on one key share a round
+ * log, or share a review's scratch, where one repository's findings are verified against the
+ * other's source and a claim that stands on nothing comes back verified. The name is long, which
+ * costs nothing a directory listing cannot afford, and the readable slug in front of it is what a
+ * human actually reads.
  */
-function key(readable: string, material: string): string {
-  const digest = createHash("sha256").update(material).digest("hex").slice(0, 8);
+export function pathKey(readable: string, material: string): string {
+  const digest = createHash("sha256").update(material).digest("hex");
   const slug = readable.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 40);
   return `${slug === "" ? "x" : slug}-${digest}`;
 }

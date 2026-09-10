@@ -60,7 +60,7 @@ const ORDER_TEST_FILE = "apps/api/tests/Feature/OrderTest.php";
  * also what lets afterEach remove a session a run threw before tearing down.
  */
 function sessionDirOf(repoRoot: string, id = "local"): string {
-  const digest = createHash("sha256").update(realpathSync(repoRoot)).digest("hex").slice(0, 8);
+  const digest = createHash("sha256").update(realpathSync(repoRoot)).digest("hex");
   return join(tmpdir(), "empo-review", `${id}-${digest}`);
 }
 
@@ -100,7 +100,7 @@ function roundsDirOf(repoRoot: string, branch: string): string {
 }
 
 function roundKeyOf(readable: string, material: string): string {
-  const digest = createHash("sha256").update(material).digest("hex").slice(0, 8);
+  const digest = createHash("sha256").update(material).digest("hex");
   const slug = readable.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 40);
   return `${slug === "" ? "x" : slug}-${digest}`;
 }
@@ -1992,7 +1992,7 @@ describe("the session directory", () => {
     expect(dirname(first.findingsPath)).toBe(sessionDirOf(repo));
     // The id stays readable in the name: a human told to write findings into this directory has to
     // be able to recognise it, and the digest alone would name nothing.
-    expect(basename(dirname(first.findingsPath))).toMatch(/^local-[0-9a-f]{8}$/);
+    expect(basename(dirname(first.findingsPath))).toMatch(/^local-[0-9a-f]{64}$/);
     expect(dirname(first.diffPath)).toBe(sessionDirOf(repo));
     expect(existsSync(join(sessionDirOf(repo), "session.json"))).toBe(true);
     expect(existsSync(first.diffPath)).toBe(true);

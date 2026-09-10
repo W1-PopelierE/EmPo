@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,6 +31,7 @@ import {
   branchesGatedUnder,
   canonicalRoot,
   lastRound,
+  pathKey,
   type RoundFinding,
   type RoundRecord,
   recordRound,
@@ -2214,8 +2214,7 @@ function teardown(repoRoot: string, id: string, session: ReviewSession | null): 
  * stays in the name so a human can still find the directory a brief just named.
  */
 function sessionDir(repoRoot: string, id: string): string {
-  const digest = createHash("sha256").update(canonicalRoot(repoRoot)).digest("hex").slice(0, 8);
-  return join(tmpdir(), "empo-review", `${slug(id)}-${digest}`);
+  return join(tmpdir(), "empo-review", pathKey(id, canonicalRoot(repoRoot)));
 }
 
 function readSession(repoRoot: string, id: string): ReviewSession | null {

@@ -456,11 +456,14 @@ wrong. The gid and the permalink belong in `url`, where nothing is matched again
 ## Where a review's scratch lives
 
 Everything a review writes goes to a per-review directory in the OS temp directory,
-`<tmp>/empo-review/<id>-<hash>/`, and never under `.empo/`. The `<hash>` is eight hex characters of
-the canonical repository root, for the reason the payload section above gives and the comment on
-`sessionDir` spells out: the id alone does not identify a review, since a local one is always
-"local", so every checkout on one machine would share a directory and tear down each other's. The
-readable id stays in the name so a human can still find the directory a brief just named. It holds `pr-<id>.diff`, a `session.json`
+`<tmp>/empo-review/<id>-<hash>/`, and never under `.empo/`. The `<hash>` is a sha256 of the canonical
+repository root, for the reason the payload section above gives and the comment on `sessionDir`
+spells out: the id alone does not identify a review, since a local one is always "local", so every
+checkout on one machine would share a directory and tear down each other's. It is the whole digest
+and not a prefix, because a prefix makes repository identity a guess, and two checkouts landing on
+one key would hand one repository's findings the other's source to verify against — a claim
+standing on nothing, come back verified. The readable id stays in front of it so a human can still
+find the directory a brief just named. It holds `pr-<id>.diff`, a `session.json`
 recording the read root, the base and the source branch that phase 2 verifies against, the detached
 `worktree/`, and, for an `mcp` adapter, the `pull-request.json` and `ticket.json` the agent host
 writes there. `generated/` is machine-owned by `empo index` alone
