@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -828,6 +829,20 @@ describe("which repository the hook is answering about", () => {
 describe("the tool-use event", () => {
   useRepo();
 
+  /**
+   * A review running, which for this hook is one session directory holding a readable session.json:
+   * `sessionDirs` (engine/session.ts) skips a directory without one, so a bare mkdir is not a review.
+   */
+  function startReview(root: string): void {
+    const dir = sessionDir(root, "local");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "session.json"),
+      JSON.stringify({ id: "local", repoRoot: root }),
+      "utf8",
+    );
+  }
+
   function toolUse(root: string, tool: string, relPath: string): Record<string, unknown> {
     return { cwd: root, tool_name: tool, tool_input: { file_path: join(root, relPath) } };
   }
@@ -842,12 +857,12 @@ describe("the tool-use event", () => {
   }
 
   test("says nothing to the agent, ever", () => {
-    mkdirSync(sessionDir(repo, "local"), { recursive: true });
+    startReview(repo);
     expect(hookAnswer("tool-use", toolUse(repo, "Read", "README.md"), { repo })).toBeNull();
   });
 
   test("records the read when a review is running", () => {
-    mkdirSync(sessionDir(repo, "local"), { recursive: true });
+    startReview(repo);
 
     hookAnswer("tool-use", toolUse(repo, "Read", "README.md"), { repo });
 
@@ -864,7 +879,7 @@ describe("the tool-use event", () => {
   });
 
   test("keeps a path outside the repository absolute rather than dropping it", () => {
-    mkdirSync(sessionDir(repo, "local"), { recursive: true });
+    startReview(repo);
     const outside = join(tmpdir(), "somewhere-else.ts");
 
     hookAnswer(
@@ -877,7 +892,7 @@ describe("the tool-use event", () => {
   });
 
   test("ignores a payload with no file path, such as a Bash call", () => {
-    mkdirSync(sessionDir(repo, "local"), { recursive: true });
+    startReview(repo);
     hookAnswer(
       "tool-use",
       { cwd: repo, tool_name: "Bash", tool_input: { command: "ls" } },
@@ -886,14 +901,68 @@ describe("the tool-use event", () => {
     expect(activity(repo)).toEqual([]);
   });
 
-  test("truncates the log rather than letting it grow without bound", () => {
-    mkdirSync(sessionDir(repo, "local"), { recursive: true });
-    writeFileSync(activityPath(repo), "x".repeat(1_100_000), "utf8");
+  /**
+   * The cap trims and never deletes, and the difference is the whole point: `empo web` reads a
+   * review's phase and its opened check marks from this log having lines at all, so a log emptied
+   * mid-review redraws that review as one that has read nothing. Hence the tail is asserted by
+   * value — an assertion that the file merely got smaller passes against deleting it outright.
+   */
+  test("trims the log to its tail rather than letting it grow without bound", () => {
+    startReview(repo);
+    const old = Array.from(
+      { length: 20_000 },
+      (_, index) => `{"at":"2026-01-01T00:00:00.000Z","tool":"Read","path":"old-${index}.ts"}`,
+    );
+    writeFileSync(activityPath(repo), `${old.join("\n")}\n`, "utf8");
 
     hookAnswer("tool-use", toolUse(repo, "Read", "README.md"), { repo });
 
+    const lines = activity(repo);
     expect(statSync(activityPath(repo)).size).toBeLessThan(200_000);
-    expect(activity(repo)).toHaveLength(1);
+    expect(lines.at(-1)?.path).toBe("README.md");
+    expect(lines.at(-2)?.path).toBe("old-19999.ts");
+    expect(lines.length).toBeGreaterThan(100);
+    expect(lines.length).toBeLessThan(1_000);
+  });
+
+  /**
+   * Every line here is an absolute path the reviewer opened, and on Linux the log sits in the shared
+   * /tmp, so the mode is asserted in both directions a file arrives in: created by the hook, and
+   * already on disk from an earlier version that made it world-readable.
+   */
+  describe.skipIf(process.platform === "win32")("the log's permissions", () => {
+    function mode(root: string): number {
+      return statSync(activityPath(root)).mode & 0o777;
+    }
+
+    test("creates the log readable by nobody else", () => {
+      startReview(repo);
+
+      hookAnswer("tool-use", toolUse(repo, "Read", "README.md"), { repo });
+
+      expect(mode(repo)).toBe(0o600);
+    });
+
+    test("narrows a log that already exists with a wider mode", () => {
+      startReview(repo);
+      writeFileSync(activityPath(repo), "", { encoding: "utf8", mode: 0o644 });
+      chmodSync(activityPath(repo), 0o644);
+
+      hookAnswer("tool-use", toolUse(repo, "Read", "README.md"), { repo });
+
+      expect(mode(repo)).toBe(0o600);
+      expect(activity(repo)).toHaveLength(1);
+    });
+
+    test("narrows the log it rewrites when the cap trips", () => {
+      startReview(repo);
+      writeFileSync(activityPath(repo), "x".repeat(1_100_000), { encoding: "utf8", mode: 0o644 });
+      chmodSync(activityPath(repo), 0o644);
+
+      hookAnswer("tool-use", toolUse(repo, "Read", "README.md"), { repo });
+
+      expect(mode(repo)).toBe(0o600);
+    });
   });
 });
 

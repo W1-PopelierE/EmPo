@@ -1,7 +1,7 @@
 import type { ChangedHunk } from "../engine/diff";
 
 /**
- * The two pieces of the page that are real logic rather than string concatenation, kept here so the
+ * The pieces of the page that are real logic rather than string concatenation, kept here so the
  * suite can run them. They are serialised into the page with `Function.prototype.toString` (see
  * `src/web/page.ts`), so each one has to be self-contained: no import, no shared constant, nothing
  * from module scope. What runs in the browser is exactly what the tests below this file run.
@@ -13,6 +13,27 @@ export interface DiffRow {
   oldLine: number | null;
   newLine: number | null;
   text: string;
+}
+
+/**
+ * Text on its way into the DOM. Every value out of the snapshot goes through this, because a
+ * snapshot carries a diff and a diff carries whatever somebody wrote in the branch, a closing script
+ * tag included. `&` has to be replaced first: doing it after `<` would turn the `&lt;` just written
+ * back into `&amp;lt;` and show the reader an escape instead of a bracket.
+ *
+ * It does NOT escape `'`, and that is deliberate rather than an oversight: every attribute the page
+ * builds is double-quoted, so an apostrophe cannot close one. Whoever writes a single-quoted
+ * attribute into `page.ts` has to add `'` here in the same change.
+ *
+ * Null and undefined become the empty string rather than the words "null" and "undefined", because
+ * a field the snapshot left out should render as nothing at all.
+ */
+export function esc(v: unknown): string {
+  return String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 /**

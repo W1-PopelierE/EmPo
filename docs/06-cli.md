@@ -910,8 +910,16 @@ under Claude too.
 It binds `127.0.0.1` and nothing else, serves GET and nothing else, and has no route that changes
 anything ([11-security-boundaries](11-security-boundaries.md)). Default port `7373`, walking upward
 over at most ten ports until one is free, because the usual collision is a viewer a previous review
-left running; the address it bound is printed, and it fails rather than walking further. Flags: `--port <n>` (pin it, and fail rather than walk) and
-`--repo <path>`.
+left running; the address the socket actually bound is printed, which is not always the one asked
+for, since `--port 0` is a legal way to say "whatever is free". It fails rather than walking further.
+Flags: `--port <n>` (pin it, and fail rather than walk) and `--repo <path>`.
+
+**A review is live for twelve hours.** Nothing else expires a session: the gate tears its own down,
+but a review abandoned after the brief leaves its directory in the temp root until the OS sweeps it,
+and it would otherwise sit in the switcher as a live review forever and keep the `tool-use` hook
+logging every file you open. Twelve hours is old enough that no real review is cut off and short
+enough that yesterday's abandoned one is gone. A review still running past it disappears from the
+viewer, which is the cost of not having a heartbeat, and not one worth a heartbeat yet.
 
 **Several reviews at once.** A viewer serves one repository — `--repo` picks it, and the sessions it
 can see are that repository's — so reviews running in separate worktrees are separate repository

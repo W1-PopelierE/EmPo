@@ -95,6 +95,13 @@ The viewer holds a diff and the suspected findings in memory, because the gate d
 disk. That memory lives in one process on one machine, for as long as the reader leaves the window
 open, and goes nowhere.
 
+**What feeds it is a file, and that file is `0600`.** The activity log the `tool-use` hook writes
+([10-distribution](10-distribution.md)) names every file the reviewer opened, which is a map of a
+private codebase whoever can read it. It sits under `os.tmpdir()`, private per user on macOS and the
+shared `/tmp` on a Linux box with no `XDG_RUNTIME_DIR`, so the mode is set on the file rather than
+assumed from the directory — on creation, and again on every append, because a mode argument does
+nothing to a file that already exists.
+
 ## A publish checklist
 
 Run this before any commit that touches `examples/` or docs, and before any release:

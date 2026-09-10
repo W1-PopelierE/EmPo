@@ -11,12 +11,12 @@
  * adds markup after escaping is `highlight`, which is why it only ever wraps spans around text that
  * has already been through `esc()`.
  *
- * The two functions with real logic in them live in `./render` and are pasted in here as source.
+ * The three functions with real logic in them live in `./render` and are pasted in here as source.
  * That keeps them under test — a template string is not runnable by the suite — without a build
  * step, a bundle or a second copy that drifts from the first. They are assigned to a name declared
  * here rather than injected as declarations, so a bundler renaming them cannot break the call sites.
  */
-import { highlight, hunkRows } from "./render";
+import { esc, highlight, hunkRows } from "./render";
 
 export function page(): string {
   return `<!doctype html>
@@ -106,10 +106,9 @@ li { padding:2px 0; }
   </div>
 </main>
 <script>
-const esc = (v) => String(v ?? "")
-  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const el = (id) => document.getElementById(id);
 
+const esc = ${esc};
 const hunkRows = ${hunkRows};
 const highlight = ${highlight};
 
@@ -308,10 +307,15 @@ function poll() {
 }
 
 let source = null;
+// A reconnect is armed for five seconds after a stream drops. Switching review inside that window
+// has to disarm it, or the pending timer opens a second stream over the one reconnect() just made:
+// unreachable, never closed, and still calling render() from the review the reader left.
+let retry = null;
 
 // Switching review means a new stream: the server picks the session per connection, so the old one
 // would keep pushing the review the reader just left.
 function reconnect() {
+  if (retry !== null) { clearTimeout(retry); retry = null; }
   if (source !== null) { source.close(); source = null; }
   connect();
 }
@@ -339,7 +343,7 @@ function connect() {
     mine.close();
     if (source !== mine) return;
     poll();
-    setTimeout(connect, 5000);
+    retry = setTimeout(connect, 5000);
   };
 }
 

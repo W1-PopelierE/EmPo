@@ -1,4 +1,5 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { emptySnapshot, readReviewState, type Snapshot } from "../engine/review-state";
 import { configError, environmentError } from "../errors";
 import { page } from "../web/page";
@@ -10,7 +11,7 @@ import { page } from "../web/page";
  */
 
 const LOOPBACK_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/;
-const DEFAULT_PORT = 7373;
+export const DEFAULT_PORT = 7373;
 const PORT_ATTEMPTS = 10;
 const POLL_MS = 400;
 
@@ -53,7 +54,12 @@ export function createViewer(repoRoot: string): { server: Server; stop(): void }
    * from the poll's copy, so a page that loads between two ticks is never a tick behind.
    */
   const server = createServer((request, response) => {
-    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    // A target starting with two slashes is parsed as an authority against this special base, so a
+    // forbidden domain code point in it (`//%%`, `//^`) makes the parse fail — and a throw here is
+    // in a listener nothing catches, long after `webCommand` resolved, so it takes the whole viewer
+    // down. Any page the reader visits can send that. `URL.parse` reports the same failure as null.
+    const url = URL.parse(request.url ?? "/", "http://127.0.0.1");
+    if (!url) return send(response, 400, "text/plain", "Bad request");
 
     if (request.method !== "GET") return send(response, 405, "text/plain", "GET only");
 
@@ -123,7 +129,10 @@ export async function webCommand(repoRoot: string, options: WebOptions = {}): Pr
     for (let port = first; port <= last; port++) {
       bound = await listen(viewer.server, port);
       if (bound) {
-        console.log(`empo web  http://127.0.0.1:${port}`);
+        // `--port 0` is a port number the walk accepts, and it means "whatever the OS has free", so
+        // the loop variable is an address nobody can open. The bound socket is what knows the real one.
+        const address = viewer.server.address() as AddressInfo | null;
+        console.log(`empo web  http://127.0.0.1:${address?.port ?? port}`);
         return;
       }
     }

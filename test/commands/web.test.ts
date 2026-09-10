@@ -1,10 +1,10 @@
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { createServer, request as httpRequest } from "node:http";
+import { createServer, request as httpRequest, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
-import { createViewer, webCommand } from "../../src/commands/web";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { createViewer, DEFAULT_PORT, webCommand } from "../../src/commands/web";
 import type { Snapshot } from "../../src/engine/review-state";
 import { sessionDir } from "../../src/engine/session";
 
@@ -16,6 +16,23 @@ const DIFF = `diff --git a/src/a.ts b/src/a.ts
 +const y = 2;
  export { x };
 `;
+
+// `webCommand` keeps the viewer it binds to itself — the reader has no use for it — so every server
+// this process makes is noted on the way past. It is the only way a test can read the address off
+// the one the command bound, and the only way to close it again afterwards.
+const { servers } = vi.hoisted(() => ({ servers: [] as Server[] }));
+vi.mock("node:http", async (importOriginal) => {
+  const http = await importOriginal<typeof import("node:http")>();
+  return {
+    ...http,
+    default: http,
+    createServer: (...args: Parameters<typeof http.createServer>) => {
+      const server = http.createServer(...args);
+      servers.push(server);
+      return server;
+    },
+  };
+});
 
 const temps: string[] = [];
 const running: { stop(): void }[] = [];
@@ -114,6 +131,31 @@ describe("the viewer's routes", () => {
 
     expect(response.status).toBe(405);
     await response.text();
+  });
+
+  /** A request target `fetch` would rewrite on the way out, sent verbatim instead. */
+  function raw(port: string, path: string): Promise<number> {
+    return new Promise((done, fail) => {
+      const call = httpRequest({ host: "127.0.0.1", port, path }, (response) => {
+        response.resume();
+        done(response.statusCode ?? 0);
+      });
+      call.on("error", fail);
+      call.end();
+    });
+  }
+
+  // Two leading slashes make the target an authority against the base the server parses with, so a
+  // forbidden domain code point in it is a parse failure. That used to throw inside the listener,
+  // where nothing catches it and the viewer dies — hence the second half of this test.
+  test("answers 400 to a target it cannot parse, and is still up afterwards", async () => {
+    const base = await serve(repo());
+
+    expect(await raw(new URL(base).port, "//%%")).toBe(400);
+
+    const after = await fetch(`${base}/api/state`);
+    expect(after.status).toBe(200);
+    await after.text();
   });
 
   test("answers 404 for anything it does not serve", async () => {
@@ -294,6 +336,66 @@ describe("the viewer's session selection", () => {
 });
 
 describe("the command", () => {
+  /** A server sitting on a fixed port, or null when this machine already has something there. */
+  function occupy(port: number): Promise<Server | null> {
+    const server = createServer();
+    return new Promise((done) => {
+      server.once("error", () => done(null));
+      server.listen(port, "127.0.0.1", () => done(server));
+    });
+  }
+
+  /** The server the command bound, taken from the tail of what it made, and closed with the rest. */
+  function boundBy(before: number): Server {
+    const server = servers[before] as Server;
+    running.push({ stop: () => server.close() });
+    return server;
+  }
+
+  // Loopback is the whole reason the Host check is worth anything: the header only tells a rebound
+  // domain apart because nothing off this machine can reach the socket at all. Every other test
+  // here calls `listen` itself, so this is the only one that sees the host the command passes.
+  test("binds the loopback address, and prints the port it actually got", async () => {
+    const before = servers.length;
+    const printed: unknown[] = [];
+    const log = vi.spyOn(console, "log").mockImplementation((line) => void printed.push(line));
+    try {
+      // `--port 0` is a port number, so it reaches `listen` and means "whatever is free": the port
+      // asked for is exactly the one the reader must not be handed back.
+      await webCommand(repo(), { port: 0 });
+    } finally {
+      log.mockRestore();
+    }
+    const address = boundBy(before).address() as AddressInfo;
+
+    expect(address.address).toBe("127.0.0.1");
+    expect(printed[0]).toBe(`empo web  http://127.0.0.1:${address.port}`);
+  });
+
+  // The walk only runs when no --port was passed, so the default port is the only way into it. If
+  // this machine already has something on that port or the one after it, there is nothing left to
+  // prove and the test says so rather than asserting against whatever else is listening.
+  test("walks past a busy default port to the next one", async (ctx) => {
+    const taken = await occupy(DEFAULT_PORT);
+    const next = await occupy(DEFAULT_PORT + 1);
+    if (!taken || !next) {
+      taken?.close();
+      next?.close();
+      return ctx.skip();
+    }
+    // Held only to prove it was free, then handed straight back for the walk to land on.
+    await new Promise<void>((closed) => next.close(() => closed()));
+
+    const before = servers.length;
+    try {
+      await webCommand(repo());
+    } finally {
+      taken.close();
+    }
+
+    expect((boundBy(before).address() as AddressInfo).port).toBe(DEFAULT_PORT + 1);
+  });
+
   test("reports a port it cannot bind as an environment error", async () => {
     const blocker = createServer();
     await new Promise<void>((ready) => {

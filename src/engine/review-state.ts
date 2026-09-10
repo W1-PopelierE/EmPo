@@ -4,7 +4,7 @@ import type { ReviewFinding } from "../discipline/findings";
 import { parseFindingsFile } from "../schema/findings.schema";
 import { type ChangedFile, type ChangeStatus, parseDiff } from "./diff";
 import { type RoundRecord, readRounds } from "./rounds";
-import { activityPath, type ReviewSession, sessionDir, sessionDirs } from "./session";
+import { activityPath, type ReviewSession, sessionDirs } from "./session";
 
 /**
  * The review as a viewer can see it, derived and never reported. Every phase here is inferred from
@@ -121,7 +121,11 @@ export function readReviewState(
     phase: one.phase,
   }));
   const found = live.find((one) => one.key === selected) ?? live[0];
-  if (found === undefined) return { ...emptySnapshot(), sessions, selected: null };
+  // A session directory with no readable `session.json` is a teardown mid-delete or a session
+  // mid-write, and neither is a reason to throw away what the viewer already holds: `src/commands/
+  // web.ts` stores this result, so returning an empty snapshot here would make the next poll see
+  // `previous.session === null` and lose the finished review's frozen picture and its verdict.
+  if (found === undefined) return afterTeardown(repoRoot, previous);
   const { session, round } = found;
 
   const changed = readDiff(session);
@@ -188,8 +192,8 @@ function derive(
   const activity = log
     .filter((one) => Date.parse(one.at) >= here.startedAt && belongsHere(one.path, here, live))
     .slice(-ACTIVITY_TAIL);
-  const suspected = readFindingsFile(repoRoot, here.session);
-  const round = newestRound(repoRoot, here.session.sourceBranch, here.startedAt);
+  const suspected = readFindingsFile(here.dir);
+  const round = newestRound(repoRoot, here.session, here.startedAt);
   let phase: Phase = activity.length === 0 ? "brief" : "reading";
   if (suspected.length > 0) phase = "findings";
   if (round !== null) phase = "gated";
@@ -252,10 +256,15 @@ function toSnapshotFinding(finding: ReviewFinding, survived: boolean | null): Sn
   };
 }
 
-/** `findings.json` as phase 1 leaves it, or nothing at all before it exists or once it is gone. */
-function readFindingsFile(repoRoot: string, session: ReviewSession): ReviewFinding[] {
+/**
+ * `findings.json` as phase 1 leaves it, or nothing at all before it exists or once it is gone.
+ * Joined onto the directory `liveSessions` actually read `session.json` out of, rather than
+ * recomputed from the id: a directory named by an older slug scheme still holds a session whose id
+ * `sessionDir` would map somewhere else entirely, and then the findings beside it are missed.
+ */
+function readFindingsFile(dir: string): ReviewFinding[] {
   try {
-    const path = join(sessionDir(repoRoot, session.id), "findings.json");
+    const path = join(dir, "findings.json");
     if (!existsSync(path)) return [];
     return parseFindingsFile(JSON.parse(readFileSync(path, "utf8")), path);
   } catch {
@@ -264,23 +273,36 @@ function readFindingsFile(repoRoot: string, session: ReviewSession): ReviewFindi
 }
 
 /**
- * The newest round for this session's branch, but only when it is newer than the session itself:
- * an old round left over from a previous review of this branch is not this review's verdict, and
- * showing it would mark this round's findings survived or dropped by a gate that never saw them.
+ * The newest round for this session's branch, but only this session's own and only newer than the
+ * session itself: an old round left over from a previous review of this branch is not this review's
+ * verdict, and showing it would mark this round's findings survived or dropped by a gate that never
+ * saw them.
+ *
+ * The id is what separates two live reviews of one branch. `roundsDir` (`src/engine/rounds.ts`)
+ * keys on repository and branch alone, and `isolate` (`src/commands/review.ts`) gives a pull request
+ * reviewed from the branch you are standing on the same `sourceBranch` as the local review beside
+ * it — so on branch and time alone both sessions adopt whichever of them gated first, and the other
+ * one shows a round number, a phase and a set of verdicts belonging to a gate that never read it.
+ *
+ * `afterTeardown` discriminates harder still, on the tree phase 1 read: there the session is gone
+ * and only the carried snapshot is left, so it matches on what the record says about the work rather
+ * than on which review wrote it.
  */
 function newestRound(
   repoRoot: string,
-  branch: string | null,
+  session: ReviewSession,
   startedAt: number,
 ): RoundRecord | null {
-  const rounds = readRounds(repoRoot, branch);
-  const newest = rounds.at(-1) ?? null;
+  const rounds = readRounds(repoRoot, session.sourceBranch);
+  const newest = rounds.filter((one) => one.id === session.id).at(-1) ?? null;
   if (newest === null) return null;
   return Date.parse(newest.at) >= startedAt ? newest : null;
 }
 
 interface LiveSession {
   key: string;
+  /** The directory `session.json` was read out of, so nothing beside it has to be recomputed. */
+  dir: string;
   session: ReviewSession;
   startedAt: number;
 }
@@ -314,7 +336,12 @@ function liveSessions(dirs: string[]): LiveSession[] {
       // Floored: the filesystem's mtime can carry sub-millisecond precision `Date.parse` never
       // does (nanoseconds rounded to a fraction of a millisecond), so an activity line logged in
       // the same millisecond session.json was written can otherwise compare as slightly earlier.
-      live.push({ key: basename(dir), session, startedAt: Math.floor(statSync(file).mtimeMs) });
+      live.push({
+        key: basename(dir),
+        dir,
+        session,
+        startedAt: Math.floor(statSync(file).mtimeMs),
+      });
     } catch {
       // Try the next directory; a half-written session.json is normal mid-write, not a failure.
     }

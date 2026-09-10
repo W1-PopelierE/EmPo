@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -9,6 +9,16 @@ const temps: string[] = [];
 function repo(): string {
   const dir = mkdtempSync(join(tmpdir(), "empo-session-"));
   temps.push(dir);
+  return dir;
+}
+
+/** A session directory as phase 1 leaves it, optionally aged so the ttl can be exercised. */
+function session(dir: string, at?: number): string {
+  mkdirSync(dir, { recursive: true });
+  temps.push(dir);
+  const file = join(dir, "session.json");
+  writeFileSync(file, "{}");
+  if (at !== undefined) utimesSync(file, at / 1000, at / 1000);
   return dir;
 }
 
@@ -55,12 +65,42 @@ describe("where a review session lives", () => {
       sessionDir(mine, "42"),
       sessionDir(theirs, "local"),
     ]) {
-      mkdirSync(dir, { recursive: true });
-      temps.push(dir);
+      session(dir);
     }
 
     expect(sessionDirs(mine)).toHaveLength(2);
     expect(sessionDirs(theirs)).toHaveLength(1);
+  });
+
+  test("skips a directory that has no session.json", () => {
+    const root = repo();
+    const written = session(sessionDir(root, "local"));
+    const bare = sessionDir(root, "42");
+    mkdirSync(bare, { recursive: true });
+    temps.push(bare);
+
+    expect(sessionDirs(root)).toEqual([written]);
+  });
+
+  test("drops a session older than the twelve-hour ttl", () => {
+    const root = repo();
+    const fresh = session(sessionDir(root, "local"));
+    const stale = session(sessionDir(root, "42"), Date.now() - 13 * 60 * 60 * 1000);
+
+    expect(sessionDirs(root)).toEqual([fresh]);
+    expect(sessionDirs(root)).not.toContain(stale);
+  });
+
+  test("orders on session.json's mtime and not the directory's", () => {
+    const root = repo();
+    // The older session is the one written to last: `empo review` has the reviewing agent drop
+    // findings.json inside the directory, which bumps the directory mtime. Sorting on that key puts
+    // the older review first and swaps the review under a viewer that asked for the newest one.
+    const older = session(sessionDir(root, "42"), Date.now() - 60 * 60 * 1000);
+    const newer = session(sessionDir(root, "local"));
+    writeFileSync(join(older, "findings.json"), "[]");
+
+    expect(sessionDirs(root)).toEqual([newer, older]);
   });
 
   test("puts the activity log beside the sessions, one per repository", () => {

@@ -466,7 +466,15 @@ and not whatever directory the session sits in, and with a `timeout` in seconds.
   web` resolves that back against the session's read root before it shows anything. It is silent
   outside a review on purpose: a log of every file read all day is not this tool's business, so the
   hook checks for a session directory first and writes nothing when there is none, which is the
-  cheapest signal that a review is what this is. `Read` alone, not the other reading tools: the
+  cheapest signal that a review is what this is — and a session directory counts as a review for
+  twelve hours, because nothing else expires one and a review abandoned after phase 1 would
+  otherwise keep this hook logging for as long as the OS leaves its directory in the temp root. The
+  log is created `0600` and narrowed to `0600` on every append: it holds the absolute path of every
+  file the reviewer opened, and `os.tmpdir()` is a private directory on macOS but the shared `/tmp`
+  on a Linux box with no `XDG_RUNTIME_DIR`. Past a megabyte it is trimmed to its last lines rather
+  than deleted, because `empo web` reads a review's phase from the log having any lines at all, so
+  emptying it mid-review would redraw a running review as one that had not started. `Read` alone,
+  not the other reading tools: the
   question the log answers is which file the reviewer opened, and Grep and Glob carry a pattern and
   a directory rather than a file, so matching them would spawn a process per call and record nothing.
   An edit is left out for a different reason: the diff already records it.

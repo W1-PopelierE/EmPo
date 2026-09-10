@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { emptySnapshot, readReviewState } from "../../src/engine/review-state";
 import { recordRound } from "../../src/engine/rounds";
@@ -412,6 +412,32 @@ describe("with a second review live in the same repository", () => {
     ]);
   });
 
+  // `roundsDir` keys on repository and branch alone, and a pull request reviewed from the branch
+  // you are standing on carries the same `sourceBranch` as the local review beside it. Matched on
+  // branch and time alone, both of them adopt whichever gated first: the one that never gated flips
+  // to "gated", shows the other's round number, and has every one of its own findings marked
+  // dropped by a gate that never read them. The round's id is what separates the two.
+  test("keeps one session's round out of the other when they share a branch", () => {
+    const root = repo();
+    const local = startReview(root, "local");
+    const pr = startReview(root, "1234");
+    writeFindings(local, ["f1"]);
+    writeSession(pr, root, { id: "1234", diffPath: join(pr, "pr-1234.diff") });
+    backdate(local, 60_000);
+    // The PR review gates; the local review beside it, on the same branch, has not.
+    recordRound(root, "feat/x", "abc123", "def456", "1234", []);
+
+    const state = readReviewState(root, emptySnapshot(), basename(local));
+
+    expect(state.phase).toBe("findings");
+    expect(state.round).toBeNull();
+    expect(state.findings.map((one) => [one.id, one.survived])).toEqual([["f1", null]]);
+    expect(state.sessions.map((one) => [one.id, one.phase])).toEqual([
+      ["1234", "gated"],
+      ["local", "findings"],
+    ]);
+  });
+
   // A review of a detached revision has no branch to name. The short sha is what a human recognises
   // it by; a session where git could answer neither is honestly named for what it is reviewing.
   test("falls back to the short sha, then to the working tree, when there is no branch", () => {
@@ -578,6 +604,48 @@ describe("once the reviewer has written findings", () => {
 
     expect(state.phase).toBe("idle");
     expect(state.findings).toEqual([]);
+  });
+});
+
+// `src/commands/web.ts` stores whatever this returns and hands it back as `previous` on the next
+// poll, so an empty snapshot here is not a blank frame — it is the finished review's frozen picture
+// and its verdict gone for good.
+describe("with a session directory whose session.json cannot be read", () => {
+  test("keeps the frozen snapshot instead of discarding what the viewer holds", () => {
+    const root = repo();
+    const dir = startReview(root);
+    writeFindings(dir, ["f1"]);
+    const before = readReviewState(root, emptySnapshot());
+    expect(before.session).not.toBeNull();
+
+    // The directory survives — teardown mid-delete, or phase 1 mid-write — but nothing in it parses.
+    writeFileSync(join(dir, "session.json"), "{ half-writ", "utf8");
+    const after = readReviewState(root, before);
+
+    expect(after.phase).toBe("findings");
+    expect(after.findings.map((one) => one.id)).toEqual(["f1"]);
+    expect(after.files.map((one) => one.path)).toEqual(["src/a.ts", "src/b.ts"]);
+    expect(after.note).toContain("session finished");
+  });
+});
+
+// The findings sit beside the `session.json` that was actually read, and a directory named by an
+// older slug scheme is not where `sessionDir` would recompute them from.
+describe("with a session directory the current slug scheme would not name", () => {
+  test("reads the findings out of the directory it found the session in", () => {
+    const root = repo();
+    const canonical = sessionDir(root, "local");
+    const dir = join(dirname(canonical), `legacy-${basename(canonical)}`);
+    mkdirSync(dir, { recursive: true });
+    temps.push(dir);
+    writeFileSync(join(dir, "pr-local.diff"), DIFF, "utf8");
+    writeSession(dir, root, { diffPath: join(dir, "pr-local.diff") });
+    writeFindings(dir, ["f1"]);
+
+    const state = readReviewState(root, emptySnapshot());
+
+    expect(state.phase).toBe("findings");
+    expect(state.findings.map((one) => [one.id, one.claim])).toEqual([["f1", "f1 claim"]]);
   });
 });
 

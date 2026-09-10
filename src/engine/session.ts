@@ -65,20 +65,49 @@ export function readSession(repoRoot: string, id: string): ReviewSession | null 
 }
 
 /**
+ * How long a session directory counts as live. Nothing else expires one: teardown runs only in the
+ * gate's `finally`, so a review abandoned after phase 1 would otherwise stay live until the OS sweeps
+ * the temp root days later — listed forever in the viewer's switcher, and keeping the `tool-use`
+ * hook logging every Read in the repository, which is exactly the all-day file log the hook promises
+ * it does not keep.
+ *
+ * ponytail: a review still running after 12 hours disappears from the viewer and stops feeding the
+ * hook. A heartbeat that touches session.json is the upgrade path if a review ever runs that long.
+ */
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+
+/**
  * Every live session directory for this repository, newest first. The repository is the hash half
  * of the key, identical across ids, so the suffix of an empty-id key is exactly the filter.
+ *
+ * Age and order both come from session.json's own mtime, never the directory's: the filesystem bumps
+ * a directory whenever an entry appears inside it, and the reviewing agent writes findings.json into
+ * a session long after phase 1 wrote session.json once, so the directory mtime would sort by last
+ * write instead of by age and swap the review on screen under the reader. A directory without a
+ * readable session.json is skipped rather than fatal — it is either expired, mid-creation, or
+ * vanishing under a sweep or a concurrent teardown, and none of those may cost the whole list.
  */
 export function sessionDirs(repoRoot: string): string[] {
   const suffix = pathKey("", canonicalRoot(repoRoot)).slice(1);
+  const oldest = Date.now() - SESSION_TTL_MS;
+  let names: string[];
   try {
-    return readdirSync(ROOT)
-      .filter((name) => name.endsWith(suffix))
-      .map((name) => join(ROOT, name))
-      .filter((dir) => statSync(dir).isDirectory())
-      .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+    names = readdirSync(ROOT);
   } catch {
     return [];
   }
+  const live: { dir: string; mtimeMs: number }[] = [];
+  for (const name of names) {
+    if (!name.endsWith(suffix)) continue;
+    const dir = join(ROOT, name);
+    try {
+      const { mtimeMs } = statSync(join(dir, "session.json"));
+      if (mtimeMs >= oldest) live.push({ dir, mtimeMs });
+    } catch {
+      // Not a session directory we can read: skip it and keep the rest.
+    }
+  }
+  return live.sort((a, b) => b.mtimeMs - a.mtimeMs).map((session) => session.dir);
 }
 
 /** One log per repository, beside the sessions, so the hook needs no session id to write it. */

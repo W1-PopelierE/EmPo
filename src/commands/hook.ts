@@ -1,4 +1,12 @@
-import { appendFileSync, existsSync, realpathSync, rmSync, statSync } from "node:fs";
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { isAbsolute, posix, relative, resolve, sep } from "node:path";
 import { loadConfig } from "../engine/config";
 import {
@@ -375,10 +383,25 @@ function toolUse(repoRoot: string, payload: Record<string, unknown>): string | n
 
   try {
     const log = activityPath(repoRoot);
-    // A cap, not rotation: the viewer only ever shows the tail, and a viewer's convenience is not
-    // worth a second file to manage.
-    if (existsSync(log) && statSync(log).size > 1_000_000) rmSync(log, { force: true });
-    appendFileSync(log, line, "utf8");
+    if (existsSync(log)) {
+      // The mode is set on every append and not only on the first, because `mode` below applies
+      // only to a file the call creates: a log already on disk keeps whatever mode it was made
+      // with, and nothing here would ever narrow it. It is worth narrowing because this file holds
+      // the absolute path of every file the reviewer opened and it lives under os.tmpdir(), which
+      // is the private /var/folders/... on macOS but the world-traversable /tmp on a Linux box.
+      // engine/rounds.ts reasons the same way about where the rounds log may live.
+      chmodSync(log, 0o600);
+      // A trim and not a delete, and not rotation either. `empo web` reads a review's phase and its
+      // opened check marks from this log having any lines at all rather than from its tail (see
+      // `derive` in engine/review-state.ts), so deleting it mid-review redraws a running review as
+      // "brief" with every check mark gone. Keeping the last lines costs old history, which is the
+      // activity list alone, and the viewer never shows more than its last 200 lines anyway.
+      if (statSync(log).size > 1_000_000) {
+        const kept = readFileSync(log, "utf8").split("\n").slice(-500).join("\n");
+        writeFileSync(log, kept, { encoding: "utf8", mode: 0o600 });
+      }
+    }
+    appendFileSync(log, line, { encoding: "utf8", mode: 0o600 });
   } catch {
     // Silence is the answer. A hook that cannot write its log is not a hook that fails a tool call.
   }

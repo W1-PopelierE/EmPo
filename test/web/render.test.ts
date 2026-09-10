@@ -1,10 +1,10 @@
 import { describe, expect, test } from "vitest";
 import type { ChangedHunk } from "../../src/engine/diff";
 import { page } from "../../src/web/page";
-import { highlight, hunkRows } from "../../src/web/render";
+import { esc, highlight, hunkRows } from "../../src/web/render";
 
 /**
- * The page's two pieces of real logic. They live in a module so they can be run here and are
+ * The page's three pieces of real logic. They live in a module so they can be run here and are
  * serialised into the page from there, which is why the last test in this file checks that the page
  * still carries them: a rename that silently stopped inlining them would leave a page whose diff
  * panel throws on the first snapshot, and no test on the string alone would notice.
@@ -81,6 +81,41 @@ describe("hunkRows", () => {
   });
 });
 
+describe("esc", () => {
+  test("replaces the four characters that can end an attribute or open a tag", () => {
+    expect(esc("&")).toBe("&amp;");
+    expect(esc("<")).toBe("&lt;");
+    expect(esc(">")).toBe("&gt;");
+    expect(esc('"')).toBe("&quot;");
+  });
+
+  test("escapes the ampersand first, so an escape is not escaped twice", () => {
+    // The other order writes `&lt;` and then rewrites its own `&` into `&amp;lt;`, which shows the
+    // reader the escape rather than the bracket it stands for.
+    expect(esc("<")).not.toContain("&amp;");
+    expect(esc("&lt;")).toBe("&amp;lt;");
+  });
+
+  test("leaves the apostrophe alone, which every attribute in the page is built to survive", () => {
+    // Not an oversight: page.ts double-quotes every attribute it writes. A single-quoted one added
+    // later has to add `'` to esc() in the same change.
+    expect(esc("it's")).toBe("it's");
+  });
+
+  test("renders a missing field as nothing rather than as the word null", () => {
+    expect(esc(null)).toBe("");
+    expect(esc(undefined)).toBe("");
+    expect(esc("")).toBe("");
+  });
+
+  test("defangs a closing script tag out of a diff line", () => {
+    const out = esc('const end = "</script><img src=x onerror=alert(1)>";');
+
+    expect(out).not.toContain("<");
+    expect(out).toContain("&lt;/script&gt;");
+  });
+});
+
 /** Every case below is a line out of a TypeScript file, which is what the page colours. */
 const colour = (text: string) => highlight(text, "src/x.ts");
 
@@ -131,11 +166,13 @@ describe("highlight", () => {
 });
 
 describe("page", () => {
-  test("inlines both render functions under the names its script calls", () => {
+  test("inlines every render function under the names its script calls", () => {
     const html = page();
 
+    expect(html).toContain("const esc =");
     expect(html).toContain("const hunkRows =");
     expect(html).toContain("const highlight =");
     expect(html).toContain("hunkRows(hunk)");
+    expect(html).toContain("highlight(esc(r.text), path)");
   });
 });
