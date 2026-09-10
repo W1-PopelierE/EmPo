@@ -80,13 +80,10 @@ file or a round. That is by design in this version and not by omission: acting o
 browser is the obvious next feature and it is deliberately not built yet
 ([the design](superpowers/specs/2026-09-10-empo-web-design.md)).
 
-**File content comes only from the active session's read root.** A requested path is resolved and
-then proven to be inside that root — after `realpath`, so that a symlink inside the root pointing
-out of it is refused too, which the lexical check alone cannot see. A path that climbs out is
-refused, never normalized into something servable, and with no session there is no read root and so
-no file at all. A path that is inside the root but absent is reported as absent rather than refused,
-because a diff cites deleted files and telling their reader "outside the read root" would send them
-hunting a breach that never happened.
+**No route serves file bytes.** The page renders the diff out of the snapshot, so nothing on the
+listener reads a file and streams it back, and there is no path parameter to contain. A viewer that
+served whole files would be the one place on this surface where a containment mistake mattered, and
+the rule it would need is not written down as a guarantee here until something exercises it.
 
 **The `Host` header is checked, and anything but loopback is refused.** Binding loopback keeps the
 network out but not the reader's own browser: any page they visit while the viewer is up can point

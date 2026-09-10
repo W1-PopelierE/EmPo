@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { createViewer, webCommand } from "../../src/commands/web";
 import type { Snapshot } from "../../src/engine/review-state";
@@ -81,75 +81,8 @@ describe("the viewer's routes", () => {
     expect(state.phase).toBe("idle");
   });
 
-  test("serves a file from the session's read root", async () => {
-    const root = repo();
-    startReview(root);
-    mkdirSync(join(root, "src"), { recursive: true });
-    writeFileSync(join(root, "src", "a.ts"), "const x = 1;\n", "utf8");
-
-    const response = await fetch(`${await serve(root)}/file?path=src/a.ts`);
-
-    expect(response.status).toBe(200);
-    expect(await response.text()).toBe("const x = 1;\n");
-  });
-
-  test("refuses a path that climbs out of the read root", async () => {
-    const root = repo();
-    startReview(root);
-    // A real file just outside the root, so the refusal is the check doing its job and not the
-    // traversal happening to land on nothing.
-    const outside = repo();
-    writeFileSync(join(outside, "secret.txt"), "secret\n", "utf8");
-
-    const climb = `../${basename(outside)}/secret.txt`;
-    const response = await fetch(`${await serve(root)}/file?path=${encodeURIComponent(climb)}`);
-
-    expect(response.status).toBe(403);
-    await response.text();
-  });
-
-  test("refuses a symlink inside the root that points out of it", async () => {
-    const root = repo();
-    startReview(root);
-    const outside = repo();
-    writeFileSync(join(outside, "secret.txt"), "secret\n", "utf8");
-    symlinkSync(join(outside, "secret.txt"), join(root, "link.txt"));
-
-    const response = await fetch(`${await serve(root)}/file?path=link.txt`);
-
-    expect(response.status).toBe(403);
-    await response.text();
-  });
-
-  test("refuses an absolute path", async () => {
-    const root = repo();
-    startReview(root);
-
-    const response = await fetch(`${await serve(root)}/file?path=/etc/passwd`);
-
-    expect(response.status).toBe(403);
-    await response.text();
-  });
-
   test("answers 404 for anything it does not serve", async () => {
     const response = await fetch(`${await serve(repo())}/../secret`);
-
-    expect(response.status).toBe(404);
-    await response.text();
-  });
-
-  test("answers 404 for a file that is simply absent inside the read root", async () => {
-    const root = repo();
-    startReview(root);
-
-    const response = await fetch(`${await serve(root)}/file?path=src/gone.ts`);
-
-    expect(response.status).toBe(404);
-    await response.text();
-  });
-
-  test("serves no file at all when no review is running", async () => {
-    const response = await fetch(`${await serve(repo())}/file?path=README.md`);
 
     expect(response.status).toBe(404);
     await response.text();

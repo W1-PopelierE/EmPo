@@ -49,8 +49,13 @@ function startReview(root: string): string {
   const dir = sessionDir(root, "local");
   mkdirSync(dir, { recursive: true });
   temps.push(dir);
-  const diffPath = join(dir, "pr-local.diff");
-  writeFileSync(diffPath, DIFF, "utf8");
+  writeFileSync(join(dir, "pr-local.diff"), DIFF, "utf8");
+  writeSession(dir, root);
+  return dir;
+}
+
+/** The session file phase 1 leaves, with whichever field a test needs to say differently. */
+function writeSession(dir: string, root: string, overrides: Record<string, unknown> = {}): void {
   writeFileSync(
     join(dir, "session.json"),
     JSON.stringify({
@@ -62,11 +67,11 @@ function startReview(root: string): string {
       sourceBranch: "feat/x",
       sha: "abc123",
       tree: "def456",
-      diffPath,
+      diffPath: join(dir, "pr-local.diff"),
+      ...overrides,
     }),
     "utf8",
   );
-  return dir;
 }
 
 function log(root: string, lines: { tool: string; path: string }[]): void {
@@ -260,6 +265,46 @@ describe("once the reviewer has written findings", () => {
     expect(after.findings.find((one) => one.id === "f1")?.survived).toBe(true);
     expect(after.findings.find((one) => one.id === "f2")?.survived).toBe(false);
     expect(after.findings.find((one) => one.id === "f2")?.claim).toBe("f2 claim");
+  });
+
+  // `recordRound` writes `tree ?? sha`, so a session whose tree git could not answer for is found
+  // again by its sha. Reading only `tree` here matched nothing and left the verdict unshown.
+  test("crosses a round recorded under the sha when the session has no tree", () => {
+    const root = repo();
+    const dir = startReview(root);
+    writeSession(dir, root, { tree: null });
+    writeFindings(dir, ["f1"]);
+    const before = readReviewState(root, emptySnapshot());
+
+    recordRound(root, "feat/x", "abc123", null, "local", [
+      { id: "f1", kind: "diff", severity: "major", title: "f1 title", file: "src/a.ts", line: 2 },
+    ]);
+    rmSync(dir, { recursive: true, force: true });
+    const after = readReviewState(root, before);
+
+    expect(after.round).toBe(1);
+    expect(after.findings[0]?.survived).toBe(true);
+  });
+
+  // Phase 2 can be handed a findings file outside the session directory, in which case the viewer
+  // never read one. Showing the round with no findings at all would report a review that found
+  // nothing, which is the opposite of what the gate just recorded.
+  test("shows a survivor the carried snapshot never held", () => {
+    const root = repo();
+    const dir = startReview(root);
+    const before = readReviewState(root, emptySnapshot());
+    expect(before.findings).toEqual([]);
+
+    recordRound(root, "feat/x", "abc123", "def456", "local", [
+      { id: "f1", kind: "diff", severity: "major", title: "f1 title", file: "src/a.ts", line: 2 },
+    ]);
+    rmSync(dir, { recursive: true, force: true });
+    const after = readReviewState(root, before);
+
+    expect(after.round).toBe(1);
+    expect(after.findings.map((one) => [one.id, one.survived, one.title])).toEqual([
+      ["f1", true, "f1 title"],
+    ]);
   });
 
   // Matched on the tree phase 1 read, so a round from an earlier review of the same branch cannot

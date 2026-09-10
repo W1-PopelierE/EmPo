@@ -24,13 +24,16 @@ export function page(): string {
     --mark:#ffa657; --panel:#1e1e1e; }
 }
 * { box-sizing: border-box; }
-body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
-header { padding:10px 14px; border-bottom:1px solid var(--line); display:flex; gap:14px; flex-wrap:wrap; align-items:baseline; }
+body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  display:flex; flex-direction:column; height:100vh; }
+header { flex:none; padding:10px 14px; border-bottom:1px solid var(--line); display:flex; gap:14px; flex-wrap:wrap; align-items:baseline; }
 header b { font-weight:600; }
 .dim { color:var(--dim); }
-main { display:flex; align-items:flex-start; gap:0; }
-#left { width:340px; flex:none; border-right:1px solid var(--line); height:calc(100vh - 44px); overflow:auto; padding:10px; }
-#right { flex:1; height:calc(100vh - 44px); overflow:auto; padding:10px 14px; min-width:0; }
+/* The header wraps, so its height is not a number this stylesheet may know: the columns take what
+   is left over instead of subtracting a guess and scrolling the whole page past the viewport. */
+main { flex:1; min-height:0; display:flex; align-items:stretch; gap:0; }
+#left { width:340px; flex:none; border-right:1px solid var(--line); overflow:auto; padding:10px; }
+#right { flex:1; overflow:auto; padding:10px 14px; min-width:0; }
 h2 { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); margin:14px 0 6px; font-weight:600; }
 h2:first-child { margin-top:0; }
 ul { list-style:none; margin:0; padding:0; }
@@ -47,9 +50,8 @@ li { padding:2px 0; }
 .row .n { width:60px; flex:none; text-align:right; padding-right:10px; color:var(--dim); }
 .row.add { background:var(--add); } .row.del { background:var(--del); }
 .row.hit { box-shadow:inset 3px 0 0 var(--mark); }
-.finding { border:1px solid var(--line); border-left:3px solid var(--dim); border-radius:4px; padding:8px 10px; margin:0 0 8px; }
-.finding.survived { border-left-color:#1a7f37; }
-.finding.dropped { border-left-color:var(--dim); opacity:.65; }
+.finding { border:1px solid var(--line); border-radius:4px; padding:8px 10px; margin:0 0 8px; }
+.finding.dropped { opacity:.65; }
 .finding .t { font-weight:600; }
 .finding p { margin:4px 0 0; white-space:pre-wrap; }
 .tag { font-size:11px; border:1px solid var(--line); border-radius:3px; padding:0 5px; color:var(--dim); }
@@ -128,7 +130,9 @@ function render(next) {
 
 function fileRow(file) {
   const mark = file.read ? "" : '<span class="unread" title="never opened">*</span>';
-  const findings = file.findingCount > 0 ? '<span class="tag">' + file.findingCount + "</span>" : "";
+  const findings = file.findingCount > 0
+    ? '<span class="tag">' + Number(file.findingCount) + "</span>"
+    : "";
   return '<li><button class="file" data-path="' + esc(file.path) + '" aria-current="'
     + (file.path === selected) + '">'
     + '<span class="name" title="' + esc(file.path) + '">' + mark + esc(file.path) + "</span>"
@@ -137,24 +141,36 @@ function fileRow(file) {
     + findings + "</button></li>";
 }
 
+// The diff is the one panel a reader is actually reading, and during the reading phase a snapshot
+// arrives on every tool call the reviewer makes. Rewriting its innerHTML on each one would drop the
+// text selection and clamp the scroll several times a minute, so it is rebuilt only when what it
+// shows has changed: the file, its hunks, or the findings marked on its lines.
+let drawn = null;
+
 function renderDiff(files) {
   const file = files.find((f) => f.path === selected) || null;
   el("diffTitle").textContent = file ? file.path + "  (" + file.status + ")" : "Diff";
+  const changed = file === null ? null : (snapshot.hunks || {})[file.path] || null;
+  // Findings sit on lines in the new file, which is where the added lines are numbered.
+  const lines = (snapshot.findings || [])
+    .filter((f) => file !== null && f.file === file.path)
+    .map((f) => f.line);
+
+  const key = JSON.stringify([selected, changed, lines, snapshot.session === null]);
+  if (key === drawn) return;
+  drawn = key;
+
   if (file === null) {
     el("diff").innerHTML = '<p class="empty">'
       + (snapshot.session === null ? "No review is running." : "No file selected.") + "</p>";
     return;
   }
-  const changed = (snapshot.hunks || {})[file.path] || null;
   if (changed === null || changed.isBinary || changed.hunks.length === 0) {
     el("diff").innerHTML = '<p class="empty">'
       + (changed && changed.isBinary ? "Binary file." : "No hunks in the diff.") + "</p>";
     return;
   }
-  // Findings sit on lines in the new file, which is where the added lines are numbered.
-  const marks = new Set(
-    (snapshot.findings || []).filter((f) => f.file === file.path).map((f) => f.line),
-  );
+  const marks = new Set(lines);
   el("diff").innerHTML = changed.hunks.map((hunk) => hunkBlock(hunk, marks)).join("");
 }
 
@@ -206,10 +222,16 @@ function status(text) { el("link").textContent = text; }
 // SSE while it lasts, polling once it does not. The stream is the cheap path, but a viewer that
 // goes blank because a laptop slept is worse than one that costs a request every two seconds.
 let polling = null;
+let failures = 0;
 function poll() {
   if (polling !== null) return;
   status("polling");
-  const tick = () => fetch("/api/state").then((r) => r.json()).then(render).catch(() => {});
+  // A failed poll is silent otherwise, and a page that says "polling" over a server that died an
+  // hour ago is telling the reader the review is quiet when it is actually gone.
+  const tick = () => fetch("/api/state")
+    .then((r) => r.json())
+    .then((state) => { failures = 0; status("polling"); render(state); })
+    .catch(() => { failures += 1; if (failures > 1) status("offline"); });
   tick();
   polling = setInterval(tick, 2000);
 }
@@ -218,9 +240,18 @@ function connect() {
   const source = new EventSource("/events");
   source.onopen = () => {
     if (polling !== null) { clearInterval(polling); polling = null; }
+    failures = 0;
     status("live");
   };
-  source.onmessage = (event) => render(JSON.parse(event.data));
+  source.onmessage = (event) => {
+    // One unparseable frame costs one frame. Throwing here would leave the page frozen on the last
+    // good snapshot with the indicator still reading "live".
+    try {
+      render(JSON.parse(event.data));
+    } catch {
+      status("bad frame");
+    }
+  };
   source.onerror = () => { source.close(); poll(); setTimeout(connect, 5000); };
 }
 

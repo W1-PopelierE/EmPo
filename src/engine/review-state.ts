@@ -314,17 +314,36 @@ function afterTeardown(repoRoot: string, previous: Snapshot): Snapshot {
 
   // Matched on the tree phase 1 read, not on time: that is exactly what the gate writes down about
   // the review it gated, so an older round on the same branch cannot be mistaken for this verdict.
-  const tree = previous.session.tree;
-  if (tree === null) return frozen;
+  // Falling back to the sha the way `recordRound` does, since a record whose tree could not be read
+  // carries the sha in that field and would otherwise match nothing at all.
+  const tree = previous.session.tree ?? previous.session.sha;
+  if (tree === null || tree === "") return frozen;
   const round = readRounds(repoRoot, previous.session.sourceBranch)
     .filter((one) => one.tree === tree)
     .at(-1);
   if (round === undefined) return frozen;
 
   const survivors = new Set(round.findings.map((one) => one.id));
-  return {
-    ...frozen,
-    round: round.round,
-    findings: previous.findings.map((one) => ({ ...one, survived: survivors.has(one.id) })),
-  };
+  const findings = previous.findings.map((one) => ({ ...one, survived: survivors.has(one.id) }));
+  // Survivors the carried findings do not name, for the same reason `readFindings` adds them: a
+  // gate run with `--findings` pointing outside the session directory leaves the viewer holding no
+  // suspected findings at all, and a round shown with none of them reads as a review that found
+  // nothing rather than one whose text the viewer never saw.
+  for (const survivor of round.findings) {
+    if (findings.some((one) => one.id === survivor.id)) continue;
+    findings.push({
+      id: survivor.id,
+      kind: survivor.kind,
+      severity: survivor.severity,
+      title: survivor.title,
+      claim: "",
+      file: survivor.file,
+      line: survivor.line,
+      anchor: "",
+      suggestion: null,
+      survived: true,
+      dropped: null,
+    });
+  }
+  return { ...frozen, round: round.round, findings };
 }

@@ -1,6 +1,4 @@
-import { readFileSync, realpathSync, statSync } from "node:fs";
 import { createServer, type Server, type ServerResponse } from "node:http";
-import { isAbsolute, relative, resolve } from "node:path";
 import { emptySnapshot, readReviewState, type Snapshot } from "../engine/review-state";
 import { configError, environmentError } from "../errors";
 import { page } from "../web/page";
@@ -35,7 +33,7 @@ export function createViewer(repoRoot: string): { server: Server; stop(): void }
   timer.unref();
 
   /**
-   * Four routes and nothing else, all GET. The state is read fresh per request rather than served
+   * Three routes and nothing else, all GET. The state is read fresh per request rather than served
    * from the poll's copy, so a page that loads between two ticks is never a tick behind.
    */
   const server = createServer((request, response) => {
@@ -59,21 +57,6 @@ export function createViewer(repoRoot: string): { server: Server; stop(): void }
     }
 
     if (url.pathname === "/events") return stream(response, clients, snapshot);
-
-    if (url.pathname === "/file") {
-      const readRoot = readReviewState(repoRoot, snapshot).session?.readRoot ?? null;
-      // No session means no file is in scope at all, which is a different answer from a path that
-      // was in scope and refused: nothing here is being kept from the caller.
-      if (readRoot === null) return send(response, 404, "text/plain", "No review is running");
-
-      const answer = fileWithin(readRoot, url.searchParams.get("path") ?? "");
-      if (!answer.ok) {
-        return answer.status === 403
-          ? send(response, 403, "text/plain", "Outside the read root")
-          : send(response, 404, "text/plain", "No such file in the read root");
-      }
-      return send(response, 200, "text/plain; charset=utf-8", answer.content);
-    }
 
     return send(response, 404, "text/plain", "Not found");
   });
@@ -170,48 +153,4 @@ function stream(response: ServerResponse, clients: Set<ServerResponse>, snapshot
 function send(response: ServerResponse, status: number, type: string, body: string): void {
   response.writeHead(status, { "content-type": type });
   response.end(body);
-}
-
-/** Refused and absent are different answers, and the caller turns them into 403 and 404. */
-type FileAnswer = { ok: true; content: string } | { ok: false; status: 403 | 404 };
-
-const REFUSED: FileAnswer = { ok: false, status: 403 };
-const ABSENT: FileAnswer = { ok: false, status: 404 };
-
-/**
- * The one trust boundary in this command. The viewer serves source from a private machine, so a
- * path is resolved and then proven to be inside the read root; a request that climbs out is
- * refused rather than normalized into something servable.
- */
-function fileWithin(readRoot: string, requested: string): FileAnswer {
-  if (requested === "" || isAbsolute(requested)) return REFUSED;
-  const root = resolve(readRoot);
-  const full = resolve(root, requested);
-  const inside = relative(root, full);
-  if (inside === "" || inside.startsWith("..") || isAbsolute(inside)) return REFUSED;
-
-  let real: string;
-  let realRoot: string;
-  try {
-    realRoot = realpathSync(root);
-    real = realpathSync(full);
-  } catch {
-    // Nothing there to serve, and nothing refused either: the diff cites deleted files, and telling
-    // their reader "outside the read root" would send them hunting a breach that never happened.
-    return ABSENT;
-  }
-
-  // The containment check again on the real paths: a symlink inside the root pointing out of it is
-  // an escape the lexical check above cannot see. Both sides are resolved because the root itself
-  // is often reached through a link (macOS /var), and comparing one form against the other would
-  // refuse everything.
-  const realInside = relative(realRoot, real);
-  if (realInside.startsWith("..") || isAbsolute(realInside)) return REFUSED;
-
-  try {
-    if (!statSync(real).isFile()) return ABSENT;
-    return { ok: true, content: readFileSync(real, "utf8") };
-  } catch {
-    return ABSENT;
-  }
 }
