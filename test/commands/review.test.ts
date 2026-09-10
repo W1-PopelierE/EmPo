@@ -9,7 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -66,14 +66,15 @@ function findingsPathOf(repoRoot: string): string {
 }
 
 /**
- * Where the review watermark lives: outside the repository, beside the scratch, keyed by the same
- * digest of the resolved root. Outside because `empo review` disturbs nothing in the checkout it
- * reviews, and beside rather than inside a session directory because a session is torn down at the
- * end of every gate and the watermark is the one thing that has to outlive it.
+ * Where the review watermark lives: in the user's own `~/.empo/`, keyed by a digest of the resolved
+ * root. Outside the repository because `empo review` disturbs nothing in the checkout it reviews,
+ * and outside the temp scratch because a session is torn down at the end of every gate while the
+ * watermark has to outlive it — and because a predictable path under a world-writable `/tmp` is one
+ * anyone can plant a symlink at. Each test's repo digest is its own, and cleanup removes it.
  */
 function watermarkPathOf(repoRoot: string): string {
   const digest = createHash("sha256").update(realpathSync(repoRoot)).digest("hex").slice(0, 8);
-  return join(tmpdir(), "empo-review", `watermark-${digest}.json`);
+  return join(homedir(), ".empo", `watermark-${digest}.json`);
 }
 
 /** The rows of the brief's changed files table, which is the one place the review's scope is listed. */
@@ -2975,6 +2976,26 @@ describe("round awareness", () => {
     const mark = JSON.parse(readFileSync(watermarkPathOf(repo), "utf8"));
     expect(mark.branches.main.sha).toBe(headSha(repo));
     expect(mark.branches.main.round).toBe(1);
+  });
+
+  /**
+   * The one that bites locally: commit or amend between the brief and the gate and a watermark
+   * taken at gate time names a commit nobody reviewed, so the next `--since` skips it unread.
+   */
+  test("the gate records what phase 1 read, not where HEAD moved to after it", () => {
+    changeCalculator();
+    capture(() => reviewCommand(repo, undefined, { workflow: false }));
+    const reviewed = headSha(repo);
+
+    git(repo, ["add", "-f", CALCULATOR_FILE]);
+    commit(repo, "committed after the brief was printed");
+    const path = findingsPathOf(repo);
+    writeFileSync(path, `${JSON.stringify({ findings: [realFinding()] }, null, 2)}\n`);
+    capture(() => reviewCommand(repo, undefined, { findings: path }));
+
+    const mark = JSON.parse(readFileSync(watermarkPathOf(repo), "utf8"));
+    expect(mark.branches.main.sha).toBe(reviewed);
+    expect(mark.branches.main.sha).not.toBe(headSha(repo));
   });
 
   test("a second gate counts a second round, and a sibling branch keeps its own", () => {

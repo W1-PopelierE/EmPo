@@ -102,6 +102,13 @@ interface ReviewSession {
   worktree: string | null;
   base: string;
   sourceBranch: string | null;
+  /**
+   * The revision phase 1 actually read, so the gate records that and not wherever HEAD has since
+   * gone. A local review is the case that bites: commit or amend between the brief and the gate and
+   * a watermark taken at gate time would name a commit nobody reviewed, and the next `--since`
+   * would skip it. Null where git could not answer, which records nothing rather than a guess.
+   */
+  sha: string | null;
   diffPath: string;
 }
 
@@ -1025,6 +1032,7 @@ function isolate(
     worktree,
     base,
     sourceBranch: prMeta?.sourceBranch ?? currentBranch(repoRoot),
+    sha: gitInfo(readRoot)?.sha ?? null,
     diffPath,
   };
   writeFileSync(join(dir, "session.json"), `${JSON.stringify(session, null, 2)}\n`, "utf8");
@@ -1860,11 +1868,7 @@ function gatePhase(repoRoot: string, pr: string | undefined, options: ReviewOpti
     // author. Written here rather than in the brief because a brief nobody gated read nothing: it
     // is the facts, and the round that skipped the gate produced no findings for anyone to trust.
     if (session !== null) {
-      recordReview(
-        repoRoot,
-        session.sourceBranch,
-        gitInfo(existsSync(readRoot) ? readRoot : repoRoot)?.sha ?? null,
-      );
+      recordReview(repoRoot, session.sourceBranch, session.sha ?? null);
     }
   } finally {
     teardown(repoRoot, id, session);
