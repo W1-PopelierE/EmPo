@@ -1296,7 +1296,7 @@ message on stderr, so the document stays parseable.
 ## `empo hook <event>`
 
 The host's half of the wiring in [10-distribution](10-distribution.md), and the one command here
-whose output is read by a machine rather than by a person. Three events, one command, because the
+whose output is read by a machine rather than by a person. Four events, one command, because the
 alternative is a shell one-liner inside generated JSON, and the hook contract belongs in code where
 it is tested.
 
@@ -1304,6 +1304,7 @@ it is tested.
 empo hook session-start    a graph behind HEAD, a drifted spine, a root or pack that is not there
 empo hook pre-edit         deny a write under .empo/generated/, warn on a spine's guarded file
 empo hook pre-commit       run the commit gate over the staged diff and deny a commit that fails it
+empo hook tool-use         log a read while a review is running, silent outside one
 ```
 
 It reads the hook payload as JSON on **stdin** and writes its answer as JSON on **stdout**. The one

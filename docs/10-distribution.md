@@ -430,7 +430,7 @@ Four rules govern the merge. Three make it safe and the fourth states what it co
   empty, which is what keeps it worth reading when it is not: a hook a human wired by hand should
   not disappear inside a diff that looks like a routine regenerate.
 
-### The three hooks
+### The four hooks
 
 Each is one entry in `settings.json` calling `empo hook <event>` ([06-cli](06-cli.md)), with
 `${CLAUDE_PROJECT_DIR}` expanded by the host so a hook resolves the repository it was configured for
@@ -459,6 +459,13 @@ and not whatever directory the session sits in, and with a `timeout` in seconds.
   that touches a spine's guarded files with no added value-asserting test, from the same computation
   `empo check` prints, naming the spine, the files and the terms it wanted. Bypassable only by
   explicit human decision with a reason on the record, never by unstaging the spine file.
+- **PostToolUse on `Read|Grep|Glob`** runs `empo hook tool-use`: it appends one line per call
+  (timestamp, tool, repo-relative path) to the activity log, so a viewer can show what a review is
+  looking at while it works. It is silent outside a review on purpose: a log of every file read all
+  day is not this tool's business, so the hook checks for a session directory first and writes nothing
+  when there is none, which is the cheapest signal that a review is what this is. Wired over the
+  reading tools only: an edit is a decision the diff already records, so logging it here too would be
+  the same call counted twice.
 
 **The hooks fail open.** A machine with no `empo` on its PATH exits 127, which the host treats as
 "other", which is non-blocking for every event. That is deliberate: a gate that blocks every edit on

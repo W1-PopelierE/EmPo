@@ -222,6 +222,7 @@ describe("which binary the hooks reach for", () => {
       `empo hook session-start --repo "\${CLAUDE_PROJECT_DIR}"`,
       `empo hook pre-edit --repo "\${CLAUDE_PROJECT_DIR}"`,
       `empo hook pre-commit --repo "\${CLAUDE_PROJECT_DIR}"`,
+      `empo hook tool-use --repo "\${CLAUDE_PROJECT_DIR}"`,
     ]);
   });
 
@@ -229,13 +230,13 @@ describe("which binary the hooks reach for", () => {
     // THE case, and the reason the ownership rule outlived the branch that produced the spelling.
     // `empo update` finds its own previous entries through `isEmpoHook` and replaces them, so a
     // repository wired by the release that wrote the repo-local path must come out of the update
-    // with three hooks and not six.
+    // with four hooks and not seven.
     seed(SETTINGS_PATH, text(null, legacyHooks()));
 
     writeClaude(repo, BARE);
 
     const written = commands(read(SETTINGS_PATH));
-    expect(written).toHaveLength(3);
+    expect(written).toHaveLength(4);
     expect(written.every((one) => one.startsWith("empo hook "))).toBe(true);
     // And the old entries are gone rather than sitting beside the new ones.
     expect(written.some((one) => one.startsWith(LEGACY_LOCAL))).toBe(false);
@@ -257,7 +258,7 @@ describe("which binary the hooks reach for", () => {
 
     const again = writeClaude(repo, BARE);
 
-    expect(commands(read(SETTINGS_PATH))).toHaveLength(3);
+    expect(commands(read(SETTINGS_PATH))).toHaveLength(4);
     expect(read(SETTINGS_PATH)).toBe(once);
     expect(again[3]).toEqual({ path: SETTINGS_PATH, state: "unchanged" });
   });
@@ -266,7 +267,7 @@ describe("which binary the hooks reach for", () => {
     const once = text(null, empoHooks());
 
     expect(text(once, empoHooks())).toBe(once);
-    expect(commands(text(once, empoHooks()))).toHaveLength(3);
+    expect(commands(text(once, empoHooks()))).toHaveLength(4);
     expect(removed(once, empoHooks())).toEqual([]);
   });
 });
@@ -540,10 +541,16 @@ describe("mergeSettings", () => {
       `empo hook session-start --repo "\${CLAUDE_PROJECT_DIR}"`,
       `empo hook pre-edit --repo "\${CLAUDE_PROJECT_DIR}"`,
       `empo hook pre-commit --repo "\${CLAUDE_PROJECT_DIR}"`,
+      `empo hook tool-use --repo "\${CLAUDE_PROJECT_DIR}"`,
     ]);
     expect(BARE_HOOKS.PreToolUse?.map((group) => group.matcher)).toEqual(["Edit|Write", "Bash"]);
     // Seconds. A timeout written in milliseconds would be a tenth of a second in practice.
     expect(BARE_HOOKS.SessionStart?.[0]?.hooks[0]?.timeout).toBe(10);
+  });
+
+  test("wires the activity hook over the reading tools only, so an edit is not double-counted", () => {
+    expect(BARE_HOOKS.PostToolUse?.map((group) => group.matcher)).toEqual(["Read|Grep|Glob"]);
+    expect(BARE_HOOKS.PostToolUse?.[0]?.hooks[0]?.timeout).toBe(5);
   });
 
   test("fills an empty document the same way", () => {
@@ -601,7 +608,7 @@ describe("mergeSettings", () => {
     const once = text(null, BARE_HOOKS);
 
     expect(text(once, BARE_HOOKS)).toBe(once);
-    expect(commands(text(once, BARE_HOOKS))).toHaveLength(3);
+    expect(commands(text(once, BARE_HOOKS))).toHaveLength(4);
   });
 
   test("replaces an entry an older version wrote instead of doubling it", () => {
@@ -682,6 +689,7 @@ describe("mergeSettings", () => {
   test("does not reorder a document whose keys sit in another order", () => {
     const reordered = json({
       hooks: {
+        PostToolUse: [...(BARE_HOOKS.PostToolUse ?? [])],
         PreToolUse: [...(BARE_HOOKS.PreToolUse ?? [])],
         SessionStart: [...(BARE_HOOKS.SessionStart ?? [])],
       },
@@ -1059,7 +1067,7 @@ describe("wiredHooks", () => {
     expect(wiredHooks(repo)).toEqual([]);
   });
 
-  test("reads back the three hooks a real writeClaude wired, in file order", () => {
+  test("reads back the four hooks a real writeClaude wired, in file order", () => {
     // Built by the writer rather than by hand, so this case tracks `empoHooks` instead of pinning a
     // second copy of it that goes stale the day a hook changes.
     writeClaude(repo, BARE);
@@ -1072,6 +1080,7 @@ describe("wiredHooks", () => {
       ["PreToolUse", "Edit|Write", 10],
       // The longer timeout, because pre-commit computes the gate `empo check` does over a diff.
       ["PreToolUse", "Bash", 20],
+      ["PostToolUse", "Read|Grep|Glob", 5],
     ]);
     const written = Object.values(empoHooks()).flatMap((groups) =>
       groups.flatMap((group) => group.hooks),
