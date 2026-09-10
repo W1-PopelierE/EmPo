@@ -191,6 +191,12 @@ export function buildProgram(): Command {
     .option("--repo <path>", "repository root", process.cwd())
     .option("--base <ref>", "pin the comparison base, critical for stacked pull requests")
     .option("--findings <path>", "verify a findings file and produce the report")
+    .option(
+      "--whole",
+      "read the whole diff against the base, instead of narrowing to the last gated round",
+      false,
+    )
+    .option("--reset", "forget every gated round on this branch and start clean", false)
     // Not --pr: the pull request id is already the positional argument, and one line reading
     // `empo review 412 --pr payload.json` would spend "pr" on two different things.
     .option("--pr-payload <path>", "the pull request an mcp host fetched, as JSON")
@@ -210,6 +216,8 @@ export function buildProgram(): Command {
           repo: string;
           base?: string;
           findings?: string;
+          whole: boolean;
+          reset: boolean;
           prPayload?: string;
           ticketPayload?: string;
           ticket: boolean;

@@ -669,6 +669,20 @@ function reviewSkill(config: EmpoConfig): string[] {
     "it and teach a workflow the gate does not implement. Read what the command prints and run",
     "that. Do not improvise a review from this file.",
     "",
+    "## A branch is reviewed more than once",
+    "",
+    // The loop is invisible from inside one run, which is why it ran eleven times: every round
+    // diffed against the base again and nothing in the brief said this was not the first.
+    "The brief's `round` line says which round this is and what the subject of it is, because after",
+    "the first gated round `empo review` narrows the next one by itself: the subject becomes what",
+    "has been written since the last gated round plus the files the graph says those hunks can",
+    "reach, and the brief names which files are which. The radius is not an extra there: a fix",
+    "written to close the last round's finding is exactly the kind of change that breaks something",
+    "the new hunks do not mention. `--whole` reads the entire diff against the base again the way a",
+    "first round does, for when the narrowing has the wrong subject, and `empo review --reset`",
+    "forgets every gated round on this branch and starts clean. The gate is what records a round,",
+    "so a round that skipped phase 2 is a round the next review will not skip over.",
+    "",
     "## The second phase is not optional",
     "",
     // Counted the same way the paragraph above counts, or the file says "phase 0" in one place and

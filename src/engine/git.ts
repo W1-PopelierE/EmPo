@@ -41,6 +41,26 @@ export function commitsAhead(repoRoot: string, sha: string): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+/**
+ * The tree phase 1 read, as a commit object: `git stash create` where the tree is dirty, HEAD where
+ * it is clean.
+ *
+ * HEAD alone is not the thing that was reviewed. A local review is `git diff <base>`, so most of
+ * what it reads is uncommitted, and a round that recorded only HEAD could not tell a later round
+ * which of those lines it had already seen: with nothing committed in between, the next round
+ * diffed HEAD against the tree and called every line of the old work new. Recording the tree fixes
+ * that at the source, and `git stash create` is how git names a dirty tree without a ref.
+ *
+ * It writes one unreachable commit object and touches no ref, no index and no file, so the review
+ * still disturbs nothing in the checkout it reads. Unreachable is also why the object can be
+ * collected later, which is the vanished-commit path the caller already announces.
+ */
+export function reviewedTree(repoRoot: string): string | null {
+  const stashed = git(repoRoot, ["stash", "create"]);
+  if (stashed !== null && stashed !== "") return stashed;
+  return gitInfo(repoRoot)?.sha ?? null;
+}
+
 export function shortSha(sha: string): string {
   return sha === "" ? "unknown" : sha.slice(0, 7);
 }
@@ -55,6 +75,17 @@ export function currentBranch(repoRoot: string): string | null {
 /** Resolves any ref to a sha, so a caller can tell "no such base" from "no changes". */
 export function resolveRef(repoRoot: string, ref: string): string | null {
   return git(repoRoot, ["rev-parse", "--verify", `${ref}^{commit}`]);
+}
+
+/**
+ * Whether `sha` is behind the commit being read, which is what makes a diff against it read as work
+ * added rather than as work missing. A round gated on a branch that has since been rebased, or on a
+ * checkout that has diverged from the pull request now under review, fails this: the diff is still
+ * the honest difference between the two trees, but half of it is the other tree's commits showing
+ * up as deletions, and a reader told only "new since that review" would take it for progress.
+ */
+export function isAncestor(repoRoot: string, sha: string, of: string): boolean {
+  return run(repoRoot, "git", ["merge-base", "--is-ancestor", sha, of]).ok;
 }
 
 /**

@@ -1,7 +1,6 @@
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { createForge, type HostPullRequestInput } from "../adapters/forge/create";
 import { type ForgeAdapter, hasCapability, type PullRequest } from "../adapters/forge/types";
 import { readHostPullRequest, readHostTicket, verifyPullRequest } from "../adapters/host-input";
@@ -15,14 +14,30 @@ import { type ChangedFile, changedLines, parseDiff } from "../engine/diff";
 import {
   addWorktree,
   currentBranch,
+  diffAgainstBase,
   diffRange,
   fetchRef,
+  gitInfo,
+  isAncestor,
   removeWorktree,
   resolveRef,
+  reviewedTree,
+  shortSha,
 } from "../engine/git";
 import { readGraph, stalenessLines } from "../engine/graph";
 import { type GuardedTouch, guardedTouches } from "../engine/guard";
 import { compareStrings } from "../engine/order";
+import {
+  branchesGatedUnder,
+  canonicalRoot,
+  lastRound,
+  pathKey,
+  type RoundFinding,
+  type RoundRecord,
+  recordRound,
+  resetRounds,
+  roundsDir,
+} from "../engine/rounds";
 import {
   type CitationDrift,
   type LoadedSpine,
@@ -81,6 +96,20 @@ export interface ReviewOptions {
    * the brief reports it as the agent's answer rather than as an absence.
    */
   ticket?: boolean;
+  /**
+   * `--whole`: read the whole diff against the base, as a first round does, rather than narrowing
+   * to what has been written since the last gated round. Narrowing is the default because a branch
+   * is reviewed more than once and the eleventh round re-reading the first round's work is the
+   * waste this exists to end; the brief says which of the two subjects it is holding either way,
+   * loudly, because a command that quietly narrowed its own subject is the worst kind of quiet.
+   */
+  whole?: boolean;
+  /**
+   * `--reset`: forget every gated round on this branch and start clean. It runs on its own and
+   * prints what it threw away, because a command that silently forgot eleven rounds of history
+   * looks exactly like one that had none to forget.
+   */
+  reset?: boolean;
 }
 
 /** What phase 1 leaves behind so phase 2 can verify against the same code the review read. */
@@ -92,6 +121,19 @@ interface ReviewSession {
   worktree: string | null;
   base: string;
   sourceBranch: string | null;
+  /**
+   * The revision phase 1 actually read, so the gate records that and not wherever HEAD has since
+   * gone. A local review is the case that bites: commit or amend between the brief and the gate and
+   * a round taken at gate time would name a commit nobody reviewed, and the next round would skip
+   * past it unread. Null where git could not answer, which records nothing rather than a guess.
+   */
+  sha: string | null;
+  /**
+   * The tree phase 1 read, which is what the next round narrows against. Not the same thing as
+   * `sha`: a local review is mostly uncommitted work, so a round that recorded only the commit
+   * would tell the next round nothing about the lines it had actually read.
+   */
+  tree: string | null;
   diffPath: string;
 }
 
@@ -145,6 +187,11 @@ export function reviewCommand(
     throw configError("--post and --readonly contradict each other", [
       "--readonly suppresses every mutating action, which is what --post asks for.",
     ]);
+  }
+
+  if (options.reset === true) {
+    resetPhase(repoRoot, pr);
+    return;
   }
 
   if (options.findings !== undefined && options.findings !== "") {
@@ -229,7 +276,13 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
   // is explicit everywhere downstream rather than assumed to be the default branch.
   const base = options.base ?? prMeta?.baseBranch ?? provisionalBase;
   const session = isolate(repoRoot, id, base, prMeta, forge.adapter, options, notes);
-  const changed = reviewableFiles(parseDiff(readFileSync(session.diffPath, "utf8")));
+  // The diff on disk stays the whole one: it is what phase 2 holds every finding to, and the pull
+  // request is still the subject of the review whatever this round chose to read. Narrowing changes
+  // what the brief is about, and nothing else.
+  const round = roundScope(repoRoot, session, base, notes, options.whole === true);
+  const since =
+    options.whole !== true && round?.diff != null ? { ...round, diff: round.diff } : null;
+  const changed = reviewableFiles(parseDiff(since?.diff ?? readFileSync(session.diffPath, "utf8")));
   if (changed.skipped.length > 0) {
     notes.push(
       `${changed.skipped.length} machine-owned file(s) left out of the review: ` +
@@ -320,6 +373,27 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
             spine: entry.loaded.spine,
             drift: entry.report,
           })),
+          round:
+            round === null
+              ? null
+              : {
+                  number: round.last.round + 1,
+                  sha: round.last.sha,
+                  at: round.last.at,
+                  // Null and not zero where there is no diff to measure: a consumer reading 0 off
+                  // `--whole` or a vanished commit would read "the branch has not moved", which is
+                  // the one thing it does not mean.
+                  linesChanged: round.diff === null ? null : linesChanged(round.diff),
+                },
+          since:
+            since === null
+              ? null
+              : {
+                  sha: since.last.sha,
+                  at: since.last.at,
+                  round: since.last.round,
+                  radiusFiles: radiusFiles(graph, facts, changed.files),
+                },
           conventions: conventionsFacts(repoRoot),
           findingsPath: join(sessionDir(repoRoot, id), "findings.json"),
           workflow: options.workflow === false ? null : reviewWorkflow(),
@@ -341,6 +415,8 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
     prMeta,
     ticket,
     facts,
+    round,
+    since,
     spines,
     curated: curated.length,
     ticketDeclined: options.ticket === false,
@@ -986,6 +1062,8 @@ function isolate(
     worktree,
     base,
     sourceBranch: prMeta?.sourceBranch ?? currentBranch(repoRoot),
+    sha: gitInfo(readRoot)?.sha ?? null,
+    tree: reviewedTree(readRoot),
     diffPath,
   };
   writeFileSync(join(dir, "session.json"), `${JSON.stringify(session, null, 2)}\n`, "utf8");
@@ -1015,6 +1093,10 @@ interface BriefView {
   prMeta: PullRequest | null;
   ticket: { key: KeyMatch | null; ticket: Ticket | null };
   facts: FileFacts[];
+  /** What the last gated round on this branch left behind, or null where there has been none. */
+  round: RoundScope | null;
+  /** The last gated round this brief narrowed itself to, or null for the whole diff. */
+  since: SinceScope | null;
   spines: SpineFacts[];
   /** How many spines exist at all, so an empty list can say which kind of empty it is. */
   curated: number;
@@ -1037,6 +1119,14 @@ function printBrief(repoRoot: string, graph: Graph, view: BriefView): void {
     `base       ${view.base}${resolveRef(repoRoot, view.base) === null ? "  (does not resolve)" : ""}`,
   );
   console.log(`branch     ${session.sourceBranch ?? "detached"}`);
+  if (view.round !== null) {
+    const { last, diff } = view.round;
+    const moved =
+      diff === null ? "lines changed since unknown" : `${linesChanged(diff)} lines changed since`;
+    console.log(
+      `round      ${last.round + 1} against this branch, last reviewed at ${shortSha(last.sha)}, ${moved}`,
+    );
+  }
   console.log(
     `read root  ${session.readRoot}${session.worktree === null ? "  (your checkout)" : "  (detached worktree, removed when the findings are gated)"}`,
   );
@@ -1050,6 +1140,7 @@ function printBrief(repoRoot: string, graph: Graph, view: BriefView): void {
 
   printTicket(view);
   printCi(view);
+  printScope(graph, view);
   printChangedFiles(facts);
   printBlastRadius(facts);
   printFanout(graph, facts);
@@ -1154,6 +1245,141 @@ function printCi(view: BriefView): void {
       console.log(`  ${comment.author}  ${where}${firstLine(comment.body)}`);
     }
   }
+}
+
+/**
+ * What the last gated round on this branch left behind: the round it was, and the diff written
+ * since it. Null where no round has been gated at all, which is round one and has nothing to say.
+ *
+ * `diff` is null where the round points at a commit that is gone, which is what a garbage collect
+ * after a rebase does to one. Both of those are loud, and that is the point rather than a nicety: a
+ * review that quietly re-read everything and a review that quietly read a third of it print the
+ * same brief otherwise, and the reader cannot tell which one they are holding. Since narrowing is
+ * what the plain command does, the announcement is owed on every round and not only to the caller
+ * who asked for it.
+ */
+function roundScope(
+  repoRoot: string,
+  session: ReviewSession,
+  base: string,
+  notes: string[],
+  /** `--whole`: the caller pinned the whole diff, so the round is reported and never applied. */
+  whole: boolean,
+): RoundScope | null {
+  const subject = `the whole diff against ${base} is under review`;
+  const last = lastRound(repoRoot, session.sourceBranch);
+  if (last === null) {
+    notes.push(
+      `round 1 against ${session.sourceBranch ?? "this checkout"}: nothing has been gated here ` +
+        `yet, so ${subject}. A round is recorded when a review's findings are gated.`,
+    );
+    return null;
+  }
+  if (whole) {
+    notes.push(
+      `--whole: round ${last.round + 1}, and the narrowing to what has been written since ` +
+        `${shortSha(last.sha)} was skipped because you asked for it, so ${subject}.`,
+    );
+    return { last, diff: null };
+  }
+  // Against the tree that round read and not against its commit. Most of a local review is
+  // uncommitted, so narrowing by the commit would hand this round every uncommitted line the last
+  // round had already read, under a heading calling it new.
+  if (resolveRef(session.readRoot, last.tree) === null) {
+    notes.push(
+      `round ${last.round + 1}: the tree round ${last.round} read (${shortSha(last.tree)}) is ` +
+        `no longer in this repository, so ${subject}.`,
+    );
+    return { last, diff: null };
+  }
+  const diff = diffAgainstBase(session.readRoot, last.tree);
+  if (diff === null) {
+    notes.push(
+      `round ${last.round + 1}: git could not diff against the tree round ${last.round} read ` +
+        `(${shortSha(last.tree)}), so ${subject}.`,
+    );
+    return { last, diff };
+  }
+  // Narrowing still holds here: the diff is the honest difference between the tree that was
+  // reviewed and the tree being read. What does not hold is calling all of it new work, so this is
+  // a note and not a refusal. The commonest cause is an amend or a rebase; the one worth catching
+  // is a local checkout and a pull request review taking turns on one branch name from two
+  // different revisions, where the other side's commits read as deletions.
+  if (!isAncestor(session.readRoot, last.sha, "HEAD")) {
+    notes.push(
+      `round ${last.round + 1}: ${shortSha(last.sha)} is not an ancestor of what is being read ` +
+        "(an amend, a rebase, or a branch that has moved apart from it), so what follows is the " +
+        "difference between the two trees and not only work written since.",
+    );
+  }
+  return { last, diff };
+}
+
+/** The last round this branch carries, and the diff since it where there is one to compute. */
+interface RoundScope {
+  last: RoundRecord;
+  diff: string | null;
+}
+
+/** The same, once the round has an answer to narrow by. */
+interface SinceScope extends RoundScope {
+  diff: string;
+}
+
+/** How far the branch has moved since the last round, in the unit the author writes in. */
+function linesChanged(diff: string | null): number {
+  if (diff === null) return 0;
+  return parseDiff(diff).reduce((total, file) => total + file.addedCount + file.removedCount, 0);
+}
+
+/**
+ * Which files came along because the graph says the new hunks can reach them.
+ *
+ * Not optional and never a footnote: a fix written in round two to close round one's finding is
+ * exactly the kind of change that breaks something the diff does not name, and an incremental
+ * review that reads only its own hunks is the one that misses it.
+ */
+function radiusFiles(graph: Graph, facts: FileFacts[], changed: ChangedFile[]): string[] {
+  const already = new Set(changed.map((file) => file.path));
+  const files = new Set<string>();
+  const add = (id: string): void => {
+    const file = graph.nodes.find((node) => node.id === id)?.file;
+    if (file !== undefined && !already.has(file)) files.add(file);
+  };
+  for (const radius of radiiOf(facts)) {
+    for (const consumer of radius.consumers) add(consumer.id);
+    for (const bridge of radius.bridges) {
+      add(bridge.from);
+      add(bridge.to);
+    }
+  }
+  return [...files].sort(compareStrings);
+}
+
+/**
+ * The two halves of an incremental round, named apart. A reader who cannot tell which files are new
+ * from which ones the radius dragged in cannot tell a finding about this round's work from a
+ * finding about code that has been sitting there for ten rounds.
+ */
+function printScope(graph: Graph, view: BriefView): void {
+  if (view.since === null) return;
+  const { last } = view.since;
+  console.log("");
+  console.log(`review scope  since ${shortSha(last.sha)}, reviewed ${last.at}`);
+  console.log("  new since that review");
+  const changed = view.facts.map((entry) => entry.file);
+  if (changed.length === 0) console.log("    nothing: this branch has not moved since that round");
+  for (const file of changed) {
+    console.log(`    ${file.path}  +${file.addedCount} -${file.removedCount}`);
+  }
+  const radius = radiusFiles(graph, view.facts, changed);
+  console.log("  in scope because the blast radius reaches them");
+  if (radius.length === 0) console.log("    none: the graph knows no consumer of these hunks");
+  for (const file of radius.slice(0, 10)) console.log(`    ${file}`);
+  if (radius.length > 10) console.log(`    +${radius.length - 10} more`);
+  console.log(
+    `  Everything else on this branch was reviewed at ${shortSha(last.sha)} and is not below.`,
+  );
 }
 
 function printChangedFiles(facts: FileFacts[]): void {
@@ -1692,7 +1918,30 @@ function gatePhase(repoRoot: string, pr: string | undefined, options: ReviewOpti
   // worktree left behind because posting failed would be the review disturbing the checkout it
   // promised not to touch (docs/07-review-discipline.md invariant 2 and step 8).
   try {
-    reportAndPost(repoRoot, pr, id, readRoot, notes, findings, changed, options);
+    const result = reportAndPost(repoRoot, pr, id, readRoot, notes, findings, changed, options);
+    // The round is over and a report has been printed, so what this review read is now behind the
+    // author. Written here rather than in the brief because a brief nobody gated read nothing: it
+    // is the facts, and the round that skipped the gate produced no findings for anyone to trust.
+    if (session !== null) {
+      const recorded = recordRound(
+        repoRoot,
+        session.sourceBranch,
+        session.sha ?? null,
+        session.tree ?? null,
+        id,
+        loggable(result),
+      );
+      if (recorded === null) {
+        console.log("");
+        console.log(
+          session.sourceBranch === null
+            ? "This checkout is detached, so there is no branch to record this round against and " +
+                "the next review reads the whole diff again."
+            : `This round could not be recorded under ${roundsDir(repoRoot, session.sourceBranch)}, ` +
+                "so the next review reads the whole diff again rather than what follows this one.",
+        );
+      }
+    }
   } finally {
     teardown(repoRoot, id, session);
   }
@@ -1708,7 +1957,7 @@ function reportAndPost(
   findings: ReviewFinding[],
   changed: ChangedFile[] | null,
   options: ReviewOptions,
-): void {
+): GateResult {
   const result = gateFindings(existsSync(readRoot) ? readRoot : repoRoot, findings, changed);
 
   if (options.json === true) {
@@ -1721,6 +1970,61 @@ function reportAndPost(
 
   if (options.post === true) {
     postFindings(repoRoot, pr, result);
+  }
+  return result;
+}
+
+/**
+ * What the round log keeps of a survivor: enough to recognise the claim a later round is reading
+ * back, and not the case for it, which is in the report the gate just printed.
+ */
+function loggable(result: GateResult): RoundFinding[] {
+  return result.kept.map((verified) => ({
+    id: verified.finding.id,
+    kind: verified.finding.kind,
+    severity: verified.finding.severity,
+    title: verified.finding.title,
+    file: verified.citation.file,
+    line: verified.citation.line,
+  }));
+}
+
+/**
+ * `empo review --reset`. Forgetting is a thing you do on purpose, so it says what it threw away
+ * and it never runs alongside a review: a flag that both reviewed and wiped the history would be
+ * one typo away from losing eleven rounds silently.
+ */
+function resetPhase(repoRoot: string, pr: string | undefined): void {
+  // A pull request is reviewed from a detached worktree and never from its own branch, so the
+  // branch whose rounds `empo review 412 --reset` means is not the one checked out. The log knows
+  // which branch it was, having written it down, and that is cheaper and truer than asking the
+  // forge to name a branch again.
+  const branches = pr === undefined ? [currentBranch(repoRoot)] : branchesGatedUnder(repoRoot, pr);
+  if (branches.length === 0 || branches[0] === null) {
+    console.log(
+      pr === undefined
+        ? "This checkout is detached, and rounds are recorded per branch, so there are none to forget."
+        : `No gated rounds for ${pr} in this repository, so there was nothing to forget.`,
+    );
+    return;
+  }
+
+  let total = 0;
+  for (const branch of branches) {
+    const forgotten = resetRounds(repoRoot, branch);
+    total += forgotten.length;
+    if (forgotten.length === 0) {
+      console.log(`No gated rounds on ${branch}, so there was nothing to forget.`);
+      continue;
+    }
+    console.log(`Forgot ${forgotten.length} gated round(s) on ${branch}:`);
+    for (const round of forgotten) {
+      const found = round.findings.length === 1 ? "1 finding" : `${round.findings.length} findings`;
+      console.log(`  round ${round.round}  ${shortSha(round.sha)}  ${round.at}  ${found}`);
+    }
+  }
+  if (total > 0) {
+    console.log("The next review is round 1 and reads the whole diff against the base.");
   }
 }
 
@@ -1911,20 +2215,7 @@ function teardown(repoRoot: string, id: string, session: ReviewSession | null): 
  * stays in the name so a human can still find the directory a brief just named.
  */
 function sessionDir(repoRoot: string, id: string): string {
-  const digest = createHash("sha256").update(canonicalRoot(repoRoot)).digest("hex").slice(0, 8);
-  return join(tmpdir(), "empo-review", `${slug(id)}-${digest}`);
-}
-
-/**
- * Both phases have to land on the same directory, so the key is the root git and the OS agree on:
- * /var and /private/var are one checkout on macOS, and a relative path is one too.
- */
-function canonicalRoot(repoRoot: string): string {
-  try {
-    return realpathSync(repoRoot);
-  } catch {
-    return resolve(repoRoot);
-  }
+  return join(tmpdir(), "empo-review", pathKey(id, canonicalRoot(repoRoot)));
 }
 
 function readSession(repoRoot: string, id: string): ReviewSession | null {

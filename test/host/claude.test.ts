@@ -375,6 +375,21 @@ describe("the generated skills", () => {
     expect(skill).not.toContain("No bridge is configured");
   });
 
+  test("empo-review says a branch gets reviewed more than once, and how to say so", () => {
+    // The loop this repairs is invisible from inside a single run: every round diffed against the
+    // base again, so an agent asked to review the same branch an eleventh time re-read the same
+    // seven hundred lines. A skill that never says the narrowing happens leaves it at eleven.
+    const skill = renderSkill("empo-review", FULL);
+
+    expect(skill).toContain("narrows the next one by itself");
+    // The half a naive incremental review drops, which is the half that makes it safe.
+    expect(skill).toContain("blast radius");
+    // And both escapes, because an agent handed the wrong subject and no way out of it works
+    // around the narrowing instead of stepping past it.
+    expect(skill).toContain("--whole");
+    expect(skill).toContain("--reset");
+  });
+
   test("point at the discipline each command prints instead of copying it", () => {
     // The copy `empo review` and `empo init` hand over is the one the verification gate is built
     // around. A second copy in a generated file drifts from it and teaches a workflow the gate does
