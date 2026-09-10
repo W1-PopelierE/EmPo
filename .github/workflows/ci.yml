@@ -52,8 +52,6 @@ jobs:
       # vitest does not typecheck, tsc does not lint, and none of the three runs the bundle.
       - name: Tests, serially
         run: npx vitest run --no-file-parallelism
-        env:
-          EMPO_DIAG: "1"
 
       - name: Typecheck
         run: npx tsc --noEmit

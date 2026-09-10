@@ -55,13 +55,18 @@ function startReview(root: string, id = "local"): string {
 }
 
 /**
- * Makes a session look older than the one beside it. `sessionDirs` sorts on the directory's mtime,
- * and two sessions a test creates land in the same millisecond, so "newest" would otherwise be
- * whichever order readdir happened to return. Call it last: writing anything inside the directory
- * afterwards stamps the mtime back to now.
+ * Makes a session look older than the one beside it. It stamps `session.json` and not the
+ * directory, because that file's mtime is what `sessionDirs` orders on — the directory's is bumped
+ * by anything written beside it, which is why it stopped being the key.
+ *
+ * Stamping the wrong one does not fail here, it fails on another machine: several sessions a test
+ * creates land inside one filesystem timestamp granule, and Linux's is coarse enough to give all of
+ * them the same mtime while macOS separates them by sub-millisecond writes. Ties fall back to
+ * whatever order readdir returned, so a fixture that does not really set the key passes on one
+ * platform and fails on the other, for reasons that have nothing to do with the code under test.
  */
 function backdate(dir: string, ms: number): void {
-  utimesSync(dir, new Date(), new Date(Date.now() - ms));
+  utimesSync(join(dir, "session.json"), new Date(), new Date(Date.now() - ms));
 }
 
 /** The session file phase 1 leaves, with whichever field a test needs to say differently. */
