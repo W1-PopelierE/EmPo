@@ -551,12 +551,13 @@ against a pull request nobody had named.
 recorded that: every round diffed against the base again, so eleven rounds over one branch re-read
 the same seven hundred lines eleven times while each round had changed a few dozen. Phase 2 now
 appends to a round log — one file per gated round, holding that round's number, the commit phase 1
-read, the time, and the findings that round got through the gate — in a directory keyed to this
-repository and this branch, outside the repository entirely ([09-adapters](09-adapters.md)) and
-never in it. A log and not a counter, because a counter answers how many rounds there have been and
-never what round two found, and a reader on round five has the second question far more often than
-the first. The brief prints the head of it back as one line under `branch`, `round 3 against this branch, last reviewed at 56abad4, 17 lines
-changed since`, which is the loop being visible to the person inside it; a branch nobody has gated
+read, the time, the id of the review it belonged to, the branch, and the findings that round got
+through the gate — in a directory keyed to this repository and this branch, outside the repository
+entirely ([09-adapters](09-adapters.md)) and never in it. A log and not a counter, because a counter
+answers how many rounds there have been and never what round two found, and a reader on round five
+has the second question far more often than the first. The brief prints the head of it back as one
+line under `branch`, `round 3 against this branch, last reviewed at 56abad4, 17 lines changed
+since`, which is the loop being visible to the person inside it; a branch nobody has gated
 has no such line.
 
 Narrowing is what a round does by default now. Where a log exists for this branch the subject
@@ -567,6 +568,15 @@ breaks something the new hunks do not name. The brief says which files are which
 scope`, so a reader can tell this round's work from code that has been sitting there since round
 one. The diff on disk is untouched by all of this: the gate still holds every finding to the whole
 pull request, which is still the subject.
+
+Where the last round's commit is not an ancestor of what is being read, the brief says so and keeps
+narrowing anyway. An amend, a rebase, or a branch that has moved apart from the one the round was
+gated on all land here, as does a local review and a pull request review taking turns on one branch
+name from two different revisions. The diff is still the honest difference between the tree that was
+reviewed and the tree in hand, so refusing to narrow would throw away a true answer; what stops being
+true is calling all of it work written since, because the other side's commits read as deletions and
+a reader told only "new since round three" would take that for progress. Hence a note and not a
+refusal, in those words.
 
 `empo review --whole` is the way out, and reads the entire diff against the base as every round
 before the log existed did. The brief states which of the two subjects it has in either case, in
@@ -579,10 +589,14 @@ and say so out loud, because a review that quietly re-read everything and one th
 third of it are otherwise the same brief.
 
 `empo review --reset` forgets every gated round on this branch, deleting the branch's directory and
-printing what it threw away — the rounds, and the commit each was reviewed at. It is the clean start
-there was no command for until now: a branch whose history has been rewritten under it, or a review
-whose narrowing has drifted somewhere a reader no longer trusts, gets to begin again at round one
-rather than living with a log nobody believes, and the print is there because deleting history
+printing what it threw away — the rounds, and the commit each was reviewed at. Given a pull request
+id it resets the branch that pull request was gated on rather than the one that happens to be checked
+out, which is the only correct reading of the request: reviewing a pull request never checks it out,
+so the checked-out branch is a different loop wearing the same command. The branch comes off the log
+itself, where every round records the id it belonged to, so no forge call is spent asking a question
+the log already answers. It is the clean start there was no command for until now: a branch whose
+history has been rewritten under it, or a review whose narrowing has drifted somewhere a reader no
+longer trusts, gets to begin again at round one rather than living with a log nobody believes, and the print is there because deleting history
 silently is the one thing a command about forgetting must not do.
 
 **The brief also prints every dispatch a changed file makes from inside a loop**, under the heading
@@ -828,7 +842,7 @@ verified findings to the PR, off by default, and unavailable on an `mcp` forge, 
 `--post` is a config error, and nothing else in a review writes anything), `--json`, `--no-workflow`
 (leave the discipline out of the brief, for a reader who already has it), `--whole` (read the entire
 diff against the base instead of narrowing to what has changed since the last gated round),
-`--reset` (forget every gated round on this branch and print what was thrown away), and
+`--reset` (forget every gated round on the branch under review and print what was thrown away), and
 `--repo <path>`.
 
 ## `empo update`

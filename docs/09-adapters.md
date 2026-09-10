@@ -473,39 +473,62 @@ worktree before it begins, so a crashed review costs a stale temp directory and 
 worktree in the human's checkout.
 
 One tree outlives those directories, and it does not live beside them. It is the round log, and its
-shape is a path rather than a file: `<base>/empo-review/rounds/<repo-slug>-<repo-hash>/<branch-slug>-<branch-hash>/001.json`,
-then `002.json`, one file per gated round, appended and never rewritten. Each of them holds the round
-number, the commit that round was read at, the timestamp, and the findings that round got through the
-gate. That last field is the whole reason this is a log and not a number on disk: a counter can say
-this is round five, and only a log can say what round two found and whether the fix for it is the
-thing round five is now looking at.
+shape is a path rather than a file: under a root chosen at runtime, one directory per repository and
+one per branch inside it — `<repo-slug>-<repo-hash>/<branch-slug>-<branch-hash>/` — and inside that
+`001.json`, `002.json`, one file per gated round, appended and never rewritten. Each of them holds
+the round number, the commit that round was read at, the timestamp, the id of the review it belonged
+to (a pull request id, or `local`), the branch spelled out rather than only hashed into the path, and
+the findings that round got through the gate. The findings are the whole reason this is a log and not
+a number on disk: a counter can say this is round five, and only a log can say what round two found
+and whether the fix for it is the thing round five is now looking at. The id and the branch are what
+let `empo review 412 --reset` find the branch that pull request was gated on instead of whichever
+branch happens to be checked out, since reviewing a pull request never checks it out and the log
+already knows the answer a forge call would have gone to fetch.
 
-`<base>` is `process.env.XDG_RUNTIME_DIR` where the environment sets it and `os.tmpdir()` otherwise.
-Both are the same idea reached by two routes: on Linux `XDG_RUNTIME_DIR` is per user, created mode
-0700 and emptied when the session ends, and on macOS `os.tmpdir()` is already the private
-`/var/folders/...` directory the OS hands each user. What that buys is the periodic sweeping of a
-temp directory without the world-writable `/tmp` underneath it, and the distinction matters because
-this path is predictable: a predictable name in a directory anyone can write is a name somebody can
-plant a symlink at ahead of time, and then the review writes its findings into a file of the
-attacker's choosing, or forges the commit a narrowed round is told it may skip past (CWE-59). The
-code does not lean on the directory alone either. The tree is created mode 0700, one `lstat` on the
-leaf directory checks that it is a real directory, not a symlink, and owned by the current user, and
-every round file is written with `flag: "wx"` — `O_EXCL` refuses to follow a symlink, and an
-append-only log has nothing to overwrite in the first place.
+Where the root is depends on what the machine can offer, and the test is applied rather than assumed:
+`XDG_RUNTIME_DIR` where it is set and private, else the OS temp directory where that is private, else
+`~/.empo/rounds`. Private means one thing and it is checked at that moment — a real directory, no
+group or other bits in its mode, owned by the current user. On Linux `XDG_RUNTIME_DIR` is exactly
+that by definition; on macOS `os.tmpdir()` is already the per-user `/var/folders/...` the OS hands
+out, so the ordinary case on both is a swept temp directory, which is what a round log wants: history
+that expires on its own. The third branch is the Linux box with no `XDG_RUNTIME_DIR`, where
+`os.tmpdir()` is the shared `/tmp`, and there the log goes under the home directory, which nobody
+else can write and so nobody else can plant a path in.
+
+That fallback exists because the obvious hardening does not work, and it is worth saying why rather
+than leaving a reader to assume the checks cover it. This path is derived and not random, so in a
+world-writable directory somebody can plant a symlink at it before EmPo ever runs. Checking for that
+loses: `mkdirSync` with `recursive` follows a symlink standing in for any intermediate component
+(`empo-review`, `rounds`), and an `lstat` of the leaf then passes precisely because the leaf is the
+directory just created under their parent, so the write lands wherever the planted link points. A
+per-component walk loses too, on the race between the check and the use, which is seconds wide; Node
+exposes no `openat` to pin a directory and work relative to the handle, so there is no version of
+this that is won inside the directory. Hence the decision one level up: a root that is not private is
+not used. What `O_EXCL` on each round file still buys is real and partial, and it is only ever
+claimed as that — every round is written with `flag: "wx"`, which refuses to follow a symlink on the
+file itself and refuses to overwrite, so nobody swaps a round out from under a log that only ever
+appends. It protects the last component of the path and says nothing about the path leading there.
 
 Repository and branch are both in the path because neither identifies a round on its own. Branch
-names are not unique across checkouts, and two checkouts of one repository must not read each other's
-rounds or, worse, gate against each other's commits. The readable slug is in each name so a human
-can find the directory a brief just named, and the hash behind it is what keeps `feat/x` and `feat-x`
-from landing in the same directory after slugging has flattened the difference away.
+names are not unique across checkouts, and two clones of one repository are two working trees at two
+different commits that must not read each other's rounds. The readable slug is in each name so a
+human can find the directory a brief just named, and the digest behind it is what keeps `feat/x` and
+`feat-x` from landing in the same directory once slugging has flattened the difference away. The next
+round's number is taken from the file names and never from the records inside them, so a file that
+will not parse still occupies its number: a round that recomputed the same number would collide with
+it under `wx` on this run and on every run after it, and one unreadable file would block the log for
+good.
 
 The log is outside a session directory because a session is torn down at the end of every gate, and
 the rounds are the one thing that has to survive that in order for the next round to say anything.
 It is not in `.empo/generated/` either, for the reason everything else here is not: that directory is
-machine-owned by `empo index` alone, and a review disturbs nothing in the checkout it reads. And the
-honest cost is that a temp sweep or a logout takes the history with it. A branch whose log has gone
-is a branch nobody has gated as far as EmPo can tell, so the next round reads the whole diff — and
-says out loud in the brief that it did, rather than presenting a full re-read as a narrowed one.
+machine-owned by `empo index` alone, and a review disturbs nothing in the checkout it reads. The
+honest cost differs per branch of that choice. In the two temp cases a sweep or a logout takes the
+history with it, which is cheap on purpose — a branch whose log has gone is a branch nobody has gated
+as far as EmPo can tell, so the next round reads the whole diff and says out loud in the brief that
+it did, rather than presenting a full re-read as a narrowed one. In the home-directory case nothing
+sweeps at all, the log keeps growing until somebody clears it, and `empo review --reset` is the only
+broom there is.
 
 A payload therefore lives exactly as long as the review that asked for it. Rerunning a command that
 worked once finds its own `--pr-payload` path gone, which is why the request block treats a
