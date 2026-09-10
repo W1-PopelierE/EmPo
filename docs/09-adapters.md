@@ -472,15 +472,17 @@ printed the survivors, and starting a new review of the same id clears the previ
 worktree before it begins, so a crashed review costs a stale temp directory and never a dangling
 worktree in the human's checkout.
 
-One file beside those directories outlives them: `<tmp>/empo-review/watermark-<hash>.json`, keyed by
-the same digest of the canonical root, holding one entry per branch with the commit its last gated
-round was reviewed at, the timestamp and the round count. It sits beside the session directories
-rather than inside one because a session is torn down at the end of every gate, and the watermark is
-the one thing that has to survive that in order to say anything about the next round. It is not in
-`.empo/generated/` for the reason everything else here is not: that directory is machine-owned by
-`empo index` alone, and a review disturbs nothing in the checkout it reads. The cost is real and is
-stated rather than hidden — a temp sweep loses the watermark, and `empo review --since` then reports
-a full review out loud instead of pretending it narrowed one.
+One file outlives those directories, and it does not live beside them: `~/.empo/watermark-<hash>.json`,
+keyed by the same digest of the canonical root, holding one entry per branch with the commit its last
+gated round was reviewed at, the timestamp and the round count. Outside a session directory because a
+session is torn down at the end of every gate, and the watermark is the one thing that has to survive
+that in order to say anything about the next round. Outside the temp directory the scratch uses
+because `/tmp` is world-writable and this path is predictable: a symlink planted there ahead of time
+would hand the write to a file of the attacker's choosing, or forge the commit `--since` is told it
+can skip. Not in `.empo/generated/` either, for the reason everything else here is not: that directory
+is machine-owned by `empo index` alone, and a review disturbs nothing in the checkout it reads. A lost
+watermark stays cheap — `empo review --since` reports a full review out loud instead of pretending it
+narrowed one.
 
 A payload therefore lives exactly as long as the review that asked for it. Rerunning a command that
 worked once finds its own `--pr-payload` path gone, which is why the request block treats a

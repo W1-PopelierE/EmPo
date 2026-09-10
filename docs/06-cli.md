@@ -550,8 +550,8 @@ against a pull request nobody had named.
 **Rounds, and `--since`.** A branch is usually reviewed more than once, and nothing recorded that:
 every round diffed against the base again, so eleven rounds over one branch re-read the same seven
 hundred lines eleven times while each round had changed a few dozen. Phase 2 now records what it
-gated — the commit, the time and the round count, per branch, in the temp directory beside the
-review scratch ([09-adapters](09-adapters.md)) and never in the repository. The brief prints that
+gated — the commit phase 1 read, the time and the round count, per branch, in the user's own
+`~/.empo/` ([09-adapters](09-adapters.md)) and never in the repository. The brief prints that
 back as one line under `branch`, `round 3 against this branch, last reviewed at 56abad4, 17 lines
 changed since`, which is the loop being visible to the person inside it; a branch nobody has gated
 has no such line.

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 /**
@@ -11,11 +11,12 @@ import { dirname, join, resolve } from "node:path";
  * against the base again. Eleven rounds over one branch re-read the same seven hundred lines
  * eleven times while each round had changed a few dozen.
  *
- * It lives beside the review scratch in the OS temp directory and never inside the repository.
- * `.empo/generated/` is machine-owned by `empo index` alone (docs/02-on-disk-layout.md) and a
- * review disturbs nothing in the checkout it reads (docs/07-review-discipline.md invariant 2), so a
- * file this command writes belongs on neither. The cost is honest and worth naming: a temp sweep
- * loses the watermark, and `--since` then reports a full review rather than pretending otherwise.
+ * It lives in the user's own `~/.empo/` and never inside the repository. `.empo/generated/` is
+ * machine-owned by `empo index` alone (docs/02-on-disk-layout.md) and a review disturbs nothing in
+ * the checkout it reads (docs/07-review-discipline.md invariant 2), so a file this command writes
+ * belongs on neither. Not the temp directory either, which is where the review scratch goes: `/tmp`
+ * is world-writable, and a path anyone can predict is a path anyone can plant a symlink at, which
+ * would hand this write to a file of their choosing or let them forge what `--since` skips.
  *
  * Per branch and not per repository, because two branches under review at once are two loops, and a
  * shared entry would tell the second one it had already read the first one's work.
@@ -48,7 +49,7 @@ export function canonicalRoot(repoRoot: string): string {
 
 export function watermarkPath(repoRoot: string): string {
   const digest = createHash("sha256").update(canonicalRoot(repoRoot)).digest("hex").slice(0, 8);
-  return join(tmpdir(), "empo-review", `watermark-${digest}.json`);
+  return join(homedir(), ".empo", `watermark-${digest}.json`);
 }
 
 /** What this branch was last reviewed at, or null where no round has been gated against it. */
@@ -68,7 +69,7 @@ export function recordReview(repoRoot: string, branch: string | null, sha: strin
   const round = (file.branches[branch]?.round ?? 0) + 1;
   file.branches[branch] = { sha, at: new Date().toISOString(), round };
   const path = watermarkPath(repoRoot);
-  mkdirSync(dirname(path), { recursive: true });
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
 }
 
