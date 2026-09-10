@@ -236,7 +236,9 @@ export function buildProgram(): Command {
     .command("web")
     .description("Serve a local viewer for the review in progress")
     .option("--repo <path>", "repository root", process.cwd())
-    .option("--port <number>", "port to bind on 127.0.0.1", Number.parseInt)
+    // Commander calls a coercion as `fn(value, previous)`, and `Number.parseInt` would read that
+    // second argument as a radix: a repeated `--port` parsed the second value in base 7373.
+    .option("--port <number>", "port to bind on 127.0.0.1", (value) => Number.parseInt(value, 10))
     .action(async (options: { repo: string; port?: number }) => {
       await webCommand(options.repo, { port: options.port });
     });
