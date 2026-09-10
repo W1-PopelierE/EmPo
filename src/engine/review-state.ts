@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
 import type { ReviewFinding } from "../discipline/findings";
 import { parseFindingsFile } from "../schema/findings.schema";
 import { type ChangedFile, type ChangeStatus, parseDiff } from "./diff";
@@ -51,6 +51,14 @@ export interface SnapshotFinding {
   survived: boolean | null;
 }
 
+/** One live review a viewer can switch to. */
+export interface SessionChoice {
+  /** The session directory's basename. Stable while the review lives; this is what `?session=` names. */
+  key: string;
+  /** What the switcher shows, e.g. "local  main -> feat/x" or "#1234  main -> pr-1234". */
+  label: string;
+}
+
 export interface Snapshot {
   phase: Phase;
   session: ReviewSession | null;
@@ -60,7 +68,10 @@ export interface Snapshot {
   readOutsideDiff: string[];
   findings: SnapshotFinding[];
   activity: ActivityLine[];
-  liveSessions: number;
+  /** Every live session, newest first. */
+  sessions: SessionChoice[];
+  /** The key this snapshot is about, which is not always the key that was asked for. */
+  selected: string | null;
   note: string | null;
 }
 
@@ -74,24 +85,38 @@ export function emptySnapshot(): Snapshot {
     readOutsideDiff: [],
     findings: [],
     activity: [],
-    liveSessions: 0,
+    sessions: [],
+    selected: null,
     note: null,
   };
 }
 
-export function readReviewState(repoRoot: string, previous: Snapshot): Snapshot {
+/**
+ * `selected` is a key out of `sessions`. When it names a live session directory that one is shown;
+ * anything else — a key that was never valid, or one whose review was torn down between the click
+ * and the poll — falls back to the newest, which is what a viewer with no choice at all gets.
+ */
+export function readReviewState(
+  repoRoot: string,
+  previous: Snapshot,
+  selected?: string | null,
+): Snapshot {
   const dirs = sessionDirs(repoRoot);
   if (dirs.length === 0) return afterTeardown(repoRoot, previous);
 
-  const found = newestSession(dirs);
-  if (found === null) return { ...emptySnapshot(), liveSessions: dirs.length };
+  const live = liveSessions(dirs);
+  const sessions = live.map((one) => ({ key: one.key, label: label(one.session) }));
+  const found = live.find((one) => one.key === selected) ?? live[0];
+  if (found === undefined) return { ...emptySnapshot(), sessions, selected: null };
   const { session, startedAt } = found;
 
   const changed = readDiff(session);
-  const activity = readActivity(repoRoot, startedAt).map((one) => ({
-    ...one,
-    path: repoRelative(one.path, session.readRoot, repoRoot),
-  }));
+  const activity = readActivity(repoRoot, startedAt)
+    .filter((one) => belongsHere(one.path, found, live))
+    .map((one) => ({
+      ...one,
+      path: repoRelative(one.path, session.readRoot, repoRoot),
+    }));
   const opened = new Set(activity.map((one) => one.path));
   const inDiff = new Set(changed.map((one) => one.path));
 
@@ -121,8 +146,9 @@ export function readReviewState(repoRoot: string, previous: Snapshot): Snapshot 
     readOutsideDiff: [...opened].filter((path) => !inDiff.has(path)).sort(),
     findings,
     activity,
-    liveSessions: dirs.length,
-    note: dirs.length > 1 ? `${dirs.length} sessions active; showing the newest` : null,
+    sessions,
+    selected: found.key,
+    note: null,
   };
 }
 
@@ -213,12 +239,20 @@ function newestRound(
   return Date.parse(newest.at) >= startedAt ? newest : null;
 }
 
+interface LiveSession {
+  key: string;
+  session: ReviewSession;
+  startedAt: number;
+}
+
 /**
- * The session the viewer follows when more than one is live, paired with when it started.
- * `sessionDirs` already sorts newest first by mtime, so this only has to skip a directory whose
- * `session.json` lost a race with teardown or was never finished — reading is best-effort here, the
- * way every source in this module is, rather than a reason to show nothing while a second review is
- * mid-write.
+ * Every session a viewer can switch to, paired with when each started. `sessionDirs` already sorts
+ * newest first by mtime, so this only has to skip a directory whose `session.json` lost a race with
+ * teardown or was never finished — reading is best-effort here, the way every source in this module
+ * is, rather than a reason to show nothing while a second review is mid-write.
+ *
+ * The key is the directory's basename and not the session id: two reviews of the same repository can
+ * both be "local", while the directory name carries the repository hash and stays unique.
  *
  * Read directly off each directory rather than through `readSession` (which takes an id and
  * recomputes the same path) — `sessionDirs` already did the lookup, and the id on disk inside
@@ -230,7 +264,8 @@ function newestRound(
  * `readActivity` filters against, so the repo-wide activity log — one file shared by every review
  * this repository ever runs — does not leak a previous, unrelated review's reads into this one.
  */
-function newestSession(dirs: string[]): { session: ReviewSession; startedAt: number } | null {
+function liveSessions(dirs: string[]): LiveSession[] {
+  const live: LiveSession[] = [];
   for (const dir of dirs) {
     try {
       const file = join(dir, "session.json");
@@ -239,12 +274,53 @@ function newestSession(dirs: string[]): { session: ReviewSession; startedAt: num
       // Floored: the filesystem's mtime can carry sub-millisecond precision `Date.parse` never
       // does (nanoseconds rounded to a fraction of a millisecond), so an activity line logged in
       // the same millisecond session.json was written can otherwise compare as slightly earlier.
-      return { session, startedAt: Math.floor(statSync(file).mtimeMs) };
+      live.push({ key: basename(dir), session, startedAt: Math.floor(statSync(file).mtimeMs) });
     } catch {
       // Try the next directory; a half-written session.json is normal mid-write, not a failure.
     }
   }
-  return null;
+  return live;
+}
+
+/** What the switcher shows: which review it is, and what it is reviewing against what. */
+function label(session: ReviewSession): string {
+  const which = session.id === "local" ? "local" : `#${session.id}`;
+  return `${which}  ${session.base} -> ${session.sourceBranch ?? "detached"}`;
+}
+
+/**
+ * Whether an activity line was this session's read. The log is one file per repository and the hook
+ * that appends to it knows nothing about sessions, so time alone cannot separate two reviews running
+ * at once: a PR review reading its worktree would mark the local review's files as opened and drag
+ * its phase from "brief" to "reading".
+ *
+ * A line belongs to the session whose read root claims it deepest. That separates a PR review (a
+ * detached worktree under the temp directory) from a local one (the checkout), and two PR reviews
+ * from each other. Two LOCAL reviews of one checkout it cannot separate — they read literally the
+ * same files — so both claim equally deep and both keep the line. Unclaimed and relative paths stay
+ * too: an attribution nobody can make is more use visible than discarded.
+ */
+function belongsHere(path: string, here: LiveSession, live: LiveSession[]): boolean {
+  if (!isAbsolute(path)) return true;
+  const mine = claimDepth(path, here.session.readRoot);
+  const deepest = Math.max(...live.map((one) => claimDepth(path, one.session.readRoot)));
+  return deepest < 0 || mine === deepest;
+}
+
+/**
+ * How deep a read root contains a path, as the length of the root that matched, or -1 for none.
+ * The realpath pass is `repoRelative`'s, for the same reason: on macOS the temp root arrives as a
+ * symlink and the file below it does not, so a raw comparison misses the worktree entirely.
+ */
+function claimDepth(path: string, readRoot: string): number {
+  let deepest = -1;
+  for (const root of [readRoot, realRoot(readRoot)]) {
+    if (root === null) continue;
+    const rel = relative(root, path);
+    if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) continue;
+    deepest = Math.max(deepest, root.length);
+  }
+  return deepest;
 }
 
 /** The session's diff, or no files at all when phase 1 has not finished writing it yet. */
@@ -339,7 +415,13 @@ function realRoot(root: string): string | null {
  */
 function afterTeardown(repoRoot: string, previous: Snapshot): Snapshot {
   if (previous.session === null) return emptySnapshot();
-  const frozen: Snapshot = { ...previous, note: "session finished; showing its last state" };
+  // No directory survives, so nothing is live to switch to; `selected` stays, since it still says
+  // which review this frozen picture is of.
+  const frozen: Snapshot = {
+    ...previous,
+    sessions: [],
+    note: "session finished; showing its last state",
+  };
   if (previous.round !== null) return { ...frozen, phase: "gated" };
 
   // Matched on the tree phase 1 read, not on time: that is exactly what the gate writes down about

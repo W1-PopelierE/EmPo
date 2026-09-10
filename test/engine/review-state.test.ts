@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { emptySnapshot, readReviewState } from "../../src/engine/review-state";
 import { recordRound } from "../../src/engine/rounds";
@@ -45,13 +45,23 @@ function repo(): string {
 }
 
 /** A session on disk exactly as phase 1 leaves it. */
-function startReview(root: string): string {
-  const dir = sessionDir(root, "local");
+function startReview(root: string, id = "local"): string {
+  const dir = sessionDir(root, id);
   mkdirSync(dir, { recursive: true });
   temps.push(dir);
-  writeFileSync(join(dir, "pr-local.diff"), DIFF, "utf8");
-  writeSession(dir, root);
+  writeFileSync(join(dir, `pr-${id}.diff`), DIFF, "utf8");
+  writeSession(dir, root, { id, diffPath: join(dir, `pr-${id}.diff`) });
   return dir;
+}
+
+/**
+ * Makes a session look older than the one beside it. `sessionDirs` sorts on the directory's mtime,
+ * and two sessions a test creates land in the same millisecond, so "newest" would otherwise be
+ * whichever order readdir happened to return. Call it last: writing anything inside the directory
+ * afterwards stamps the mtime back to now.
+ */
+function backdate(dir: string, ms: number): void {
+  utimesSync(dir, new Date(), new Date(Date.now() - ms));
 }
 
 /** The session file phase 1 leaves, with whichever field a test needs to say differently. */
@@ -221,6 +231,118 @@ describe("on a pull request, whose read root is a worktree outside the repositor
     const state = readReviewState(root, emptySnapshot());
 
     expect(state.readOutsideDiff).toEqual(["/etc/hosts"]);
+  });
+});
+
+// The activity log is one file per repository, so a second review running at the same time writes
+// into it too. Filtering on time alone let those lines through: a PR review reading its worktree
+// made the local review next to it look like it had opened files it never touched, and dragged its
+// phase from "brief" to "reading". A line belongs to the session whose read root claims it deepest.
+describe("with a second review live in the same repository", () => {
+  /** A PR session, which reads out of its own detached worktree rather than the checkout. */
+  function startPrReview(root: string, id: string): { dir: string; readRoot: string } {
+    const dir = startReview(root, id);
+    const readRoot = join(dir, "worktree");
+    mkdirSync(readRoot, { recursive: true });
+    writeSession(dir, root, {
+      id,
+      readRoot,
+      worktree: readRoot,
+      diffPath: join(dir, `pr-${id}.diff`),
+    });
+    return { dir, readRoot };
+  }
+
+  test("drops a read that happened inside the other session's read root", () => {
+    const root = repo();
+    const local = startReview(root);
+    const { readRoot } = startPrReview(root, "1234");
+    backdate(local, 60_000);
+    log(root, [
+      { tool: "Read", path: join(readRoot, "src/a.ts") },
+      { tool: "Read", path: join(readRoot, "src/elsewhere.ts") },
+    ]);
+
+    const state = readReviewState(root, emptySnapshot(), basename(local));
+
+    expect(state.session?.id).toBe("local");
+    expect(state.activity).toEqual([]);
+    expect(state.readOutsideDiff).toEqual([]);
+    expect(state.files.every((one) => one.read)).toBe(false);
+    expect(state.phase).toBe("brief");
+  });
+
+  test("keeps a read that happened inside its own read root", () => {
+    const root = repo();
+    const local = startReview(root);
+    const { dir, readRoot } = startPrReview(root, "1234");
+    backdate(local, 60_000);
+    log(root, [{ tool: "Read", path: join(readRoot, "src/a.ts") }]);
+
+    const state = readReviewState(root, emptySnapshot(), basename(dir));
+
+    expect(state.session?.id).toBe("1234");
+    expect(state.activity.map((one) => one.path)).toEqual(["src/a.ts"]);
+    expect(state.files.find((one) => one.path === "src/a.ts")?.read).toBe(true);
+  });
+
+  test("keeps a path no read root claims rather than dropping it", () => {
+    const root = repo();
+    const local = startReview(root);
+    startPrReview(root, "1234");
+    backdate(local, 60_000);
+    log(root, [{ tool: "Read", path: "/etc/hosts" }]);
+
+    const state = readReviewState(root, emptySnapshot(), basename(local));
+
+    expect(state.readOutsideDiff).toEqual(["/etc/hosts"]);
+  });
+
+  // Two local reviews of one checkout read literally the same files, so nothing on disk can say
+  // which of them opened one. Showing the line to both is the documented behaviour, not a bug:
+  // an undecidable attribution is more useful visible in two places than thrown away.
+  test("shows a line to both sessions when they share a read root", () => {
+    const root = repo();
+    const first = startReview(root, "local");
+    const second = startReview(root, "local-2");
+    backdate(first, 60_000);
+    log(root, [{ tool: "Read", path: join(root, "src/a.ts") }]);
+
+    for (const key of [basename(first), basename(second)]) {
+      const state = readReviewState(root, emptySnapshot(), key);
+      expect(state.activity.map((one) => one.path)).toEqual(["src/a.ts"]);
+      expect(state.files.find((one) => one.path === "src/a.ts")?.read).toBe(true);
+    }
+  });
+
+  test("follows the selected session, and falls back to the newest for a key nobody has", () => {
+    const root = repo();
+    const local = startReview(root);
+    startPrReview(root, "1234");
+    backdate(local, 60_000);
+
+    expect(readReviewState(root, emptySnapshot(), basename(local)).session?.id).toBe("local");
+    expect(readReviewState(root, emptySnapshot(), "swept-away").session?.id).toBe("1234");
+    expect(readReviewState(root, emptySnapshot(), null).session?.id).toBe("1234");
+    expect(readReviewState(root, emptySnapshot()).session?.id).toBe("1234");
+  });
+
+  test("offers every live session newest first, named so a human can tell them apart", () => {
+    const root = repo();
+    const local = startReview(root);
+    const { dir } = startPrReview(root, "1234");
+    backdate(local, 60_000);
+
+    const state = readReviewState(root, emptySnapshot());
+
+    expect(state.sessions.map((one) => one.key)).toEqual([basename(dir), basename(local)]);
+    expect(state.sessions.map((one) => one.label)).toEqual([
+      "#1234  main -> feat/x",
+      "local  main -> feat/x",
+    ]);
+    expect(state.selected).toBe(basename(dir));
+    // The chooser shows what is live now, so the note that used to count sessions is gone.
+    expect(state.note).toBeNull();
   });
 });
 

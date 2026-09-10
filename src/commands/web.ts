@@ -19,16 +19,32 @@ export interface WebOptions {
 }
 
 export function createViewer(repoRoot: string): { server: Server; stop(): void } {
-  let snapshot = emptySnapshot();
-  const clients = new Set<ServerResponse>();
+  // One snapshot per selected session key, "" meaning "no choice, follow the newest". A single
+  // shared copy would not do: `previous` is what carries a torn-down review's last state forward,
+  // so session A would inherit B's frozen picture, and the timer's change test would compare A's
+  // fresh read against whatever B last broadcast and fire on every tick.
+  //
+  // ponytail: never pruned. A key is a session directory basename, so the map holds one snapshot
+  // per review the reader ever looked at in this viewer's lifetime — a handful. Drop keys nobody
+  // holds if a viewer ever outlives hundreds of reviews.
+  const snapshots = new Map<string, Snapshot>();
+  const snapshotFor = (key: string): Snapshot => snapshots.get(key) ?? emptySnapshot();
+  // Which session each stream asked for; the key decides who a frame goes to.
+  const clients = new Map<ServerResponse, string>();
 
   // ponytail: polling, not fs.watch. fs.watch on macOS misses subdirectories created after the
   // watch and duplicates events; five stats per tick is cheaper than working around that.
   const timer = setInterval(() => {
-    const next = readReviewState(repoRoot, snapshot);
-    if (JSON.stringify(next) === JSON.stringify(snapshot)) return;
-    snapshot = next;
-    for (const client of clients) client.write(`data: ${JSON.stringify(snapshot)}\n\n`);
+    // Only the keys somebody is actually watching, plus "" for the next stream that arrives
+    // without one: a key nobody holds would otherwise cost a full state read every tick forever.
+    for (const key of new Set(["", ...clients.values()])) {
+      const previous = snapshotFor(key);
+      const next = readReviewState(repoRoot, previous, key === "" ? null : key);
+      if (JSON.stringify(next) === JSON.stringify(previous)) continue;
+      snapshots.set(key, next);
+      const frame = `data: ${JSON.stringify(next)}\n\n`;
+      for (const [client, watching] of clients) if (watching === key) client.write(frame);
+    }
   }, POLL_MS);
   timer.unref();
 
@@ -48,17 +64,23 @@ export function createViewer(repoRoot: string): { server: Server; stop(): void }
       return send(response, 403, "text/plain", "Bad host");
     }
 
+    // The page is static; `?session=` on it is for the page's own script to read back out of the
+    // location, which is why the query never reaches here as anything but part of the URL.
     if (url.pathname === "/") return send(response, 200, "text/html; charset=utf-8", page());
 
-    // Read fresh, and left there: advancing `snapshot` from here would make the timer compare its
-    // next poll against a state it never broadcast, so one request would swallow the frame every
-    // SSE client was owed. The timer keeps `snapshot` current on its own.
+    // A key naming no live session falls back to the newest inside `readReviewState`, so a tab
+    // left open across a teardown keeps showing something rather than blanking.
+    const key = url.searchParams.get("session") ?? "";
+
+    // Read fresh, and left there: storing it under `key` from here would make the timer compare
+    // its next poll against a state it never broadcast, so one request would swallow the frame
+    // every SSE client on that key was owed. The timer keeps each key current on its own.
     if (url.pathname === "/api/state") {
-      const state = readReviewState(repoRoot, snapshot);
+      const state = readReviewState(repoRoot, snapshotFor(key), key === "" ? null : key);
       return send(response, 200, "application/json", JSON.stringify(state));
     }
 
-    if (url.pathname === "/events") return stream(response, clients, snapshot);
+    if (url.pathname === "/events") return stream(response, clients, key, snapshotFor(key));
 
     return send(response, 404, "text/plain", "Not found");
   });
@@ -67,7 +89,7 @@ export function createViewer(repoRoot: string): { server: Server; stop(): void }
     server,
     stop() {
       clearInterval(timer);
-      for (const client of clients) client.end();
+      for (const client of clients.keys()) client.end();
       clients.clear();
       server.close();
     },
@@ -148,15 +170,24 @@ function listen(server: Server, port: number): Promise<boolean> {
   });
 }
 
-/** One server-sent-events client: the current state at once, then every change until it leaves. */
-function stream(response: ServerResponse, clients: Set<ServerResponse>, snapshot: Snapshot): void {
+/**
+ * One server-sent-events client: the current state at once, then every change to the session it
+ * named until it leaves. The first frame is the timer's copy for that key, which is empty when
+ * nobody was watching it yet — the next tick corrects it, exactly as it always has for the newest.
+ */
+function stream(
+  response: ServerResponse,
+  clients: Map<ServerResponse, string>,
+  key: string,
+  snapshot: Snapshot,
+): void {
   response.writeHead(200, {
     "content-type": "text/event-stream",
     "cache-control": "no-cache",
     connection: "keep-alive",
   });
   response.write(`data: ${JSON.stringify(snapshot)}\n\n`);
-  clients.add(response);
+  clients.set(response, key);
   response.on("close", () => clients.delete(response));
 }
 

@@ -71,6 +71,12 @@ li { padding:2px 0; }
 .finding .t { font-weight:600; }
 .finding p { margin:4px 0 0; white-space:pre-wrap; }
 .tag { font-size:11px; border:1px solid var(--line); border-radius:3px; padding:0 5px; color:var(--dim); }
+/* One button per live review. Hidden entirely when there is only one, so the common case is the
+   header it was before. */
+#sessions { display:flex; gap:6px; }
+#sessions button { font:inherit; font-size:11px; background:none; color:var(--dim); border:1px solid var(--line);
+  border-radius:3px; padding:0 6px; cursor:pointer; }
+#sessions button[aria-current="true"] { color:var(--fg); border-color:var(--mark); }
 .activity li { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .empty { color:var(--dim); }
 </style>
@@ -78,6 +84,7 @@ li { padding:2px 0; }
 <body>
 <header>
   <b>empo web</b>
+  <span id="sessions"></span>
   <span id="phase" class="tag">idle</span>
   <span id="where" class="dim"></span>
   <span id="note" class="dim"></span>
@@ -109,6 +116,10 @@ const highlight = ${highlight};
 
 let snapshot = null;
 let selected = null;
+// Which review this window follows. It lives in the URL, so a reader running three reviews can keep
+// three tabs open and each one comes back to the same review after a reload.
+let session = new URLSearchParams(location.search).get("session") || "";
+const query = () => (session === "" ? "" : "?session=" + encodeURIComponent(session));
 
 function render(next) {
   snapshot = next;
@@ -126,6 +137,7 @@ function render(next) {
       + (snapshot.round !== null ? "  round " + snapshot.round : "")
     : "no review running";
   el("note").textContent = snapshot.note || "";
+  renderSessions();
 
   el("files").innerHTML = files.length === 0
     ? '<li class="empty">nothing yet</li>'
@@ -145,6 +157,27 @@ function render(next) {
 
   renderDiff(files);
   renderFindings();
+}
+
+// The server decides which review an unknown or empty key resolves to, so the button that matches
+// snapshot.selected is the current one — never the one this page asked for.
+function renderSessions() {
+  const sessions = snapshot.sessions || [];
+  el("sessions").innerHTML = sessions.length < 2
+    ? ""
+    : sessions.map((one) => '<button data-key="' + esc(one.key) + '" aria-current="'
+        + (one.key === snapshot.selected) + '">' + esc(one.label) + "</button>").join("");
+  for (const button of document.querySelectorAll("#sessions button")) {
+    button.onclick = () => {
+      session = button.dataset.key;
+      // Replace, not push: the back button should leave the viewer, not walk back through which
+      // review was looked at when.
+      history.replaceState(null, "", location.pathname + query());
+      selected = null;
+      drawn = null;
+      reconnect();
+    };
+  }
 }
 
 function fileRow(file) {
@@ -255,7 +288,7 @@ function poll() {
   status("polling");
   // A failed poll is silent otherwise, and a page that says "polling" over a server that died an
   // hour ago is telling the reader the review is quiet when it is actually gone.
-  const tick = () => fetch("/api/state")
+  const tick = () => fetch("/api/state" + query())
     .then((r) => r.json())
     .then((state) => { failures = 0; status("polling"); render(state); })
     .catch(() => { failures += 1; if (failures > 1) status("offline"); });
@@ -263,8 +296,18 @@ function poll() {
   polling = setInterval(tick, 2000);
 }
 
+let source = null;
+
+// Switching review means a new stream: the server picks the session per connection, so the old one
+// would keep pushing the review the reader just left.
+function reconnect() {
+  if (source !== null) { source.close(); source = null; }
+  connect();
+}
+
 function connect() {
-  const source = new EventSource("/events");
+  source = new EventSource("/events" + query());
+  const mine = source;
   source.onopen = () => {
     if (polling !== null) { clearInterval(polling); polling = null; }
     failures = 0;
@@ -279,7 +322,14 @@ function connect() {
       status("bad frame");
     }
   };
-  source.onerror = () => { source.close(); poll(); setTimeout(connect, 5000); };
+  // Guarded on mine: a stream the reader replaced by switching review still fires its error when
+  // it closes, and an unguarded handler would reconnect it and start a second live stream.
+  source.onerror = () => {
+    mine.close();
+    if (source !== mine) return;
+    poll();
+    setTimeout(connect, 5000);
+  };
 }
 
 connect();
