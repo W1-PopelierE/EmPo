@@ -1,7 +1,10 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import type { ReviewFinding } from "../discipline/findings";
+import { parseFindingsFile } from "../schema/findings.schema";
 import { type ChangedFile, type ChangeStatus, parseDiff } from "./diff";
-import { activityPath, type ReviewSession, sessionDirs } from "./session";
+import { type RoundRecord, readRounds } from "./rounds";
+import { activityPath, type ReviewSession, sessionDir, sessionDirs } from "./session";
 
 /**
  * The review as a viewer can see it, derived and never reported. Every phase here is inferred from
@@ -91,25 +94,124 @@ export function readReviewState(repoRoot: string, previous: Snapshot): Snapshot 
   const opened = new Set(activity.map((one) => one.path));
   const inDiff = new Set(changed.map((one) => one.path));
 
+  const { findings, round } = readFindings(repoRoot, session, startedAt);
+  const findingCounts = new Map<string, number>();
+  for (const finding of findings) {
+    findingCounts.set(finding.file, (findingCounts.get(finding.file) ?? 0) + 1);
+  }
+
+  let phase: Phase = activity.length === 0 ? "brief" : "reading";
+  if (findings.length > 0) phase = "findings";
+  if (round !== null) phase = "gated";
+
   return {
-    phase: activity.length === 0 ? "brief" : "reading",
+    phase,
     session,
-    round: null,
+    round: round?.round ?? null,
     files: changed.map((file) => ({
       path: file.path,
       status: file.status,
       addedCount: file.addedCount,
       removedCount: file.removedCount,
-      findingCount: 0,
+      findingCount: findingCounts.get(file.path) ?? 0,
       read: opened.has(file.path),
     })),
     hunks: Object.fromEntries(changed.map((file) => [file.path, file])),
     readOutsideDiff: [...opened].filter((path) => !inDiff.has(path)).sort(),
-    findings: [],
+    findings,
     activity,
     liveSessions: dirs.length,
     note: dirs.length > 1 ? `${dirs.length} sessions active; showing the newest` : null,
   };
+}
+
+/**
+ * The suspected findings crossed with the gate's verdict on them. `findings.json` (docs/07-review-
+ * discipline.md step 5) has the full text of every finding the reviewer suspected, but the gate
+ * deletes the session directory and its round record (`src/engine/rounds.ts`) keeps only the
+ * survivors, each stripped to `{id, kind, severity, title, file, line}`. Crossing the two is what
+ * lets a dropped finding show its actual claim rather than nothing at all.
+ *
+ * Findings named only by the round record — the session is gone, so `findings.json` cannot be read
+ * — are added with empty text: the record only ever holds survivors, so they show as such.
+ */
+function readFindings(
+  repoRoot: string,
+  session: ReviewSession,
+  startedAt: number,
+): { findings: SnapshotFinding[]; round: RoundRecord | null } {
+  const suspected = readFindingsFile(repoRoot, session);
+  const round = newestRound(repoRoot, session.sourceBranch, startedAt);
+  if (round === null) {
+    return {
+      findings: suspected.map((one) => toSnapshotFinding(one, null)),
+      round: null,
+    };
+  }
+
+  const survivors = new Map(round.findings.map((one) => [one.id, one]));
+  const findings = suspected.map((one) => toSnapshotFinding(one, survivors.has(one.id)));
+  for (const survivor of round.findings) {
+    if (!suspected.some((one) => one.id === survivor.id)) {
+      findings.push({
+        id: survivor.id,
+        kind: survivor.kind,
+        severity: survivor.severity,
+        title: survivor.title,
+        claim: "",
+        file: survivor.file,
+        line: survivor.line,
+        anchor: "",
+        suggestion: null,
+        survived: true,
+        dropped: null,
+      });
+    }
+  }
+  return { findings, round };
+}
+
+function toSnapshotFinding(finding: ReviewFinding, survived: boolean | null): SnapshotFinding {
+  return {
+    id: finding.id,
+    kind: finding.kind,
+    severity: finding.severity,
+    title: finding.title,
+    claim: finding.claim,
+    file: finding.citation.file,
+    line: finding.citation.line,
+    anchor: finding.citation.anchor,
+    suggestion: finding.suggestion ?? null,
+    survived,
+    dropped: null,
+  };
+}
+
+/** `findings.json` as phase 1 leaves it, or nothing at all before it exists or once it is gone. */
+function readFindingsFile(repoRoot: string, session: ReviewSession): ReviewFinding[] {
+  try {
+    const path = join(sessionDir(repoRoot, session.id), "findings.json");
+    if (!existsSync(path)) return [];
+    return parseFindingsFile(JSON.parse(readFileSync(path, "utf8")), path);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The newest round for this session's branch, but only when it is newer than the session itself:
+ * an old round left over from a previous review of this branch is not this review's verdict, and
+ * showing it would mark this round's findings survived or dropped by a gate that never saw them.
+ */
+function newestRound(
+  repoRoot: string,
+  branch: string | null,
+  startedAt: number,
+): RoundRecord | null {
+  const rounds = readRounds(repoRoot, branch);
+  const newest = rounds.at(-1) ?? null;
+  if (newest === null) return null;
+  return Date.parse(newest.at) >= startedAt ? newest : null;
 }
 
 /**

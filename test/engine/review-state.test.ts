@@ -1,9 +1,25 @@
 import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { emptySnapshot, readReviewState } from "../../src/engine/review-state";
+import { recordRound } from "../../src/engine/rounds";
 import { activityPath, sessionDir } from "../../src/engine/session";
+
+/**
+ * `recordRound` falls back to `homedir()` when the OS temp root is not private
+ * (test/engine/rounds.test.ts explains why). Redirected to a sandbox so a run on a machine where
+ * that fallback fires never writes rounds under the real `~/.empo`. `tmpdir()` itself is left alone:
+ * `session.ts` fixes its `ROOT` from `tmpdir()` at module load, before any per-test mock value could
+ * apply, so `sessionDir` always resolves against the real temp root regardless — redirecting it here
+ * would only desync the two.
+ */
+const roots = vi.hoisted(() => ({ home: "" }));
+
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  return { ...actual, homedir: () => (roots.home === "" ? actual.homedir() : roots.home) };
+});
 
 const temps: string[] = [];
 
@@ -70,7 +86,14 @@ function logAt(root: string, lines: { at: string; tool: string; path: string }[]
   );
 }
 
+beforeEach(() => {
+  const home = mkdtempSync(join(tmpdir(), "empo-state-home-"));
+  temps.push(home);
+  roots.home = home;
+});
+
 afterEach(() => {
+  roots.home = "";
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -147,5 +170,87 @@ describe("once phase 1 has written the brief", () => {
     expect(state.activity).toHaveLength(200);
     expect(state.activity[0]?.path).toBe("src/file-50.ts");
     expect(state.activity.at(-1)?.path).toBe("src/file-249.ts");
+  });
+});
+
+describe("once the reviewer has written findings", () => {
+  function writeFindings(dir: string, ids: string[]): void {
+    writeFileSync(
+      join(dir, "findings.json"),
+      JSON.stringify({
+        findings: ids.map((id) => ({
+          id,
+          kind: "diff",
+          severity: "major",
+          title: `${id} title`,
+          claim: `${id} claim`,
+          citation: { file: "src/a.ts", line: 2, anchor: "const y = 2;" },
+          introducedBy: { file: "src/a.ts", line: 2, anchor: "const y = 2;" },
+          suggestion: `${id} suggestion`,
+        })),
+      }),
+      "utf8",
+    );
+  }
+
+  test("shows them all as unjudged before the gate has run", () => {
+    const root = repo();
+    const dir = startReview(root);
+    log(root, [{ tool: "Read", path: "src/a.ts" }]);
+    writeFindings(dir, ["f1", "f2"]);
+
+    const state = readReviewState(root, emptySnapshot());
+
+    expect(state.phase).toBe("findings");
+    expect(state.findings.map((one) => one.survived)).toEqual([null, null]);
+    expect(state.findings[0]?.claim).toBe("f1 claim");
+    expect(state.files.find((one) => one.path === "src/a.ts")?.findingCount).toBe(2);
+  });
+
+  test("marks survivors and dropped once a round record exists, keeping the full text of both", () => {
+    const root = repo();
+    const dir = startReview(root);
+    writeFindings(dir, ["f1", "f2"]);
+    recordRound(root, "feat/x", "abc123", "def456", "local", [
+      { id: "f1", kind: "diff", severity: "major", title: "f1 title", file: "src/a.ts", line: 2 },
+    ]);
+
+    const state = readReviewState(root, emptySnapshot());
+
+    expect(state.phase).toBe("gated");
+    expect(state.round).toBe(1);
+    expect(state.findings.find((one) => one.id === "f1")?.survived).toBe(true);
+    expect(state.findings.find((one) => one.id === "f2")?.survived).toBe(false);
+    // The point of the crossing: the dropped one still has the text the round record does not keep.
+    expect(state.findings.find((one) => one.id === "f2")?.claim).toBe("f2 claim");
+  });
+
+  test("keeps showing the last review after the gate deleted the session", () => {
+    const root = repo();
+    const dir = startReview(root);
+    writeFindings(dir, ["f1"]);
+    const before = readReviewState(root, emptySnapshot());
+
+    rmSync(dir, { recursive: true, force: true });
+    const after = readReviewState(root, before);
+
+    expect(after.phase).toBe("gated");
+    expect(after.files.map((one) => one.path)).toEqual(["src/a.ts", "src/b.ts"]);
+    expect(after.note).toContain("session finished");
+  });
+
+  // A round record with no session and no previous snapshot cannot be crossed with anything: with
+  // no session directory there is no sourceBranch to read the record with, so the viewer stays idle
+  // rather than showing a review it arrived too late to have witnessed.
+  test("stays idle for a round record left with no session and no previous snapshot", () => {
+    const root = repo();
+    recordRound(root, "feat/x", "abc123", "def456", "local", [
+      { id: "f1", kind: "diff", severity: "minor", title: "f1 title", file: "src/a.ts", line: 2 },
+    ]);
+
+    const state = readReviewState(root, emptySnapshot());
+
+    expect(state.phase).toBe("idle");
+    expect(state.findings).toEqual([]);
   });
 });
