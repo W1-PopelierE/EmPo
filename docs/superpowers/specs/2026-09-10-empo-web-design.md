@@ -101,6 +101,16 @@ JSON and the client renders them.
 
 The server exposes source code and diffs from a private machine. Three rules, none of them optional:
 
+> **Amendment, 2026-09-10, before merge.** Rule 2 no longer describes what ships. The `GET /file`
+> route this spec's security rules were written around was deleted before merge: the page renders
+> every changed line out of the snapshot's parsed hunks, so nothing consumed it, and it was the only
+> route that ever streamed file bytes off the listener. Deleting it removes the containment check
+> along with the thing it contained. The control that shipped in its place, and that this document
+> predates, is a `Host`-header check: anything but loopback is refused, which is what closes DNS
+> rebinding against a listener bound to `127.0.0.1`. Rules 1 and 3 stand as written. See
+> `docs/11-security-boundaries.md` for the surface as shipped.
+
+
 1. **Bind `127.0.0.1` only.** Never `0.0.0.0`, and no flag to change it.
 2. **File content comes only from the active session's `readRoot`**, with a containment check on the
    resolved path. A request for `../../.ssh/id_rsa` is refused, not normalized.

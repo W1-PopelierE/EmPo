@@ -548,8 +548,8 @@ describe("mergeSettings", () => {
     expect(BARE_HOOKS.SessionStart?.[0]?.hooks[0]?.timeout).toBe(10);
   });
 
-  test("wires the activity hook over the reading tools only, so an edit is not double-counted", () => {
-    expect(BARE_HOOKS.PostToolUse?.map((group) => group.matcher)).toEqual(["Read|Grep|Glob"]);
+  test("wires the activity hook over Read alone, the one reading tool that names a file", () => {
+    expect(BARE_HOOKS.PostToolUse?.map((group) => group.matcher)).toEqual(["Read"]);
     expect(BARE_HOOKS.PostToolUse?.[0]?.hooks[0]?.timeout).toBe(5);
   });
 
@@ -1080,7 +1080,7 @@ describe("wiredHooks", () => {
       ["PreToolUse", "Edit|Write", 10],
       // The longer timeout, because pre-commit computes the gate `empo check` does over a diff.
       ["PreToolUse", "Bash", 20],
-      ["PostToolUse", "Read|Grep|Glob", 5],
+      ["PostToolUse", "Read", 5],
     ]);
     const written = Object.values(empoHooks()).flatMap((groups) =>
       groups.flatMap((group) => group.hooks),

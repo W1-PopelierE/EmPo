@@ -231,7 +231,16 @@ function useRepo(): void {
 }
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const dir of temps.splice(0)) {
+    // The activity log lives beside the sessions in the OS temp root, keyed on the repository path
+    // and never deleted by anything in `src`, so a test repo that is not swept here leaks one file
+    // per run into a directory `sessionDirs` enumerates on every Read the hook sees. Computed while
+    // the directory still exists, since the key runs through `realpathSync`.
+    rmSync(activityPath(dir), { force: true });
+    // The session directories the tool-use tests mint live beside it, in the same shared root.
+    rmSync(sessionDir(dir, "local"), { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 describe("detecting a git commit", () => {

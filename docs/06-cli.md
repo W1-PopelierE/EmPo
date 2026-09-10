@@ -875,8 +875,15 @@ some minutes, and then prints the survivors. The page shows the in-between: whic
 reviewer is reading right now, **which changed files it never opened at all**, what it read *outside*
 the diff (the blast radius it actually checked), and, after the gate, the dropped findings beside the
 survivors with the claim each one stood on. Two columns: the changed files, the files read outside
-the diff and the live tool stream on the left; the selected file's hunks with findings marked on
-their line, and the findings list, on the right.
+the diff and the live tool stream on the left; the selected file's changed lines with findings marked
+on their line, and the findings list, on the right.
+
+**The right-hand pane is not a diff.** It shows the lines the selected file's hunks changed and only
+those: the removed run and the added run of each hunk, one after the other, each line carrying its
+number in the file it came from — so the two columns of numbers belong to two different revisions.
+There are no context lines around them, because the parsed hunks (`src/engine/diff.ts`) keep none.
+It answers "what changed here, and which findings sit on it", not "how does this file read now"; for
+that, open the file.
 
 Nothing on it is reported by the agent. Every phase — brief, reading, findings, gated — is derived
 from a file `empo review` writes for its own reasons, so nothing on the page depends on an agent
@@ -896,8 +903,8 @@ straight to findings with nothing in between.
 
 It binds `127.0.0.1` and nothing else, serves GET and nothing else, and has no route that changes
 anything ([11-security-boundaries](11-security-boundaries.md)). Default port `7373`, walking upward
-until one is free, because the usual collision is a viewer a previous review left running; the
-address it bound is printed. Flags: `--port <n>` (pin it, and fail rather than walk) and
+over at most ten ports until one is free, because the usual collision is a viewer a previous review
+left running; the address it bound is printed, and it fails rather than walking further. Flags: `--port <n>` (pin it, and fail rather than walk) and
 `--repo <path>`. One repository per process: two repositories are two viewers on two ports. Where
 two reviews are live in one repository the newest is shown, with a line saying how many there are.
 
