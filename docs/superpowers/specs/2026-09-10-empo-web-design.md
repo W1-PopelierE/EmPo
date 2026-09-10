@@ -167,9 +167,47 @@ No syntax highlighting, no word-level diff highlighting in this version.
 | no review running | idle screen; the server keeps running and picks up the next one |
 | several repos | `empo web` is per repo (`--repo`). Two repos, two processes, two ports |
 | port taken | default `7373`, increment until free, print the address. `--port` pins it |
-| two sessions in one repo (PR + local) | newest wins, with a "2 sessions active" line. No switcher in this version |
+| two sessions in one repo (PR + local) | a switcher in the left column; the choice lives in `?session=<key>`. Newest wins when nothing is chosen (see the amendment below) |
 | abandoned session directory | shown with its mtime and nothing more; cleanup is review's job |
 | teardown deletes the directory mid-read | every read in try/catch; a vanished source leaves the last known state standing, marked "session finished" |
+
+> **Amendment, 2026-09-10, before merge.** The "two sessions in one repo" row above is corrected in
+> place; this is what shipped instead of it.
+>
+> **A switcher, not a note.** `Snapshot` gained `sessions: {key, id, branch, phase}[]` — every live session,
+> newest first — and `selected`, the key the snapshot is actually about. `key` is the session
+> directory's basename, not the session id: a local review is always id `"local"`, while the
+> directory name carries the repository hash and stays unique (`sessionDir`,
+> `src/engine/session.ts`). The other three are what the row shows, and `phase` is derived for every
+> live review and not only the selected one, so the column says which of three reviews is still
+> reading without switching to each; deriving it reads that session's activity, findings and round
+> record but never parses its diff, which is the expensive part and decides nothing here.
+> `/api/state?session=<key>` and `/events?session=<key>` select the
+> review; a key naming no live session — never valid, or torn down between the click and the poll —
+> falls back to the newest rather than failing, so a tab left open across a teardown keeps showing
+> something. The page renders the block only when more than one session is live and keeps the
+> choice in `?session=<key>`, so three tabs each stay on their own review across a reload; switching
+> reopens the SSE stream, because the server picks the session per connection and the old stream
+> would keep pushing the review the reader just left. The "N sessions active" line is gone: the
+> switcher shows the same thing, and shows *which* — it sits at the top of the left column rather
+> than in the header, where a row per review reads like the file rows under it and the header stays
+> the one line it was.
+>
+> **Activity is attributed per session.** The activity log is one file per repository and the
+> `PostToolUse` hook knows nothing about sessions, so the `startedAt` filter alone cannot separate
+> two reviews running at once: a PR review reading its worktree would mark the local review's files
+> `✓` and drag its phase from "brief" to "reading". A line now belongs to the session whose
+> `readRoot` claims its path deepest (`belongsHere`, `src/engine/review-state.ts`). That separates a
+> PR review — a detached worktree under the temp directory — from a local one, and two PR reviews
+> from each other.
+>
+> **Known limit: two *local* reviews in one checkout are not separated.** They read literally the
+> same files, so both read roots claim every path equally deep and both keep the line; nothing on
+> disk says which review opened it. It is not a case the switcher can show either: `sessionDir` keys
+> on id plus repository root and a local review is always `"local"`, so two local reviews of one
+> checkout share one session directory — the second tears down the first's scratch. Unclaimed paths
+> and relative ones stay with every session for the same reason: an attribution nobody can make is
+> more use visible than discarded.
 
 ## Testing
 

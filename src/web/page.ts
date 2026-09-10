@@ -48,9 +48,9 @@ h2 { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(-
 h2:first-child { margin-top:0; }
 ul { list-style:none; margin:0; padding:0; }
 li { padding:2px 0; }
-.file { display:flex; gap:6px; width:100%; text-align:left; background:none; border:0; color:inherit; font:inherit; cursor:pointer; padding:2px 4px; border-radius:3px; }
-.file:hover { background:var(--panel); }
-.file[aria-current="true"] { background:var(--panel); outline:1px solid var(--line); }
+.file, .review { display:flex; gap:6px; width:100%; text-align:left; background:none; border:0; color:inherit; font:inherit; cursor:pointer; padding:2px 4px; border-radius:3px; }
+.file:hover, .review:hover { background:var(--panel); }
+.file[aria-current="true"], .review[aria-current="true"] { background:var(--panel); outline:1px solid var(--line); }
 .file .name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .plus { color:#1a7f37; } .minus { color:#c0392b; }
 /* A glyph, not a colour: read and unread have to be told apart without seeing the difference. */
@@ -71,12 +71,10 @@ li { padding:2px 0; }
 .finding .t { font-weight:600; }
 .finding p { margin:4px 0 0; white-space:pre-wrap; }
 .tag { font-size:11px; border:1px solid var(--line); border-radius:3px; padding:0 5px; color:var(--dim); }
-/* One button per live review. Hidden entirely when there is only one, so the common case is the
-   header it was before. */
-#sessions { display:flex; gap:6px; }
-#sessions button { font:inherit; font-size:11px; background:none; color:var(--dim); border:1px solid var(--line);
-  border-radius:3px; padding:0 6px; cursor:pointer; }
-#sessions button[aria-current="true"] { color:var(--fg); border-color:var(--mark); }
+/* A review reads like a file row, because it is the same gesture: pick the thing the right-hand
+   side is about. The whole block is hidden when only one review is live, which is the common case
+   and the column it always had. */
+.review .who { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .activity li { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .empty { color:var(--dim); }
 </style>
@@ -84,7 +82,6 @@ li { padding:2px 0; }
 <body>
 <header>
   <b>empo web</b>
-  <span id="sessions"></span>
   <span id="phase" class="tag">idle</span>
   <span id="where" class="dim"></span>
   <span id="note" class="dim"></span>
@@ -92,6 +89,8 @@ li { padding:2px 0; }
 </header>
 <main>
   <div id="left">
+    <h2 id="reviewsHead" hidden>Reviews</h2>
+    <ul id="reviews" hidden></ul>
     <h2>Changed files</h2>
     <ul id="files"><li class="empty">nothing yet</li></ul>
     <h2>Read outside the diff</h2>
@@ -159,25 +158,37 @@ function render(next) {
   renderFindings();
 }
 
-// The server decides which review an unknown or empty key resolves to, so the button that matches
+// The server decides which review an unknown or empty key resolves to, so the row that matches
 // snapshot.selected is the current one — never the one this page asked for.
 function renderSessions() {
   const sessions = snapshot.sessions || [];
-  el("sessions").innerHTML = sessions.length < 2
-    ? ""
-    : sessions.map((one) => '<button data-key="' + esc(one.key) + '" aria-current="'
-        + (one.key === snapshot.selected) + '">' + esc(one.label) + "</button>").join("");
-  for (const button of document.querySelectorAll("#sessions button")) {
+  // One review is the ordinary case and needs no list: the header already says which review this
+  // is, and a list of one is a control that can only reselect what is already selected.
+  const many = sessions.length > 1;
+  el("reviewsHead").hidden = !many;
+  el("reviews").hidden = !many;
+  el("reviews").innerHTML = !many ? "" : sessions.map(reviewRow).join("");
+  for (const button of document.querySelectorAll("#reviews .review")) {
     button.onclick = () => {
       session = button.dataset.key;
       // Replace, not push: the back button should leave the viewer, not walk back through which
       // review was looked at when.
       history.replaceState(null, "", location.pathname + query());
+      // The next review has its own files and its own hunks, so neither the selected file nor the
+      // drawn diff carries over.
       selected = null;
       drawn = null;
       reconnect();
     };
   }
+}
+
+function reviewRow(one) {
+  return '<li><button class="review" data-key="' + esc(one.key) + '" aria-current="'
+    + (one.key === snapshot.selected) + '">'
+    + '<span class="who" title="' + esc(one.branch) + '">' + esc(one.id) + "  "
+    + '<span class="dim">' + esc(one.branch) + "</span></span>"
+    + '<span class="tag">' + esc(one.phase) + "</span></button></li>";
 }
 
 function fileRow(file) {

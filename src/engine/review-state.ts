@@ -51,12 +51,15 @@ export interface SnapshotFinding {
   survived: boolean | null;
 }
 
-/** One live review a viewer can switch to. */
+/** One live review a viewer can switch to. The page composes the line; the shape is what it needs. */
 export interface SessionChoice {
   /** The session directory's basename. Stable while the review lives; this is what `?session=` names. */
   key: string;
-  /** What the switcher shows, e.g. "local  main -> feat/x" or "#1234  main -> pr-1234". */
-  label: string;
+  /** "local", or the pull request id. */
+  id: string;
+  /** The branch under review, falling back to the short sha, then to "working tree". */
+  branch: string;
+  phase: Phase;
 }
 
 export interface Snapshot {
@@ -104,34 +107,39 @@ export function readReviewState(
   const dirs = sessionDirs(repoRoot);
   if (dirs.length === 0) return afterTeardown(repoRoot, previous);
 
-  const live = liveSessions(dirs);
-  const sessions = live.map((one) => ({ key: one.key, label: label(one.session) }));
+  // Read once for every session rather than once per session: the log is one file per repository
+  // and this whole function runs on a poll, so parsing it four times over would be three times the
+  // work for the same lines. The diff is the other half of that: it is the only large file here and
+  // no session's phase depends on it, so only the session actually on screen has its diff parsed.
+  const log = readActivityLog(repoRoot);
+  const onDisk = liveSessions(dirs);
+  const live = onDisk.map((one) => ({ ...one, ...derive(repoRoot, one, log, onDisk) }));
+  const sessions = live.map((one) => ({
+    key: one.key,
+    id: one.session.id,
+    branch: branchOf(one.session),
+    phase: one.phase,
+  }));
   const found = live.find((one) => one.key === selected) ?? live[0];
   if (found === undefined) return { ...emptySnapshot(), sessions, selected: null };
-  const { session, startedAt } = found;
+  const { session, round } = found;
 
   const changed = readDiff(session);
-  const activity = readActivity(repoRoot, startedAt)
-    .filter((one) => belongsHere(one.path, found, live))
-    .map((one) => ({
-      ...one,
-      path: repoRelative(one.path, session.readRoot, repoRoot),
-    }));
+  const activity = found.activity.map((one) => ({
+    ...one,
+    path: repoRelative(one.path, session.readRoot, repoRoot),
+  }));
   const opened = new Set(activity.map((one) => one.path));
   const inDiff = new Set(changed.map((one) => one.path));
 
-  const { findings, round } = readFindings(repoRoot, session, startedAt);
+  const findings = crossFindings(found.suspected, round);
   const findingCounts = new Map<string, number>();
   for (const finding of findings) {
     findingCounts.set(finding.file, (findingCounts.get(finding.file) ?? 0) + 1);
   }
 
-  let phase: Phase = activity.length === 0 ? "brief" : "reading";
-  if (findings.length > 0) phase = "findings";
-  if (round !== null) phase = "gated";
-
   return {
-    phase,
+    phase: found.phase,
     session,
     round: round?.round ?? null,
     files: changed.map((file) => ({
@@ -152,6 +160,49 @@ export function readReviewState(
   };
 }
 
+/** What every live session needs derived, whether it is on screen or only a line in the switcher. */
+interface SessionState {
+  /** This session's own reads, paths still absolute as the hook logged them. */
+  activity: ActivityLine[];
+  suspected: ReviewFinding[];
+  round: RoundRecord | null;
+  phase: Phase;
+}
+
+/**
+ * Everything a session's phase is inferred from, and nothing else. Deliberately without the diff:
+ * it is hundreds of kilobytes, the phase does not depend on it, and this runs for every live session
+ * on every poll — parsing four diffs to draw one is the difference between a viewer you can leave
+ * open and one you notice.
+ *
+ * `belongsHere` applies to the switcher for the same reason it applies to the activity list: a
+ * session that has read nothing must not be dragged from "brief" to "reading" by the review running
+ * beside it.
+ */
+function derive(
+  repoRoot: string,
+  here: LiveSession,
+  log: ActivityLine[],
+  live: LiveSession[],
+): SessionState {
+  const activity = log
+    .filter((one) => Date.parse(one.at) >= here.startedAt && belongsHere(one.path, here, live))
+    .slice(-ACTIVITY_TAIL);
+  const suspected = readFindingsFile(repoRoot, here.session);
+  const round = newestRound(repoRoot, here.session.sourceBranch, here.startedAt);
+  let phase: Phase = activity.length === 0 ? "brief" : "reading";
+  if (suspected.length > 0) phase = "findings";
+  if (round !== null) phase = "gated";
+  return { activity, suspected, round, phase };
+}
+
+/** What a human recognises the review by. A detached revision has no branch, so the sha stands in. */
+function branchOf(session: ReviewSession): string {
+  if (session.sourceBranch !== null && session.sourceBranch !== "") return session.sourceBranch;
+  if (session.sha !== null && session.sha !== "") return session.sha.slice(0, 7);
+  return "working tree";
+}
+
 /**
  * The suspected findings crossed with the gate's verdict on them. `findings.json` (docs/07-review-
  * discipline.md step 5) has the full text of every finding the reviewer suspected, but the gate
@@ -162,19 +213,8 @@ export function readReviewState(
  * Findings named only by the round record — the session is gone, so `findings.json` cannot be read
  * — are added with empty text: the record only ever holds survivors, so they show as such.
  */
-function readFindings(
-  repoRoot: string,
-  session: ReviewSession,
-  startedAt: number,
-): { findings: SnapshotFinding[]; round: RoundRecord | null } {
-  const suspected = readFindingsFile(repoRoot, session);
-  const round = newestRound(repoRoot, session.sourceBranch, startedAt);
-  if (round === null) {
-    return {
-      findings: suspected.map((one) => toSnapshotFinding(one, null)),
-      round: null,
-    };
-  }
+function crossFindings(suspected: ReviewFinding[], round: RoundRecord | null): SnapshotFinding[] {
+  if (round === null) return suspected.map((one) => toSnapshotFinding(one, null));
 
   const survivors = new Map(round.findings.map((one) => [one.id, one]));
   const findings = suspected.map((one) => toSnapshotFinding(one, survivors.has(one.id)));
@@ -194,7 +234,7 @@ function readFindings(
       });
     }
   }
-  return { findings, round };
+  return findings;
 }
 
 function toSnapshotFinding(finding: ReviewFinding, survived: boolean | null): SnapshotFinding {
@@ -282,12 +322,6 @@ function liveSessions(dirs: string[]): LiveSession[] {
   return live;
 }
 
-/** What the switcher shows: which review it is, and what it is reviewing against what. */
-function label(session: ReviewSession): string {
-  const which = session.id === "local" ? "local" : `#${session.id}`;
-  return `${which}  ${session.base} -> ${session.sourceBranch ?? "detached"}`;
-}
-
 /**
  * Whether an activity line was this session's read. The log is one file per repository and the hook
  * that appends to it knows nothing about sessions, so time alone cannot separate two reviews running
@@ -334,34 +368,31 @@ function readDiff(session: ReviewSession): ChangedFile[] {
 }
 
 /**
- * The activity log the `tool-use` hook appends to, filtered to this session and tailed to the most
- * recent lines a viewer can usefully show. A line the hook half-wrote (a crash mid-append) is
- * dropped rather than failing the whole read, since one bad line should cost one line of history,
- * not the display.
+ * The whole activity log the `tool-use` hook appends to, every session's lines together, since one
+ * file holds them all and `derive` splits them per session afterwards. A line the hook half-wrote
+ * (a crash mid-append) is dropped rather than failing the whole read, since one bad line should cost
+ * one line of history, not the display.
  *
- * `activityPath` is one file per repository, not per review, so without the `startedAt` filter a
- * second review would inherit the first one's history: it would start in "reading" instead of
- * "brief", and files the previous review opened would show as already read by this one. Filtering
- * first and tailing after means the 200 lines kept are this session's, not 200 lines of whichever
- * review happened to write last.
+ * The `startedAt` filter `derive` applies is what keeps a review out of its predecessor's history:
+ * `activityPath` is one file per repository, not per review, so without it a second review would
+ * start in "reading" instead of "brief" and show the previous review's files as already read.
+ * Filtering first and tailing after means the 200 lines kept are that session's, not 200 lines of
+ * whichever review happened to write last.
  */
-function readActivity(repoRoot: string, startedAt: number): ActivityLine[] {
+function readActivityLog(repoRoot: string): ActivityLine[] {
   try {
     const path = activityPath(repoRoot);
     if (!existsSync(path)) return [];
-    const lines = readFileSync(path, "utf8")
-      .split("\n")
-      .filter((line) => line.trim() !== "");
     const parsed: ActivityLine[] = [];
-    for (const line of lines) {
+    for (const line of readFileSync(path, "utf8").split("\n")) {
+      if (line.trim() === "") continue;
       try {
-        const entry = JSON.parse(line) as ActivityLine;
-        if (Date.parse(entry.at) >= startedAt) parsed.push(entry);
+        parsed.push(JSON.parse(line) as ActivityLine);
       } catch {
         // One malformed line costs one line of history, not the read.
       }
     }
-    return parsed.slice(-ACTIVITY_TAIL);
+    return parsed;
   } catch {
     return [];
   }

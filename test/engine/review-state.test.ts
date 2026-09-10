@@ -84,6 +84,26 @@ function writeSession(dir: string, root: string, overrides: Record<string, unkno
   );
 }
 
+/** `findings.json` as phase 1 leaves it, one finding per id, all citing the same changed line. */
+function writeFindings(dir: string, ids: string[]): void {
+  writeFileSync(
+    join(dir, "findings.json"),
+    JSON.stringify({
+      findings: ids.map((id) => ({
+        id,
+        kind: "diff",
+        severity: "major",
+        title: `${id} title`,
+        claim: `${id} claim`,
+        citation: { file: "src/a.ts", line: 2, anchor: "const y = 2;" },
+        introducedBy: { file: "src/a.ts", line: 2, anchor: "const y = 2;" },
+        suggestion: `${id} suggestion`,
+      })),
+    }),
+    "utf8",
+  );
+}
+
 function log(root: string, lines: { tool: string; path: string }[]): void {
   writeFileSync(
     activityPath(root),
@@ -327,7 +347,7 @@ describe("with a second review live in the same repository", () => {
     expect(readReviewState(root, emptySnapshot()).session?.id).toBe("1234");
   });
 
-  test("offers every live session newest first, named so a human can tell them apart", () => {
+  test("offers every live session newest first, with what the switcher has to name it", () => {
     const root = repo();
     const local = startReview(root);
     const { dir } = startPrReview(root, "1234");
@@ -335,37 +355,88 @@ describe("with a second review live in the same repository", () => {
 
     const state = readReviewState(root, emptySnapshot());
 
-    expect(state.sessions.map((one) => one.key)).toEqual([basename(dir), basename(local)]);
-    expect(state.sessions.map((one) => one.label)).toEqual([
-      "#1234  main -> feat/x",
-      "local  main -> feat/x",
+    expect(state.sessions).toEqual([
+      { key: basename(dir), id: "1234", branch: "feat/x", phase: "brief" },
+      { key: basename(local), id: "local", branch: "feat/x", phase: "brief" },
     ]);
     expect(state.selected).toBe(basename(dir));
-    // The chooser shows what is live now, so the note that used to count sessions is gone.
+    // The switcher shows what is live now, so the note that used to count sessions is gone.
     expect(state.note).toBeNull();
+  });
+
+  // The switcher shows each review's phase, so every live session's phase is derived, not just the
+  // selected one's — and derived from the same three sources, in the same order of precedence.
+  test("derives a phase for every live session, not only the selected one", () => {
+    const root = repo();
+    const brief = startReview(root, "local");
+    const { dir: reading, readRoot } = startPrReview(root, "1234");
+    const findings = startReview(root, "1240");
+    writeFindings(findings, ["f1"]);
+    const gated = startReview(root, "1250");
+    writeSession(gated, root, {
+      id: "1250",
+      sourceBranch: "fix/gate",
+      diffPath: join(gated, "pr-1250.diff"),
+    });
+    recordRound(root, "fix/gate", "abc123", "def456", "1250", []);
+    log(root, [{ tool: "Read", path: join(readRoot, "src/a.ts") }]);
+    backdate(brief, 90_000);
+    backdate(reading, 60_000);
+    backdate(findings, 30_000);
+
+    const state = readReviewState(root, emptySnapshot(), basename(brief));
+
+    expect(state.phase).toBe("brief");
+    expect(state.sessions.map((one) => [one.id, one.phase])).toEqual([
+      ["1250", "gated"],
+      ["1240", "findings"],
+      ["1234", "reading"],
+      ["local", "brief"],
+    ]);
+  });
+
+  // The same attribution bug as in `activity`, one level up: a session that has read nothing must
+  // not be shown as "reading" because the review beside it is busy in its own worktree.
+  test("leaves a session at brief while the session beside it is the one reading", () => {
+    const root = repo();
+    const local = startReview(root);
+    const { readRoot } = startPrReview(root, "1234");
+    backdate(local, 60_000);
+    log(root, [{ tool: "Read", path: join(readRoot, "src/a.ts") }]);
+
+    const state = readReviewState(root, emptySnapshot(), basename(local));
+
+    expect(state.sessions.map((one) => [one.id, one.phase])).toEqual([
+      ["1234", "reading"],
+      ["local", "brief"],
+    ]);
+  });
+
+  // A review of a detached revision has no branch to name. The short sha is what a human recognises
+  // it by; a session where git could answer neither is honestly named for what it is reviewing.
+  test("falls back to the short sha, then to the working tree, when there is no branch", () => {
+    const root = repo();
+    const detached = startReview(root, "local");
+    writeSession(detached, root, { sourceBranch: null, sha: "0123456789abcdef" });
+    const unknown = startReview(root, "1234");
+    writeSession(unknown, root, {
+      id: "1234",
+      sourceBranch: null,
+      sha: null,
+      diffPath: join(unknown, "pr-1234.diff"),
+    });
+    backdate(detached, 60_000);
+
+    const state = readReviewState(root, emptySnapshot());
+
+    expect(state.sessions.map((one) => [one.id, one.branch])).toEqual([
+      ["1234", "working tree"],
+      ["local", "0123456"],
+    ]);
   });
 });
 
 describe("once the reviewer has written findings", () => {
-  function writeFindings(dir: string, ids: string[]): void {
-    writeFileSync(
-      join(dir, "findings.json"),
-      JSON.stringify({
-        findings: ids.map((id) => ({
-          id,
-          kind: "diff",
-          severity: "major",
-          title: `${id} title`,
-          claim: `${id} claim`,
-          citation: { file: "src/a.ts", line: 2, anchor: "const y = 2;" },
-          introducedBy: { file: "src/a.ts", line: 2, anchor: "const y = 2;" },
-          suggestion: `${id} suggestion`,
-        })),
-      }),
-      "utf8",
-    );
-  }
-
   test("shows them all as unjudged before the gate has run", () => {
     const root = repo();
     const dir = startReview(root);

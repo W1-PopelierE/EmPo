@@ -911,8 +911,30 @@ It binds `127.0.0.1` and nothing else, serves GET and nothing else, and has no r
 anything ([11-security-boundaries](11-security-boundaries.md)). Default port `7373`, walking upward
 over at most ten ports until one is free, because the usual collision is a viewer a previous review
 left running; the address it bound is printed, and it fails rather than walking further. Flags: `--port <n>` (pin it, and fail rather than walk) and
-`--repo <path>`. One repository per process: two repositories are two viewers on two ports. Where
-two reviews are live in one repository the newest is shown, with a line saying how many there are.
+`--repo <path>`.
+
+**Several reviews at once.** A viewer serves one repository — `--repo` picks it, and the sessions it
+can see are that repository's — so reviews running in separate worktrees are separate repository
+roots and want one viewer per worktree on its own port. Within one repository, every live review is
+listed: when more than one is running the left column opens with a `Reviews` block, one row per
+review carrying what it is (`#1234`, or `local`), the branch it reads, and the phase that review is
+in right now — so the column answers "which of the three is still reading" without switching to each
+of them. Clicking a row switches the whole page to it. The choice lives in the URL as `?session=<key>`, so
+three tabs pointed at the same viewer each stay on their own review across a reload; the key is the
+session directory's name, and one that names no live review — a stale bookmark, or a review torn
+down while the tab sat open — falls back to the newest rather than erroring, so the tab keeps
+showing something.
+
+Which review opened which file is worked out from the path. The activity log is one file per
+repository and the hook that writes it knows nothing about sessions, so a line is attributed to the
+review whose read root contains its path most specifically. That separates a PR review — which reads
+a detached worktree under the temp directory — from a local one reading the checkout, and two PR
+reviews from each other. **It does not separate two local reviews of the same checkout**: they read
+literally the same files, so both claim every line and both show it. That is a limit worth knowing
+and not one worth working around, since two local reviews in one checkout also share one session
+directory (the scratch is keyed on the review's id plus the repository root, and a local review is
+always `local`), so the second tears down the first's state and the switcher has nothing to offer
+between them anyway. Run the second one in its own worktree.
 
 ## `empo update`
 
