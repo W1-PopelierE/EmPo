@@ -1,9 +1,10 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer, request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { createViewer } from "../../src/commands/web";
+import { createViewer, webCommand } from "../../src/commands/web";
 import type { Snapshot } from "../../src/engine/review-state";
 import { sessionDir } from "../../src/engine/session";
 
@@ -137,10 +138,84 @@ describe("the viewer's routes", () => {
     await response.text();
   });
 
+  test("answers 404 for a file that is simply absent inside the read root", async () => {
+    const root = repo();
+    startReview(root);
+
+    const response = await fetch(`${await serve(root)}/file?path=src/gone.ts`);
+
+    expect(response.status).toBe(404);
+    await response.text();
+  });
+
   test("serves no file at all when no review is running", async () => {
     const response = await fetch(`${await serve(repo())}/file?path=README.md`);
 
     expect(response.status).toBe(404);
     await response.text();
+  });
+});
+
+describe("the viewer's host check", () => {
+  /** `fetch` refuses to set Host, so the header a rebound page would send is sent by hand. */
+  function status(base: string, host: string): Promise<number> {
+    const { port } = new URL(base);
+    return new Promise((done, fail) => {
+      const call = httpRequest(
+        { host: "127.0.0.1", port, path: "/api/state", headers: { host } },
+        (response) => {
+          response.resume();
+          done(response.statusCode ?? 0);
+        },
+      );
+      call.on("error", fail);
+      call.end();
+    });
+  }
+
+  test("refuses a request whose Host is not loopback, so a rebound domain reads nothing", async () => {
+    const root = repo();
+    startReview(root);
+    const base = await serve(root);
+
+    expect(await status(base, "evil.example")).toBe(403);
+  });
+
+  test("serves a request whose Host is the loopback address it bound", async () => {
+    const base = await serve(repo());
+
+    expect(await status(base, base.slice("http://".length))).toBe(200);
+  });
+});
+
+describe("the command", () => {
+  test("reports a port it cannot bind as an environment error", async () => {
+    const blocker = createServer();
+    await new Promise<void>((ready) => {
+      blocker.listen(0, "127.0.0.1", ready);
+    });
+    const { port } = blocker.address() as AddressInfo;
+
+    try {
+      await expect(webCommand(repo(), { port })).rejects.toMatchObject({ exitCode: 3 });
+    } finally {
+      blocker.close();
+    }
+  });
+
+  // Binding port 1 is EACCES for anyone but root, which is the bind failure the walk must not
+  // swallow. Skipped as root, where it would simply succeed.
+  test.skipIf(process.getuid?.() === 0)(
+    "reports a bind refused by the OS as an environment error, not a stack trace",
+    async () => {
+      await expect(webCommand(repo(), { port: 1 })).rejects.toMatchObject({ exitCode: 3 });
+    },
+  );
+
+  test("reports a --port that is not a port number as a usage error", async () => {
+    await expect(webCommand(repo(), { port: Number.parseInt("abc", 10) })).rejects.toMatchObject({
+      exitCode: 2,
+    });
+    await expect(webCommand(repo(), { port: 70000 })).rejects.toMatchObject({ exitCode: 2 });
   });
 });
