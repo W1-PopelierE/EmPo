@@ -8,7 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
 /**
@@ -26,13 +26,20 @@ import { basename, join, resolve } from "node:path";
  *
  * Where it lives, and why not the two obvious places. Not in the repository: `.empo/generated/` is
  * machine-owned by `empo index` alone (docs/02-on-disk-layout.md) and a review disturbs nothing in
- * the checkout it reads (docs/07-review-discipline.md invariant 2). Not in a bare `/tmp` either,
- * because the path here is derived rather than random, and a predictable path in a world-writable
- * directory is one somebody else can plant a symlink at ahead of time: the write would land in a
- * file of their choosing, or a forged round would tell `empo review` it may skip code nobody read.
- * `XDG_RUNTIME_DIR` is the temp directory that is already the user's own, mode 0700 and emptied at
- * logout, and where it is unset `os.tmpdir()` is per-user anyway on macOS. Sweeping is the point
- * rather than the cost: a lost log reads as no rounds, which is a whole review, said out loud.
+ * the checkout it reads (docs/07-review-discipline.md invariant 2). And a temp directory only where
+ * that temp directory is the user's own, which `roundsRoot` decides and never assumes.
+ *
+ * The reason is worth stating in full, because the obvious hardening does not work. This path is
+ * derived rather than random, so in a world-writable directory somebody can plant a symlink at it
+ * ahead of time. Checking for that is not enough: `mkdirSync` with `recursive` follows a symlink
+ * standing in for any parent component, and an `lstat` of the leaf passes because the leaf is the
+ * directory we just created ourselves, under their parent. Even a per-component check loses the
+ * race, since Node exposes no `openat` to pin a directory and work relative to the handle. What
+ * `O_EXCL` on each round file buys is real but partial: nobody replaces a round through a symlink
+ * on the file itself. So the decision is made one level up. A world-writable root is not used.
+ *
+ * Sweeping is the point rather than the cost: a lost log reads as no rounds, which is a whole
+ * review, said out loud.
  *
  * Both the repository and the branch are in the path. Per branch because two branches under review
  * at once are two loops and a shared entry would tell the second it had already read the first
@@ -46,6 +53,14 @@ export interface RoundRecord {
   sha: string;
   /** ISO timestamp of the gate that wrote it, so a stale round can be read as stale. */
   at: string;
+  /**
+   * The review this round belonged to: a pull request id, or "local". Kept so `--reset` can find
+   * the branch a pull request was reviewed on without asking the forge which branch that was,
+   * which is a network call to answer a question the log already holds the answer to.
+   */
+  id: string;
+  /** The branch, written down rather than only hashed into the path, so it can be read back. */
+  branch: string;
   /** What came through the gate, so a later round can read what an earlier one already said. */
   findings: RoundFinding[];
 }
@@ -76,25 +91,74 @@ export function canonicalRoot(repoRoot: string): string {
 /** Where this branch's rounds are kept. Named readably, keyed by digest: see the type above. */
 export function roundsDir(repoRoot: string, branch: string): string {
   const root = canonicalRoot(repoRoot);
-  return join(
-    runtimeRoot(),
-    "empo-review",
-    "rounds",
-    key(basename(root), root),
-    key(branch, branch),
-  );
+  return join(roundsRoot(), key(basename(root), root), key(branch, branch));
+}
+
+/**
+ * The temp directory where it is the user's own, and the user's own directory otherwise.
+ *
+ * `XDG_RUNTIME_DIR` is exactly this by definition on Linux, and `os.tmpdir()` is the private
+ * `/var/folders/...` on macOS, so on both the common case is a swept temp directory, which is what
+ * a round log wants: history that expires on its own. Where neither is private — a Linux box with
+ * no `XDG_RUNTIME_DIR`, where `os.tmpdir()` is the shared `/tmp` — the log goes under the home
+ * directory instead, which nobody else can write and so nobody else can plant a path in. That
+ * costs the automatic sweep, and `--reset` is the broom.
+ */
+export function roundsRoot(): string {
+  const runtime = process.env.XDG_RUNTIME_DIR;
+  if (runtime !== undefined && runtime !== "" && isPrivate(runtime)) {
+    return join(runtime, "empo-review", "rounds");
+  }
+  const temp = tmpdir();
+  if (isPrivate(temp)) return join(temp, "empo-review", "rounds");
+  return join(homedir(), ".empo", "rounds");
+}
+
+/** A directory that is ours and that no one else may write, which is the whole test that matters. */
+function isPrivate(dir: string): boolean {
+  try {
+    const stat = lstatSync(dir);
+    return (
+      stat.isDirectory() &&
+      (stat.mode & 0o077) === 0 &&
+      stat.uid === (process.getuid?.() ?? stat.uid)
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** Every gated round on this branch, oldest first. Empty where none has been gated, or none read. */
 export function readRounds(repoRoot: string, branch: string | null): RoundRecord[] {
-  if (branch === null || branch === "") return [];
-  const dir = roundsDir(repoRoot, branch);
-  if (!ours(dir)) return [];
-  return readdirSync(dir)
-    .filter((name) => /^\d+\.json$/.test(name))
-    .sort(compare)
-    .map((name) => parseRound(join(dir, name)))
+  return roundFiles(repoRoot, branch)
+    .map(([, path]) => parseRound(path))
     .filter((round): round is RoundRecord => round !== null);
+}
+
+/**
+ * Every round file that is there, as `[number, path]`, oldest first. Kept apart from the parsing
+ * because the next round's number comes off the file names and never off the records: a file that
+ * will not parse still occupies its number, and a round that recomputed the same number would
+ * collide with it under `wx` on this run and on every run after it.
+ *
+ * Sorted numerically, so round 1000 does not land before round 999 the way a string sort puts it.
+ */
+function roundFiles(repoRoot: string, branch: string | null): [number, string][] {
+  return branch === null || branch === "" ? [] : roundFilesIn(roundsDir(repoRoot, branch));
+}
+
+function roundFilesIn(dir: string): [number, string][] {
+  try {
+    if (!ours(dir)) return [];
+    return readdirSync(dir)
+      .filter((name) => /^\d+\.json$/.test(name))
+      .map((name): [number, string] => [Number.parseInt(name, 10), join(dir, name)])
+      .sort(([a], [b]) => a - b);
+  } catch {
+    // The directory can go while we are reading it: a temp sweep, a logout, another `--reset`.
+    // That is no rounds, which is a whole review, and never a review that fails to start.
+    return [];
+  }
 }
 
 /** What this branch was last reviewed at, or null where no round has been gated against it. */
@@ -114,12 +178,13 @@ export function recordRound(
   repoRoot: string,
   branch: string | null,
   sha: string | null,
+  id: string,
   findings: RoundFinding[],
 ): RoundRecord | null {
   if (branch === null || branch === "" || sha === null || sha === "") return null;
   const dir = roundsDir(repoRoot, branch);
-  const round = (lastRound(repoRoot, branch)?.round ?? 0) + 1;
-  const record: RoundRecord = { round, sha, at: new Date().toISOString(), findings };
+  const round = (roundFiles(repoRoot, branch).at(-1)?.[0] ?? 0) + 1;
+  const record: RoundRecord = { round, sha, at: new Date().toISOString(), id, branch, findings };
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     if (!ours(dir)) return null;
@@ -139,18 +204,33 @@ export function recordRound(
   }
 }
 
+/**
+ * Which branches of this repository carry rounds gated under `id`. What `--reset` needs when it is
+ * given a pull request: the rounds are keyed by the branch the pull request came from, and that
+ * branch is usually not the one checked out, because reviewing a pull request never checks it out.
+ */
+export function branchesGatedUnder(repoRoot: string, id: string): string[] {
+  const root = canonicalRoot(repoRoot);
+  const dir = join(roundsRoot(), key(basename(root), root));
+  try {
+    return readdirSync(dir)
+      .map((name) => roundFilesIn(join(dir, name)).at(-1))
+      .map((file) => (file === undefined ? null : parseRound(file[1])))
+      .filter((round): round is RoundRecord => round !== null && round.id === id)
+      .map((round) => round.branch)
+      .filter((branch) => branch !== "")
+      .sort(compare);
+  } catch {
+    return [];
+  }
+}
+
 /** Forget every round on this branch, and hand back what was forgotten. `empo review --reset`. */
 export function resetRounds(repoRoot: string, branch: string | null): RoundRecord[] {
   if (branch === null || branch === "") return [];
   const forgotten = readRounds(repoRoot, branch);
   rmSync(roundsDir(repoRoot, branch), { recursive: true, force: true });
   return forgotten;
-}
-
-/** The temp root that is already the user's own, where the platform offers one. */
-function runtimeRoot(): string {
-  const runtime = process.env.XDG_RUNTIME_DIR;
-  return runtime !== undefined && runtime !== "" ? runtime : tmpdir();
 }
 
 /**
@@ -180,9 +260,17 @@ function ours(dir: string): boolean {
 function parseRound(path: string): RoundRecord | null {
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as RoundRecord;
-    return typeof parsed.sha === "string" && typeof parsed.round === "number"
-      ? { ...parsed, findings: Array.isArray(parsed.findings) ? parsed.findings : [] }
-      : null;
+    if (typeof parsed.sha !== "string" || typeof parsed.round !== "number") return null;
+    // Field by field rather than spread: whatever else is in that file is not part of a round, and
+    // a record carrying it would hand the rest of the command fields nobody here decided on.
+    return {
+      round: parsed.round,
+      sha: parsed.sha,
+      at: typeof parsed.at === "string" ? parsed.at : "",
+      id: typeof parsed.id === "string" ? parsed.id : "local",
+      branch: typeof parsed.branch === "string" ? parsed.branch : "",
+      findings: Array.isArray(parsed.findings) ? parsed.findings : [],
+    };
   } catch {
     return null;
   }

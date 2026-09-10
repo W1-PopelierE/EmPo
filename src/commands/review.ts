@@ -19,6 +19,7 @@ import {
   diffRange,
   fetchRef,
   gitInfo,
+  isAncestor,
   removeWorktree,
   resolveRef,
   shortSha,
@@ -27,6 +28,7 @@ import { readGraph, stalenessLines } from "../engine/graph";
 import { type GuardedTouch, guardedTouches } from "../engine/guard";
 import { compareStrings } from "../engine/order";
 import {
+  branchesGatedUnder,
   canonicalRoot,
   lastRound,
   type RoundFinding,
@@ -181,7 +183,7 @@ export function reviewCommand(
   }
 
   if (options.reset === true) {
-    resetPhase(repoRoot);
+    resetPhase(repoRoot, pr);
     return;
   }
 
@@ -371,7 +373,10 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
                   number: round.last.round + 1,
                   sha: round.last.sha,
                   at: round.last.at,
-                  linesChanged: linesChanged(round.diff),
+                  // Null and not zero where there is no diff to measure: a consumer reading 0 off
+                  // `--whole` or a vanished commit would read "the branch has not moved", which is
+                  // the one thing it does not mean.
+                  linesChanged: round.diff === null ? null : linesChanged(round.diff),
                 },
           since:
             since === null
@@ -1281,6 +1286,19 @@ function roundScope(
     notes.push(
       `round ${last.round + 1}: git could not diff against ${shortSha(last.sha)}, so ${subject}.`,
     );
+    return { last, diff };
+  }
+  // Narrowing still holds here: the diff is the honest difference between the tree that was
+  // reviewed and the tree being read. What does not hold is calling all of it new work, so this is
+  // a note and not a refusal. The commonest cause is an amend or a rebase; the one worth catching
+  // is a local checkout and a pull request review taking turns on one branch name from two
+  // different revisions, where the other side's commits read as deletions.
+  if (!isAncestor(session.readRoot, last.sha, "HEAD")) {
+    notes.push(
+      `round ${last.round + 1}: ${shortSha(last.sha)} is not an ancestor of what is being read ` +
+        "(an amend, a rebase, or a branch that has moved apart from it), so what follows is the " +
+        "difference between the two trees and not only work written since.",
+    );
   }
   return { last, diff };
 }
@@ -1897,13 +1915,17 @@ function gatePhase(repoRoot: string, pr: string | undefined, options: ReviewOpti
         repoRoot,
         session.sourceBranch,
         session.sha ?? null,
+        id,
         loggable(result),
       );
       if (recorded === null) {
         console.log("");
         console.log(
-          `This round could not be recorded under ${roundsDir(repoRoot, session.sourceBranch ?? "")}, ` +
-            "so the next review reads the whole diff again rather than what follows this one.",
+          session.sourceBranch === null
+            ? "This checkout is detached, so there is no branch to record this round against and " +
+                "the next review reads the whole diff again."
+            : `This round could not be recorded under ${roundsDir(repoRoot, session.sourceBranch)}, ` +
+                "so the next review reads the whole diff again rather than what follows this one.",
         );
       }
     }
@@ -1959,24 +1981,38 @@ function loggable(result: GateResult): RoundFinding[] {
  * and it never runs alongside a review: a flag that both reviewed and wiped the history would be
  * one typo away from losing eleven rounds silently.
  */
-function resetPhase(repoRoot: string): void {
-  const branch = currentBranch(repoRoot);
-  if (branch === null) {
-    throw configError("--reset needs a branch, and this checkout is detached", [
-      "Rounds are recorded per branch, so a detached HEAD has none to forget.",
-    ]);
-  }
-  const forgotten = resetRounds(repoRoot, branch);
-  if (forgotten.length === 0) {
-    console.log(`No gated rounds on ${branch}, so there was nothing to forget.`);
+function resetPhase(repoRoot: string, pr: string | undefined): void {
+  // A pull request is reviewed from a detached worktree and never from its own branch, so the
+  // branch whose rounds `empo review 412 --reset` means is not the one checked out. The log knows
+  // which branch it was, having written it down, and that is cheaper and truer than asking the
+  // forge to name a branch again.
+  const branches = pr === undefined ? [currentBranch(repoRoot)] : branchesGatedUnder(repoRoot, pr);
+  if (branches.length === 0 || branches[0] === null) {
+    console.log(
+      pr === undefined
+        ? "This checkout is detached, and rounds are recorded per branch, so there are none to forget."
+        : `No gated rounds for ${pr} in this repository, so there was nothing to forget.`,
+    );
     return;
   }
-  console.log(`Forgot ${forgotten.length} gated round(s) on ${branch}:`);
-  for (const round of forgotten) {
-    const found = round.findings.length === 1 ? "1 finding" : `${round.findings.length} findings`;
-    console.log(`  round ${round.round}  ${shortSha(round.sha)}  ${round.at}  ${found}`);
+
+  let total = 0;
+  for (const branch of branches) {
+    const forgotten = resetRounds(repoRoot, branch);
+    total += forgotten.length;
+    if (forgotten.length === 0) {
+      console.log(`No gated rounds on ${branch}, so there was nothing to forget.`);
+      continue;
+    }
+    console.log(`Forgot ${forgotten.length} gated round(s) on ${branch}:`);
+    for (const round of forgotten) {
+      const found = round.findings.length === 1 ? "1 finding" : `${round.findings.length} findings`;
+      console.log(`  round ${round.round}  ${shortSha(round.sha)}  ${round.at}  ${found}`);
+    }
   }
-  console.log("The next review is round 1 and reads the whole diff against the base.");
+  if (total > 0) {
+    console.log("The next review is round 1 and reads the whole diff against the base.");
+  }
 }
 
 function printGate(

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -10,7 +11,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -27,6 +28,7 @@ import type { ChangedFile } from "../../src/engine/diff";
 import { run } from "../../src/engine/git";
 import { GRAPH_PATH, GRAPH_SCHEMA, graphPath, serializeGraph } from "../../src/engine/graph";
 import { loadPack } from "../../src/engine/pack-loader";
+import { recordRound } from "../../src/engine/rounds";
 import { EmpoError } from "../../src/errors";
 import { buildProgram } from "../../src/program";
 import type { Graph, GraphEdge, GraphNode } from "../../src/schema/types";
@@ -74,8 +76,23 @@ function findingsPathOf(repoRoot: string): string {
  */
 function roundsRepoDirOf(repoRoot: string): string {
   const root = realpathSync(repoRoot);
-  const base = process.env.XDG_RUNTIME_DIR ?? tmpdir();
-  return join(base, "empo-review", "rounds", roundKeyOf(basename(root), root));
+  return join(roundsRoot(), roundKeyOf(basename(root), root));
+}
+
+/** The same choice src/engine/rounds.ts makes: a temp root only where it is the user's own. */
+function roundsRoot(): string {
+  const runtime = process.env.XDG_RUNTIME_DIR;
+  if (runtime !== undefined && runtime !== "" && isPrivateDir(runtime)) {
+    return join(runtime, "empo-review", "rounds");
+  }
+  return isPrivateDir(tmpdir())
+    ? join(tmpdir(), "empo-review", "rounds")
+    : join(homedir(), ".empo", "rounds");
+}
+
+function isPrivateDir(dir: string): boolean {
+  const stat = lstatSync(dir);
+  return stat.isDirectory() && (stat.mode & 0o077) === 0 && stat.uid === process.getuid?.();
 }
 
 function roundsDirOf(repoRoot: string, branch: string): string {
@@ -94,7 +111,15 @@ function roundsOf(repoRoot: string, branch: string) {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
     .sort()
-    .map((name) => JSON.parse(readFileSync(join(dir, name), "utf8")));
+    .flatMap((name) => {
+      // A file that will not parse drops out here exactly as it does in the code under test, so a
+      // test about the wedge it used to cause can still read the rounds around it.
+      try {
+        return [JSON.parse(readFileSync(join(dir, name), "utf8"))];
+      } catch {
+        return [];
+      }
+    });
 }
 
 /** The rows of the brief's changed files table, which is the one place the review's scope is listed. */
@@ -3154,6 +3179,67 @@ describe("round awareness", () => {
     expect(capture(() => reviewCommand(repo, undefined, { workflow: false }))).toContain(
       "round 1 against feat/rounds: nothing has been gated here yet",
     );
+  });
+
+  /**
+   * A file that will not parse still occupies its number. Recomputing that number from the records
+   * instead of from the names would collide with it under `wx` on this run and every run after it,
+   * which is a log that has quietly stopped recording while the gate still prints a report.
+   */
+  test("a round file that will not parse does not wedge the next round", () => {
+    changeCalculator();
+    gate([realFinding()]);
+    writeFileSync(join(roundsDirOf(repo, "main"), "001.json"), "{ not json");
+
+    gate([realFinding()]);
+
+    expect(readdirSync(roundsDirOf(repo, "main")).sort()).toEqual(["001.json", "002.json"]);
+    expect(roundsOf(repo, "main")).toMatchObject([{ round: 2 }]);
+  });
+
+  /**
+   * The rounds of a pull request are on its own branch, and reviewing one never checks that branch
+   * out, so a reset that keyed off the checkout would report nothing to forget while the rounds sat
+   * there — or forget the wrong branch's.
+   */
+  test("--reset with a pull request forgets that pull request's branch, not the checkout", () => {
+    changeCalculator();
+    gate([realFinding()]);
+    const local = roundsOf(repo, "main");
+    // The same shape a pull request review records: another branch, gated under the pr's id.
+    recordRound(repo, "feat/from-a-pr", headSha(repo), PR_ID, []);
+
+    const printed = capture(() => reviewCommand(repo, PR_ID, { reset: true }));
+
+    expect(printed).toContain("feat/from-a-pr");
+    expect(roundsOf(repo, "feat/from-a-pr")).toHaveLength(0);
+    // And the checkout's own rounds are untouched, which is the half that would have been silent.
+    expect(roundsOf(repo, "main")).toEqual(local);
+  });
+
+  test("says so when the last round's commit is not an ancestor of what is being read", () => {
+    gatedRound();
+    // Amending the gated commit itself is what takes it off the branch: its sha still resolves,
+    // because the object is there until a garbage collect, but it is no longer behind HEAD.
+    changeCalculator();
+    git(repo, ["add", "-f", CALCULATOR_FILE]);
+    git(repo, [
+      "-c",
+      "user.email=empo@example.com",
+      "-c",
+      "user.name=EmPo Test",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "--amend",
+      "-m",
+      "round one, amended",
+    ]);
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    expect(printed).toContain("is not an ancestor of what is being read");
   });
 
   test("falls back to the whole diff, out loud, when the round's commit is gone", () => {

@@ -58,6 +58,17 @@ export function resolveRef(repoRoot: string, ref: string): string | null {
 }
 
 /**
+ * Whether `sha` is behind the commit being read, which is what makes a diff against it read as work
+ * added rather than as work missing. A round gated on a branch that has since been rebased, or on a
+ * checkout that has diverged from the pull request now under review, fails this: the diff is still
+ * the honest difference between the two trees, but half of it is the other tree's commits showing
+ * up as deletions, and a reader told only "new since that review" would take it for progress.
+ */
+export function isAncestor(repoRoot: string, sha: string, of: string): boolean {
+  return run(repoRoot, "git", ["merge-base", "--is-ancestor", sha, of]).ok;
+}
+
+/**
  * The local working diff against a base ref: two dots, no second ref, so uncommitted work is in it.
  * This is what `empo review` with no PR argument reviews (docs/06-cli.md).
  */
