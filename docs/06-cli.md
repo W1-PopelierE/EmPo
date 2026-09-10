@@ -872,18 +872,21 @@ changes nothing about a review and killing it loses nothing but the window.
 
 The page shows what the terminal structurally cannot. The terminal prints a brief, goes quiet for
 some minutes, and then prints the survivors. The page shows the in-between: which changed file the
-reviewer is reading right now, **which changed files it never opened at all**, what it read *outside*
+reviewer is reading right now, **which changed files it opened and which it never did** (the opened
+ones carry a `✓`; the rest are the rows without one), what it read *outside*
 the diff (the blast radius it actually checked), and, after the gate, the dropped findings beside the
 survivors with the claim each one stood on. Two columns: the changed files, the files read outside
 the diff and the live tool stream on the left; the selected file's changed lines with findings marked
 on their line, and the findings list, on the right.
 
-**The right-hand pane is not a diff.** It shows the lines the selected file's hunks changed and only
-those: the removed run and the added run of each hunk, one after the other, each line carrying its
-number in the file it came from — so the two columns of numbers belong to two different revisions.
-There are no context lines around them, because the parsed hunks (`src/engine/diff.ts`) keep none.
-It answers "what changed here, and which findings sit on it", not "how does this file read now"; for
-that, open the file.
+**The right-hand pane is the hunks, not the file.** Each hunk is rebuilt in the order git wrote it
+— removals, additions, and the unchanged context between them — with an old and a new number column
+on every row, so a number is never ambiguous about which revision it belongs to. Code is coloured by
+a small tokeniser built into the page: strings, comments, numbers and keywords, nothing fetched from
+a network, nothing coloured in a file whose extension is not code, and one line at a time, so an
+unterminated block comment stops colouring at the end of its line. What falls outside the hunks is
+not there. It answers "what changed here, and which findings sit on it", not "how does this file
+read now"; for that, open the file.
 
 Nothing on it is reported by the agent. Every phase — brief, reading, findings, gated — is derived
 from a file `empo review` writes for its own reasons, so nothing on the page depends on an agent
@@ -899,7 +902,10 @@ preserve state for a UI would put a window's needs inside the discipline.
 **Under Codex there is no live tool stream.** The activity column is fed by a `PostToolUse` hook, and
 Codex has no hook mechanism (`empo update` ships it skills and nothing else), so under Codex the
 page still shows the diff, the findings and the gate's verdict, and the phase moves from brief
-straight to findings with nothing in between.
+straight to findings with nothing in between. The same hook feeds the `✓` beside a changed file, so
+under Codex no file is marked as opened either — an empty mark column there means unknown, not
+unread. The hook matches `Read` alone, so a file the reviewer only grepped or edited is unmarked
+under Claude too.
 
 It binds `127.0.0.1` and nothing else, serves GET and nothing else, and has no route that changes
 anything ([11-security-boundaries](11-security-boundaries.md)). Default port `7373`, walking upward

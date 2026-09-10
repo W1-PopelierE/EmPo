@@ -135,6 +135,31 @@ it read beyond the diff, and what the gate dropped.
 
 No syntax highlighting, no word-level diff highlighting in this version.
 
+> **Amendment, 2026-09-10, before merge.** Three sentences above are not what shipped.
+>
+> **Context lines.** `ChangedHunk` gained `context: ContextLine[]` (`{oldLine, newLine, text}`);
+> `added` and `removed` are untouched, so `changedLines` and the findings gate read exactly what they
+> always read. The page rebuilds the hunk in git's order out of the three arrays (`hunkRows`,
+> `src/web/render.ts`) and renders context dimmed, every row carrying an old *and* a new number
+> column — so one column no longer holds numbers from two revisions.
+>
+> **Syntax highlighting**, listed here as out of scope, shipped: a hand-written ~15-line tokeniser in
+> `src/web/render.ts` (strings, comments, numbers, keywords), no dependency and no CDN. It runs
+> *after* `esc()` and only ever wraps spans around already-escaped text; that ordering is the page's
+> whole XSS argument, because tokenising first would escape the spans and leave a diff's own
+> `</script>` live. It is skipped entirely for extensions it does not recognise as code, so a
+> markdown diff is not coloured, and it is single-line and stateless: an unterminated block comment
+> colours to the end of that line and no further.
+>
+> **The marker is inverted.** The left column marks the files that *have* been read, with a `✓`
+> glyph rather than colour alone. Before the reviewer opens its first file every changed file is
+> unread, so the marker this spec asked for marked every row and distinguished nothing. The signal
+> this section wanted — changed files the reviewer never opened — is still readable, as the absence
+> of a check; but only as an absence. The mark is the `tool-use` hook's log and nothing else, and
+> that hook's matcher is `Read` alone (`src/host/claude.ts:171`), so a file reached by `Grep` or
+> edited without being opened stays unmarked — and under Codex, which has no hooks, no file is ever
+> marked at all.
+
 ## Edge cases
 
 | case | behavior |
