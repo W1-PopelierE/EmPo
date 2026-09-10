@@ -3284,4 +3284,20 @@ describe("round awareness", () => {
     expect(changedRows(printed)).toContain(CALCULATOR_FILE);
     expect(changedRows(printed)).toContain(ORDER_TEST_FILE);
   });
+
+  test("the fallback names the tree it tested, not the commit that still resolves", () => {
+    gatedRound();
+    changeCalculator();
+    // The normal local case: the round was narrowed against a stash-create tree, git pruned that
+    // tree as unreachable, and the round's commit is still on the branch. Naming the commit here
+    // would tell the reader a live commit is gone.
+    const file = join(roundsDirOf(repo, "feat/rounds"), "001.json");
+    const round = JSON.parse(readFileSync(file, "utf8"));
+    writeFileSync(file, JSON.stringify({ ...round, tree: "0".repeat(40) }));
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    expect(printed).toContain("the tree round 1 read (0000000) is no longer in this repository");
+    expect(printed).not.toContain(`${round.sha.slice(0, 7)} is no longer`);
+  });
 });

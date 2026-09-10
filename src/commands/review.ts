@@ -1287,7 +1287,7 @@ function roundScope(
   // round had already read, under a heading calling it new.
   if (resolveRef(session.readRoot, last.tree) === null) {
     notes.push(
-      `round ${last.round + 1}: ${shortSha(last.sha)}, where round ${last.round} was reviewed, is ` +
+      `round ${last.round + 1}: the tree round ${last.round} read (${shortSha(last.tree)}) is ` +
         `no longer in this repository, so ${subject}.`,
     );
     return { last, diff: null };
@@ -1295,7 +1295,8 @@ function roundScope(
   const diff = diffAgainstBase(session.readRoot, last.tree);
   if (diff === null) {
     notes.push(
-      `round ${last.round + 1}: git could not diff against ${shortSha(last.sha)}, so ${subject}.`,
+      `round ${last.round + 1}: git could not diff against the tree round ${last.round} read ` +
+        `(${shortSha(last.tree)}), so ${subject}.`,
     );
     return { last, diff };
   }
