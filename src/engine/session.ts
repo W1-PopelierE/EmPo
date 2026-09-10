@@ -107,7 +107,13 @@ export function sessionDirs(repoRoot: string): string[] {
       // Not a session directory we can read: skip it and keep the rest.
     }
   }
-  return live.sort((a, b) => b.mtimeMs - a.mtimeMs).map((session) => session.dir);
+  const sorted = live.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  if (process.env.EMPO_DIAG === "1" && sorted.length > 1) {
+    process.stderr.write(
+      `EMPODIAG ${JSON.stringify({ root: ROOT, names: names.length, live: sorted.map((s) => [s.dir.split("/").pop(), s.mtimeMs]) })}\n`,
+    );
+  }
+  return sorted.map((session) => session.dir);
 }
 
 /** One log per repository, beside the sessions, so the hook needs no session id to write it. */
