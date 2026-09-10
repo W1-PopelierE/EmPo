@@ -132,7 +132,12 @@ On top of that graph:
   scheduler entry, and every dispatch it makes from inside a loop. How often either runs is a
   property of the data and
   not of the source, so EmPo prints the coordinate and claims nothing; going and reading what bounds
-  the loop is the reviewer's job, and a conclusion about it is a finding like any other.
+  the loop is the reviewer's job, and a conclusion about it is a finding like any other. A branch is
+  reviewed more than once, so every gated round is logged per branch and the next one is about what
+  has been written since the last one, plus the files the graph says those hunks can reach, which is
+  the half a naive incremental review drops. `--whole` reads the entire diff again and `--reset`
+  forgets the branch's rounds; which of the two subjects a brief is holding is stated in it and
+  never left to be worked out.
 - **`empo verify` and `empo check`** hold hand-curated critical chains, and `empo hook` makes those
   fire while an agent works rather than only when somebody types them.
 
