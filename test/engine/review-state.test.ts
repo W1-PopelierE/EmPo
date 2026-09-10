@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -61,6 +61,15 @@ function log(root: string, lines: { tool: string; path: string }[]): void {
   );
 }
 
+/** Like `log`, but the caller picks each line's `at` instead of stamping it with "now". */
+function logAt(root: string, lines: { at: string; tool: string; path: string }[]): void {
+  writeFileSync(
+    activityPath(root),
+    `${lines.map((one) => JSON.stringify(one)).join("\n")}\n`,
+    "utf8",
+  );
+}
+
 afterEach(() => {
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
@@ -104,5 +113,39 @@ describe("once phase 1 has written the brief", () => {
     expect(state.files.find((one) => one.path === "src/b.ts")?.read).toBe(false);
     expect(state.readOutsideDiff).toEqual(["src/engine/git.ts"]);
     expect(state.activity).toHaveLength(2);
+  });
+
+  test("ignores activity left over from a review that finished before this one started", () => {
+    const root = repo();
+    const dir = startReview(root);
+    // Written after the session directory, but stamped as if it happened long before this
+    // session existed — exactly what a previous review's unpruned log line looks like.
+    logAt(root, [{ at: new Date(0).toISOString(), tool: "Read", path: "src/a.ts" }]);
+    // Confirm the fixture actually is older than session.json's mtime, not just older in string form.
+    expect(new Date(0).getTime()).toBeLessThan(statSync(join(dir, "session.json")).mtimeMs);
+
+    const state = readReviewState(root, emptySnapshot());
+
+    expect(state.phase).toBe("brief");
+    expect(state.activity).toEqual([]);
+    expect(state.files.every((one) => one.read)).toBe(false);
+  });
+
+  test("keeps only the most recent 200 activity lines", () => {
+    const root = repo();
+    startReview(root);
+    const base = Date.now() + 60_000; // comfortably after session.json's mtime
+    const lines = Array.from({ length: 250 }, (_, index) => ({
+      at: new Date(base + index).toISOString(),
+      tool: "Read",
+      path: `src/file-${index}.ts`,
+    }));
+    logAt(root, lines);
+
+    const state = readReviewState(root, emptySnapshot());
+
+    expect(state.activity).toHaveLength(200);
+    expect(state.activity[0]?.path).toBe("src/file-50.ts");
+    expect(state.activity.at(-1)?.path).toBe("src/file-249.ts");
   });
 });

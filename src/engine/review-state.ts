@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { type ChangedFile, type ChangeStatus, parseDiff } from "./diff";
 import { activityPath, type ReviewSession, sessionDirs } from "./session";
@@ -82,11 +82,12 @@ export function readReviewState(repoRoot: string, previous: Snapshot): Snapshot 
   const dirs = sessionDirs(repoRoot);
   if (dirs.length === 0) return afterTeardown(repoRoot, previous);
 
-  const session = newestSession(dirs);
-  if (session === null) return { ...emptySnapshot(), liveSessions: dirs.length };
+  const found = newestSession(dirs);
+  if (found === null) return { ...emptySnapshot(), liveSessions: dirs.length };
+  const { session, startedAt } = found;
 
   const changed = readDiff(session);
-  const activity = readActivity(repoRoot);
+  const activity = readActivity(repoRoot, startedAt);
   const opened = new Set(activity.map((one) => one.path));
   const inDiff = new Set(changed.map((one) => one.path));
 
@@ -112,22 +113,32 @@ export function readReviewState(repoRoot: string, previous: Snapshot): Snapshot 
 }
 
 /**
- * The session the viewer follows when more than one is live. `sessionDirs` already sorts newest
- * first by mtime, so this only has to skip a directory whose `session.json` lost a race with
- * teardown or was never finished — reading is best-effort here, the way every source in this module
- * is, rather than a reason to show nothing while a second review is mid-write.
+ * The session the viewer follows when more than one is live, paired with when it started.
+ * `sessionDirs` already sorts newest first by mtime, so this only has to skip a directory whose
+ * `session.json` lost a race with teardown or was never finished — reading is best-effort here, the
+ * way every source in this module is, rather than a reason to show nothing while a second review is
+ * mid-write.
  *
  * Read directly off each directory rather than through `readSession` (which takes an id and
  * recomputes the same path) — `sessionDirs` already did the lookup, and the id on disk inside
  * `session.json` is not reliably recoverable from the directory name, which is a sanitized,
  * truncated slug plus a hash.
+ *
+ * `session.json`'s own mtime is this round's start: phase 1 writes it once, when it creates the
+ * session, and a later round gets a fresh file after teardown deletes the old one. That is what
+ * `readActivity` filters against, so the repo-wide activity log — one file shared by every review
+ * this repository ever runs — does not leak a previous, unrelated review's reads into this one.
  */
-function newestSession(dirs: string[]): ReviewSession | null {
+function newestSession(dirs: string[]): { session: ReviewSession; startedAt: number } | null {
   for (const dir of dirs) {
     try {
       const file = join(dir, "session.json");
       if (!existsSync(file)) continue;
-      return JSON.parse(readFileSync(file, "utf8")) as ReviewSession;
+      const session = JSON.parse(readFileSync(file, "utf8")) as ReviewSession;
+      // Floored: the filesystem's mtime can carry sub-millisecond precision `Date.parse` never
+      // does (nanoseconds rounded to a fraction of a millisecond), so an activity line logged in
+      // the same millisecond session.json was written can otherwise compare as slightly earlier.
+      return { session, startedAt: Math.floor(statSync(file).mtimeMs) };
     } catch {
       // Try the next directory; a half-written session.json is normal mid-write, not a failure.
     }
@@ -146,11 +157,18 @@ function readDiff(session: ReviewSession): ChangedFile[] {
 }
 
 /**
- * The activity log the `tool-use` hook appends to, tailed to the most recent lines a viewer can
- * usefully show. A line the hook half-wrote (a crash mid-append) is dropped rather than failing the
- * whole read, since one bad line should cost one line of history, not the display.
+ * The activity log the `tool-use` hook appends to, filtered to this session and tailed to the most
+ * recent lines a viewer can usefully show. A line the hook half-wrote (a crash mid-append) is
+ * dropped rather than failing the whole read, since one bad line should cost one line of history,
+ * not the display.
+ *
+ * `activityPath` is one file per repository, not per review, so without the `startedAt` filter a
+ * second review would inherit the first one's history: it would start in "reading" instead of
+ * "brief", and files the previous review opened would show as already read by this one. Filtering
+ * first and tailing after means the 200 lines kept are this session's, not 200 lines of whichever
+ * review happened to write last.
  */
-function readActivity(repoRoot: string): ActivityLine[] {
+function readActivity(repoRoot: string, startedAt: number): ActivityLine[] {
   try {
     const path = activityPath(repoRoot);
     if (!existsSync(path)) return [];
@@ -160,7 +178,8 @@ function readActivity(repoRoot: string): ActivityLine[] {
     const parsed: ActivityLine[] = [];
     for (const line of lines) {
       try {
-        parsed.push(JSON.parse(line) as ActivityLine);
+        const entry = JSON.parse(line) as ActivityLine;
+        if (Date.parse(entry.at) >= startedAt) parsed.push(entry);
       } catch {
         // One malformed line costs one line of history, not the read.
       }
