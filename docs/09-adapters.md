@@ -476,14 +476,22 @@ One tree outlives those directories, and it does not live beside them. It is the
 shape is a path rather than a file: under a root chosen at runtime, one directory per repository and
 one per branch inside it — `<repo-slug>-<repo-hash>/<branch-slug>-<branch-hash>/` — and inside that
 `001.json`, `002.json`, one file per gated round, appended and never rewritten. Each of them holds
-the round number, the commit that round was read at, the timestamp, the id of the review it belonged
-to (a pull request id, or `local`), the branch spelled out rather than only hashed into the path, and
-the findings that round got through the gate. The findings are the whole reason this is a log and not
-a number on disk: a counter can say this is round five, and only a log can say what round two found
-and whether the fix for it is the thing round five is now looking at. The id and the branch are what
-let `empo review 412 --reset` find the branch that pull request was gated on instead of whichever
-branch happens to be checked out, since reviewing a pull request never checks it out and the log
-already knows the answer a forge call would have gone to fetch.
+the round number, the commit that round was read at, the tree it actually read, the timestamp, the
+id of the review it belonged to (a pull request id, or `local`), the branch spelled out rather than
+only hashed into the path, and the findings that round got through the gate. Commit and tree are
+both there because they answer different questions: the commit is what the brief's ancestry note is
+about, and the tree is what the next round narrows against, which for a local review is mostly
+uncommitted work the commit says nothing about ([06-cli](06-cli.md)). A record written before the
+tree was kept falls back to the commit, which narrows no worse than that version did. The findings
+are the whole reason this is a log and not a number on disk: a counter can say this is round five,
+and only a log can say what round two found and whether the fix for it is the thing round five is
+now looking at. The id and the branch are what let `empo review 412 --reset` find the branch that
+pull request was gated on instead of whichever branch happens to be checked out, since reviewing a
+pull request never checks it out and the log already knows the answer a forge call would have gone
+to fetch. That search reads every round in a branch's directory, because the id lives in the
+records and not in the path, so one branch holds rounds under more than one id whenever a pull
+request review and a local review of it take turns, and the pull request's round is then not
+reliably the newest one there.
 
 Where the root is depends on what the machine can offer, and the test is applied rather than assumed:
 `XDG_RUNTIME_DIR` where it is set and private, else the OS temp directory where that is private, else
@@ -515,9 +523,14 @@ different commits that must not read each other's rounds. The readable slug is i
 human can find the directory a brief just named, and the digest behind it is what keeps `feat/x` and
 `feat-x` from landing in the same directory once slugging has flattened the difference away. The next
 round's number is taken from the file names and never from the records inside them, so a file that
-will not parse still occupies its number: a round that recomputed the same number would collide with
-it under `wx` on this run and on every run after it, and one unreadable file would block the log for
-good.
+will not parse still occupies its number, and a number already taken is stepped past rather than
+failed on. Both halves of that matter. An unreadable file occupies its number permanently, so a
+round that insisted on the number it first computed would collide under `wx` on this run and on
+every run after it, and one bad file would block the log for good. And two gates can land on one
+branch at the same moment — the shipped discipline says as much — where both compute the same
+number and only one of them wins the `wx`; dropping the loser threw away findings that had already
+passed a gate and cost the next review a whole re-read, for a collision the next free number
+settles.
 
 The log is outside a session directory because a session is torn down at the end of every gate, and
 the rounds are the one thing that has to survive that in order for the next round to say anything.

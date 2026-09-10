@@ -550,15 +550,15 @@ against a pull request nobody had named.
 **Rounds, `--whole` and `--reset`.** A branch is usually reviewed more than once, and nothing
 recorded that: every round diffed against the base again, so eleven rounds over one branch re-read
 the same seven hundred lines eleven times while each round had changed a few dozen. Phase 2 now
-appends to a round log — one file per gated round, holding that round's number, the commit phase 1
-read, the time, the id of the review it belonged to, the branch, and the findings that round got
-through the gate — in a directory keyed to this repository and this branch, outside the repository
-entirely ([09-adapters](09-adapters.md)) and never in it. A log and not a counter, because a counter
-answers how many rounds there have been and never what round two found, and a reader on round five
-has the second question far more often than the first. The brief prints the head of it back as one
-line under `branch`, `round 3 against this branch, last reviewed at 56abad4, 17 lines changed
-since`, which is the loop being visible to the person inside it; a branch nobody has gated
-has no such line.
+appends to a round log — one file per gated round, holding that round's number, the commit and the
+tree phase 1 read, the time, the id of the review it belonged to, the branch, and the findings that
+round got through the gate — in a directory keyed to this repository and this branch, outside the
+repository entirely ([09-adapters](09-adapters.md)) and never in it. A log and not a counter,
+because a counter answers how many rounds there have been and never what round two found, and a
+reader on round five has the second question far more often than the first. The brief prints the
+head of it back as one line under `branch`, `round 3 against this branch, last reviewed at 56abad4,
+17 lines changed since`, which is the loop being visible to the person inside it; a branch nobody
+has gated has no such line.
 
 Narrowing is what a round does by default now. Where a log exists for this branch the subject
 becomes the hunks written since the last gated round **plus the files the graph says those hunks can
@@ -568,6 +568,19 @@ breaks something the new hunks do not name. The brief says which files are which
 scope`, so a reader can tell this round's work from code that has been sitting there since round
 one. The diff on disk is untouched by all of this: the gate still holds every finding to the whole
 pull request, which is still the subject.
+
+Since the last gated round means since the tree that round read, and not since the commit it was
+standing on. A local `empo review` reads the working diff against the base, so most of what a round
+reads has never been committed, and a round that recorded only the commit could not tell the next
+round which of those lines it had already seen: with nothing committed in between, the next round
+diffed that commit against the working tree and handed back every line of the old work under the
+brief's own "17 lines changed since" and its heading for what is new since that review, which is the
+one failure narrowing exists to prevent. So phase 1 records the tree it read, as a `git stash
+create` commit where the tree is dirty and the commit itself where it is clean. That writes a single
+unreachable commit object and touches no ref, no index and no file, so the review still disturbs
+nothing in the checkout it reads. Being unreachable is also what lets a garbage collect take it
+later, which is the vanished-commit path the brief already announces. The commit stays in the record
+beside the tree, because it is the commit and not the tree that the ancestry note below is about.
 
 Where the last round's commit is not an ancestor of what is being read, the brief says so and keeps
 narrowing anyway. An amend, a rebase, or a branch that has moved apart from the one the round was
@@ -594,10 +607,15 @@ id it resets the branch that pull request was gated on rather than the one that 
 out, which is the only correct reading of the request: reviewing a pull request never checks it out,
 so the checked-out branch is a different loop wearing the same command. The branch comes off the log
 itself, where every round records the id it belonged to, so no forge call is spent asking a question
-the log already answers. It is the clean start there was no command for until now: a branch whose
-history has been rewritten under it, or a review whose narrowing has drifted somewhere a reader no
-longer trusts, gets to begin again at round one rather than living with a log nobody believes, and the print is there because deleting history
-silently is the one thing a command about forgetting must not do.
+the log already answers. Answering it reads every round in a branch's directory rather than only
+the newest, because one branch carries rounds under more than one id as soon as a pull request
+review and a plain local review take turns on it, and the pull request's round is then whichever
+one it happens to be: a search that looked only at the last round would report the branch as never
+gated under that id while its rounds sat on disk. It is the clean start there was no command for
+until now: a branch whose history has been rewritten under it, or a review whose narrowing has
+drifted somewhere a reader no longer trusts, gets to begin again at round one rather than living
+with a log nobody believes, and the print is there because deleting history silently is the one
+thing a command about forgetting must not do.
 
 **The brief also prints every dispatch a changed file makes from inside a loop**, under the heading
 `dispatches inside a loop  (step 2: what changed files can put on the queue)`, one row per site naming

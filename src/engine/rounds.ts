@@ -49,8 +49,15 @@ import { basename, join, resolve } from "node:path";
 export interface RoundRecord {
   /** 1 for the first gated round on this branch. The next review is this + 1. */
   round: number;
-  /** The commit phase 1 read. The next round diffs the working tree against this. */
+  /** The commit phase 1 read, which is what the ancestry note is about. */
   sha: string;
+  /**
+   * The tree phase 1 read, which is what the next round diffs against. Usually a `git stash create`
+   * commit and not `sha`, because most of a local review is uncommitted: a round that narrowed by
+   * `sha` alone would call the old uncommitted work new every time nothing had been committed in
+   * between. Falls back to `sha` on a record written before this field existed.
+   */
+  tree: string;
   /** ISO timestamp of the gate that wrote it, so a stale round can be read as stale. */
   at: string;
   /**
@@ -178,30 +185,49 @@ export function recordRound(
   repoRoot: string,
   branch: string | null,
   sha: string | null,
+  tree: string | null,
   id: string,
   findings: RoundFinding[],
 ): RoundRecord | null {
   if (branch === null || branch === "" || sha === null || sha === "") return null;
   const dir = roundsDir(repoRoot, branch);
-  const round = (roundFiles(repoRoot, branch).at(-1)?.[0] ?? 0) + 1;
-  const record: RoundRecord = { round, sha, at: new Date().toISOString(), id, branch, findings };
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     if (!ours(dir)) return null;
-    // `wx` is O_CREAT|O_EXCL, which refuses to follow a symlink and refuses to overwrite. A log
-    // that only ever appends needs nothing else, and it is what makes a shared temp root survivable.
-    writeFileSync(
-      join(dir, `${String(round).padStart(3, "0")}.json`),
-      `${JSON.stringify(record, null, 2)}\n`,
-      {
-        encoding: "utf8",
-        flag: "wx",
-      },
-    );
-    return record;
   } catch {
     return null;
   }
+  // Past a number already taken rather than failing on it. The number comes off the file names, so
+  // it is taken by an unparseable file, which is permanent, and by the winner of two gates landing
+  // on one branch at once, which the discipline says can happen. Dropping the loser's round there
+  // would lose its findings and cost the next review a whole re-read, for a collision that the
+  // next free number settles.
+  let round = (roundFiles(repoRoot, branch).at(-1)?.[0] ?? 0) + 1;
+  for (let attempt = 0; attempt < 16; attempt++, round++) {
+    const record: RoundRecord = {
+      round,
+      sha,
+      tree: tree === null || tree === "" ? sha : tree,
+      at: new Date().toISOString(),
+      id,
+      branch,
+      findings,
+    };
+    try {
+      // `wx` is O_CREAT|O_EXCL, which refuses to follow a symlink and refuses to overwrite. A log
+      // that only ever appends needs nothing else, and it is what makes a shared temp root
+      // survivable.
+      writeFileSync(
+        join(dir, `${String(round).padStart(3, "0")}.json`),
+        `${JSON.stringify(record, null, 2)}\n`,
+        { encoding: "utf8", flag: "wx" },
+      );
+      return record;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") return null;
+    }
+  }
+  return null;
 }
 
 /**
@@ -213,13 +239,21 @@ export function branchesGatedUnder(repoRoot: string, id: string): string[] {
   const root = canonicalRoot(repoRoot);
   const dir = join(roundsRoot(), key(basename(root), root));
   try {
-    return readdirSync(dir)
-      .map((name) => roundFilesIn(join(dir, name)).at(-1))
-      .map((file) => (file === undefined ? null : parseRound(file[1])))
-      .filter((round): round is RoundRecord => round !== null && round.id === id)
-      .map((round) => round.branch)
-      .filter((branch) => branch !== "")
-      .sort(compare);
+    return (
+      readdirSync(dir)
+        // Every round in the directory and not only the newest: one branch carries rounds under more
+        // than one id, because a pull request review and a plain local review of the same branch
+        // both land here, and a filter that saw only the last round would report a pull request's
+        // rounds as absent while they sat on disk.
+        .map((name) =>
+          roundFilesIn(join(dir, name))
+            .map(([, file]) => parseRound(file))
+            .find((round) => round !== null && round.id === id && round.branch !== ""),
+        )
+        .filter((round): round is RoundRecord => round !== undefined && round !== null)
+        .map((round) => round.branch)
+        .sort(compare)
+    );
   } catch {
     return [];
   }
@@ -266,6 +300,7 @@ function parseRound(path: string): RoundRecord | null {
     return {
       round: parsed.round,
       sha: parsed.sha,
+      tree: typeof parsed.tree === "string" && parsed.tree !== "" ? parsed.tree : parsed.sha,
       at: typeof parsed.at === "string" ? parsed.at : "",
       id: typeof parsed.id === "string" ? parsed.id : "local",
       branch: typeof parsed.branch === "string" ? parsed.branch : "",

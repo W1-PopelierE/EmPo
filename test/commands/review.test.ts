@@ -3109,6 +3109,32 @@ describe("round awareness", () => {
     expect(changedRows(printed)).not.toContain(ORDER_TEST_FILE);
   });
 
+  /**
+   * The case the round log exists for, and the one it used to get wrong. A local review reads
+   * `git diff <base>`, so most of what it reads is uncommitted, and a round that recorded only
+   * HEAD knew nothing about those lines: with nothing committed in between, the next round diffed
+   * HEAD against the tree and handed every one of them back under "new since that review". The
+   * round records the tree it read, not just the commit, so it does not.
+   */
+  test("the next round skips uncommitted work the last round already read", () => {
+    git(repo, ["checkout", "-q", "-b", "feat/uncommitted"]);
+    const before = headSha(repo);
+    // Round one's work, never committed, which is the ordinary shape of a local review.
+    changeCalculator();
+    gate([realFinding()]);
+
+    writeFileSync(
+      join(repo, ORDER_TEST_FILE),
+      `${readFileSync(join(repo, ORDER_TEST_FILE), "utf8")}\n// round two\n`,
+    );
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    // Nothing was committed between the two rounds, which is the whole of the case.
+    expect(headSha(repo)).toBe(before);
+    expect(changedRows(printed)).toContain(ORDER_TEST_FILE);
+    expect(changedRows(printed)).not.toContain(CALCULATOR_FILE);
+  });
+
   test("says which files are new and which are only in scope because the radius reaches them", () => {
     gatedRound();
     changeCalculator();
@@ -3207,7 +3233,7 @@ describe("round awareness", () => {
     gate([realFinding()]);
     const local = roundsOf(repo, "main");
     // The same shape a pull request review records: another branch, gated under the pr's id.
-    recordRound(repo, "feat/from-a-pr", headSha(repo), PR_ID, []);
+    recordRound(repo, "feat/from-a-pr", headSha(repo), headSha(repo), PR_ID, []);
 
     const printed = capture(() => reviewCommand(repo, PR_ID, { reset: true }));
 
@@ -3248,7 +3274,9 @@ describe("round awareness", () => {
     // What a rebase followed by a garbage collect does to the commit the last round was reviewed at.
     const file = join(roundsDirOf(repo, "feat/rounds"), "001.json");
     const round = JSON.parse(readFileSync(file, "utf8"));
-    writeFileSync(file, JSON.stringify({ ...round, sha: "0".repeat(40) }));
+    // Both coordinates go: the round's commit and the stash-create tree it was narrowed against
+    // are equally unreachable once the branch has been rebased away from under them.
+    writeFileSync(file, JSON.stringify({ ...round, sha: "0".repeat(40), tree: "0".repeat(40) }));
 
     const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
 

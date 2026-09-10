@@ -22,6 +22,7 @@ import {
   isAncestor,
   removeWorktree,
   resolveRef,
+  reviewedTree,
   shortSha,
 } from "../engine/git";
 import { readGraph, stalenessLines } from "../engine/graph";
@@ -127,6 +128,12 @@ interface ReviewSession {
    * past it unread. Null where git could not answer, which records nothing rather than a guess.
    */
   sha: string | null;
+  /**
+   * The tree phase 1 read, which is what the next round narrows against. Not the same thing as
+   * `sha`: a local review is mostly uncommitted work, so a round that recorded only the commit
+   * would tell the next round nothing about the lines it had actually read.
+   */
+  tree: string | null;
   diffPath: string;
 }
 
@@ -1056,6 +1063,7 @@ function isolate(
     base,
     sourceBranch: prMeta?.sourceBranch ?? currentBranch(repoRoot),
     sha: gitInfo(readRoot)?.sha ?? null,
+    tree: reviewedTree(readRoot),
     diffPath,
   };
   writeFileSync(join(dir, "session.json"), `${JSON.stringify(session, null, 2)}\n`, "utf8");
@@ -1274,14 +1282,17 @@ function roundScope(
     );
     return { last, diff: null };
   }
-  if (resolveRef(session.readRoot, last.sha) === null) {
+  // Against the tree that round read and not against its commit. Most of a local review is
+  // uncommitted, so narrowing by the commit would hand this round every uncommitted line the last
+  // round had already read, under a heading calling it new.
+  if (resolveRef(session.readRoot, last.tree) === null) {
     notes.push(
       `round ${last.round + 1}: ${shortSha(last.sha)}, where round ${last.round} was reviewed, is ` +
         `no longer in this repository, so ${subject}.`,
     );
     return { last, diff: null };
   }
-  const diff = diffAgainstBase(session.readRoot, last.sha);
+  const diff = diffAgainstBase(session.readRoot, last.tree);
   if (diff === null) {
     notes.push(
       `round ${last.round + 1}: git could not diff against ${shortSha(last.sha)}, so ${subject}.`,
@@ -1915,6 +1926,7 @@ function gatePhase(repoRoot: string, pr: string | undefined, options: ReviewOpti
         repoRoot,
         session.sourceBranch,
         session.sha ?? null,
+        session.tree ?? null,
         id,
         loggable(result),
       );
