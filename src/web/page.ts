@@ -7,8 +7,17 @@
  * so the worst a mistake in this file can do is show the reader something wrong.
  *
  * Every value from the snapshot is escaped on its way into the DOM. The snapshot carries a diff,
- * and a diff carries whatever somebody wrote in the branch, `</script>` included.
+ * and a diff carries whatever somebody wrote in the branch, `</script>` included. The one thing that
+ * adds markup after escaping is `highlight`, which is why it only ever wraps spans around text that
+ * has already been through `esc()`.
+ *
+ * The two functions with real logic in them live in `./render` and are pasted in here as source.
+ * That keeps them under test — a template string is not runnable by the suite — without a build
+ * step, a bundle or a second copy that drifts from the first. They are assigned to a name declared
+ * here rather than injected as declarations, so a bundler renaming them cannot break the call sites.
  */
+import { highlight, hunkRows } from "./render";
+
 export function page(): string {
   return `<!doctype html>
 <html lang="en">
@@ -18,10 +27,11 @@ export function page(): string {
 <title>empo web</title>
 <style>
 :root { color-scheme: light dark; --bg:#fff; --fg:#1a1a1a; --dim:#6a6a6a; --line:#dcdcdc;
-  --add:#e6ffec; --del:#ffebe9; --mark:#b34700; --panel:#f7f7f7; }
+  --add:#e6ffec; --del:#ffebe9; --mark:#b34700; --panel:#f7f7f7;
+  --tok-k:#cf222e; --tok-s:#0a3069; --tok-n:#0550ae; }
 @media (prefers-color-scheme: dark) {
   :root { --bg:#161616; --fg:#e6e6e6; --dim:#8f8f8f; --line:#333; --add:#15311d; --del:#3a1a1a;
-    --mark:#ffa657; --panel:#1e1e1e; }
+    --mark:#ffa657; --panel:#1e1e1e; --tok-k:#ff7b72; --tok-s:#a5d6ff; --tok-n:#79c0ff; }
 }
 * { box-sizing: border-box; }
 body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
@@ -43,12 +53,18 @@ li { padding:2px 0; }
 .file[aria-current="true"] { background:var(--panel); outline:1px solid var(--line); }
 .file .name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .plus { color:#1a7f37; } .minus { color:#c0392b; }
-.unread { color:var(--mark); }
+/* A glyph, not a colour: read and unread have to be told apart without seeing the difference. */
+.mark { display:inline-block; width:1.1em; flex:none; color:var(--dim); }
 .hunk { border:1px solid var(--line); border-radius:4px; margin:0 0 12px; overflow-x:auto; }
 .hunk .head { background:var(--panel); color:var(--dim); padding:2px 8px; border-bottom:1px solid var(--line); }
 .row { display:flex; white-space:pre; }
-.row .n { width:60px; flex:none; text-align:right; padding-right:10px; color:var(--dim); }
+.row .ln { width:46px; flex:none; text-align:right; padding-right:10px; color:var(--dim); }
 .row.add { background:var(--add); } .row.del { background:var(--del); }
+.row.context { color:var(--dim); }
+/* Tokens, wrapped around already-escaped text by highlight(). */
+.row .k { color:var(--tok-k); } .row .s { color:var(--tok-s); } .row .n { color:var(--tok-n); }
+.row .c { color:var(--dim); font-style:italic; }
+.row.context .k, .row.context .s, .row.context .n, .row.context .c { color:inherit; }
 .row.hit { box-shadow:inset 3px 0 0 var(--mark); }
 .finding { border:1px solid var(--line); border-radius:4px; padding:8px 10px; margin:0 0 8px; }
 .finding.dropped { opacity:.65; }
@@ -87,6 +103,9 @@ li { padding:2px 0; }
 const esc = (v) => String(v ?? "")
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const el = (id) => document.getElementById(id);
+
+const hunkRows = ${hunkRows};
+const highlight = ${highlight};
 
 let snapshot = null;
 let selected = null;
@@ -129,7 +148,11 @@ function render(next) {
 }
 
 function fileRow(file) {
-  const mark = file.read ? "" : '<span class="unread" title="never opened">*</span>';
+  // What was read, not what was not: before a review opens its first file every changed file is
+  // unread, and a mark on all of them marks nothing.
+  const mark = file.read
+    ? '<span class="mark" title="opened during this review">\u2713</span>'
+    : '<span class="mark" title="not opened yet"> </span>';
   const findings = file.findingCount > 0
     ? '<span class="tag">' + Number(file.findingCount) + "</span>"
     : "";
@@ -177,15 +200,20 @@ function renderDiff(files) {
 function hunkBlock(hunk, marks) {
   const head = "@@ -" + hunk.oldStart + "," + hunk.oldLines
     + " +" + hunk.newStart + "," + hunk.newLines + " @@";
-  const rows = hunk.removed.map((line) => row("del", line, false))
-    .concat(hunk.added.map((line) => row("add", line, marks.has(line.line))));
+  const rows = hunkRows(hunk).map((r) => row(r, marks));
   return '<div class="hunk"><div class="head">' + esc(head) + "</div>" + rows.join("") + "</div>";
 }
 
-function row(kind, line, hit) {
-  return '<div class="row ' + kind + (hit ? " hit" : "") + '">'
-    + '<span class="n">' + Number(line.line) + "</span>"
-    + "<span>" + (kind === "add" ? "+" : "-") + esc(line.text) + "</span></div>";
+const SIGN = { add: "+", del: "-", context: " " };
+
+// Escape first, colour second. highlight() puts spans into the string, so what it is handed has to
+// be text already: the reverse order would escape the spans and leave the diff's own markup live.
+function row(r, marks) {
+  const hit = r.newLine !== null && marks.has(r.newLine);
+  return '<div class="row ' + r.kind + (hit ? " hit" : "") + '">'
+    + '<span class="ln">' + (r.oldLine === null ? "" : Number(r.oldLine)) + "</span>"
+    + '<span class="ln">' + (r.newLine === null ? "" : Number(r.newLine)) + "</span>"
+    + "<span>" + SIGN[r.kind] + highlight(esc(r.text)) + "</span></div>";
 }
 
 function renderFindings() {

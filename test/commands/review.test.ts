@@ -2217,6 +2217,7 @@ describe("narrowToChangedLines", () => {
           newLines: added.length,
           added: added.map((line) => ({ line, text: "  return 0;" })),
           removed: [],
+          context: [],
         },
       ],
       addedCount: added.length,
@@ -2277,6 +2278,7 @@ describe("narrowToChangedLines", () => {
         newLines: 0,
         added: [],
         removed: removed.map((line) => ({ line, text: "  return 0;" })),
+        context: [],
       },
     ];
     return file;
