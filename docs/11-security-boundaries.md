@@ -64,6 +64,40 @@ constraints travel with it. Moving a lesson into a public repository does not re
 it was learned on. When in doubt about whether something is safe to publish, treat it as private and
 ask. The cost of asking is a message; the cost of leaking is unrecoverable.
 
+## The one runtime listener
+
+Everything above is about what this repository ships. `empo web` is a different kind of boundary,
+and the first of its kind here: it is the only command that opens a socket and keeps it open. It
+serves a private codebase's diff and source to a browser, so the rules it follows are not
+conveniences.
+
+**It binds `127.0.0.1`, and there is no flag to change that.** Not `0.0.0.0`, not an interface the
+user picks. A viewer that can be reached from the network is a code-exfiltration route wearing a
+UI, and the flag that would allow it is the way that happens quietly, later.
+
+**Every route is a GET, and none of them writes.** The viewer cannot change a finding, a config, a
+file or a round. That is by design in this version and not by omission: acting on findings from the
+browser is the obvious next feature and it is deliberately not built yet
+([the design](superpowers/specs/2026-09-10-empo-web-design.md)).
+
+**File content comes only from the active session's read root.** A requested path is resolved and
+then proven to be inside that root — after `realpath`, so that a symlink inside the root pointing
+out of it is refused too, which the lexical check alone cannot see. A path that climbs out is
+refused, never normalized into something servable, and with no session there is no read root and so
+no file at all. A path that is inside the root but absent is reported as absent rather than refused,
+because a diff cites deleted files and telling their reader "outside the read root" would send them
+hunting a breach that never happened.
+
+**The `Host` header is checked, and anything but loopback is refused.** Binding loopback keeps the
+network out but not the reader's own browser: any page they visit while the viewer is up can point
+its own domain at `127.0.0.1` and then read this origin as its own, which is DNS rebinding. The
+`Host` header is what tells a request for `localhost` apart from a request for `evil.example`
+resolved to `127.0.0.1`, so it is the check that closes it.
+
+The viewer holds a diff and the suspected findings in memory, because the gate deletes them from
+disk. That memory lives in one process on one machine, for as long as the reader leaves the window
+open, and goes nowhere.
+
 ## A publish checklist
 
 Run this before any commit that touches `examples/` or docs, and before any release:

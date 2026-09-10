@@ -27,6 +27,7 @@ tool, and adding the call quietly later would be the way that happens.
 | `empo verify` | Resolve every spine citation, report drift | no | no |
 | `empo check` | Commit gate: spine touched without a value-asserting test? | no | no |
 | `empo review [<pr>]` | Run the review discipline over a PR or local diff | yes | only via `gh`; an `mcp` forge makes none |
+| `empo web` | Serve a local, read-only viewer of the review in progress on `127.0.0.1` | no | no, and it binds loopback only |
 | `empo update` | Regenerate the host wiring, `AGENTS.md`, `.claude/` and `.codex/`, from this config | no | no |
 | `empo upgrade` | Replace this standalone binary with the latest GitHub Release | no | **yes**, and it is the only one |
 | `empo doctor` | Health: staleness, config validity, unmapped dirs, bridge match rates, unclaimed files, wired hooks that do not run, `commit` vs git | no | no |
@@ -862,6 +863,43 @@ verified findings to the PR, off by default, and unavailable on an `mcp` forge, 
 diff against the base instead of narrowing to what has changed since the last gated round),
 `--reset` (forget every gated round on the branch under review and print what was thrown away), and
 `--repo <path>`.
+
+## `empo web`
+
+A viewer, on `127.0.0.1`, for a review while it is happening. It is long-running: start it in its
+own terminal, leave it up, and run reviews beside it. It reads and never writes, so starting it
+changes nothing about a review and killing it loses nothing but the window.
+
+The page shows what the terminal structurally cannot. The terminal prints a brief, goes quiet for
+some minutes, and then prints the survivors. The page shows the in-between: which changed file the
+reviewer is reading right now, **which changed files it never opened at all**, what it read *outside*
+the diff (the blast radius it actually checked), and, after the gate, the dropped findings beside the
+survivors with the claim each one stood on. Two columns: the changed files, the files read outside
+the diff and the live tool stream on the left; the selected file's hunks with findings marked on
+their line, and the findings list, on the right.
+
+Nothing on it is reported by the agent. Every phase — brief, reading, findings, gated — is derived
+from a file `empo review` writes for its own reasons, so nothing on the page depends on an agent
+being honest about its own progress.
+
+**Start it before the review, not after.** Phase 2 deletes the session directory, which is where the
+diff and the suspected findings live ([07-review-discipline](07-review-discipline.md), invariant 2).
+A viewer that was up while the review ran holds both in memory and keeps showing them after the
+gate, marked as finished; one started afterwards has nothing to read and says so, rather than
+showing an empty review. This is the lifecycle's shape and not a bug in the viewer: making `review`
+preserve state for a UI would put a window's needs inside the discipline.
+
+**Under Codex there is no live tool stream.** The activity column is fed by a `PostToolUse` hook, and
+Codex has no hook mechanism (`empo update` ships it skills and nothing else), so under Codex the
+page still shows the diff, the findings and the gate's verdict, and the phase moves from brief
+straight to findings with nothing in between.
+
+It binds `127.0.0.1` and nothing else, serves GET and nothing else, and has no route that changes
+anything ([11-security-boundaries](11-security-boundaries.md)). Default port `7373`, walking upward
+until one is free, because the usual collision is a viewer a previous review left running; the
+address it bound is printed. Flags: `--port <n>` (pin it, and fail rather than walk) and
+`--repo <path>`. One repository per process: two repositories are two viewers on two ports. Where
+two reviews are live in one repository the newest is shown, with a line saying how many there are.
 
 ## `empo update`
 

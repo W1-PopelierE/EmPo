@@ -239,6 +239,47 @@ describe("once the reviewer has written findings", () => {
     expect(after.note).toContain("session finished");
   });
 
+  // The gate records the round and deletes the session twenty lines later, so a poll at any sane
+  // interval sees the findings before it and the round after, and practically never both at once.
+  // Without the crossing on the way past, the verdict the whole viewer exists to show never renders.
+  test("crosses the round into the carried findings when the gate deleted the session first", () => {
+    const root = repo();
+    const dir = startReview(root);
+    writeFindings(dir, ["f1", "f2"]);
+    const before = readReviewState(root, emptySnapshot());
+    expect(before.findings.every((one) => one.survived === null)).toBe(true);
+
+    recordRound(root, "feat/x", "abc123", "def456", "local", [
+      { id: "f1", kind: "diff", severity: "major", title: "f1 title", file: "src/a.ts", line: 2 },
+    ]);
+    rmSync(dir, { recursive: true, force: true });
+    const after = readReviewState(root, before);
+
+    expect(after.phase).toBe("gated");
+    expect(after.round).toBe(1);
+    expect(after.findings.find((one) => one.id === "f1")?.survived).toBe(true);
+    expect(after.findings.find((one) => one.id === "f2")?.survived).toBe(false);
+    expect(after.findings.find((one) => one.id === "f2")?.claim).toBe("f2 claim");
+  });
+
+  // Matched on the tree phase 1 read, so a round from an earlier review of the same branch cannot
+  // be read as this one's verdict and mark findings a gate never saw.
+  test("leaves the carried findings ungraded when the only round is from another tree", () => {
+    const root = repo();
+    const dir = startReview(root);
+    writeFindings(dir, ["f1"]);
+    const before = readReviewState(root, emptySnapshot());
+
+    recordRound(root, "feat/x", "abc123", "other-tree", "local", [
+      { id: "f1", kind: "diff", severity: "major", title: "f1 title", file: "src/a.ts", line: 2 },
+    ]);
+    rmSync(dir, { recursive: true, force: true });
+    const after = readReviewState(root, before);
+
+    expect(after.round).toBeNull();
+    expect(after.findings[0]?.survived).toBeNull();
+  });
+
   // A round record with no session and no previous snapshot cannot be crossed with anything: with
   // no session directory there is no sourceBranch to read the record with, so the viewer stays idle
   // rather than showing a review it arrived too late to have witnessed.

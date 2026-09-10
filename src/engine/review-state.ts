@@ -296,8 +296,35 @@ function readActivity(repoRoot: string, startedAt: number): ActivityLine[] {
  * What to show once no session directory survives. A review that ran in this process's lifetime
  * left its last snapshot behind, so that carries forward with a note explaining why it is frozen; a
  * viewer that never saw a session has nothing to carry and stays idle.
+ *
+ * The gate's verdict is read here rather than only in `readReviewState`, because the two things it
+ * needs never coexist for long: `recordRound` and the teardown that deletes the session directory
+ * are twenty lines apart (`src/commands/review.ts`), so a poll at any sane interval sees the
+ * findings before and the round after, and practically never both at once. Crossing the carried
+ * findings with the round on the way past is what makes survivors and dropped findings show at all.
  */
-function afterTeardown(_repoRoot: string, previous: Snapshot): Snapshot {
+function afterTeardown(repoRoot: string, previous: Snapshot): Snapshot {
   if (previous.session === null) return emptySnapshot();
-  return { ...previous, phase: "gated", note: "session finished; showing its last state" };
+  const frozen: Snapshot = {
+    ...previous,
+    phase: "gated",
+    note: "session finished; showing its last state",
+  };
+  if (previous.round !== null) return frozen;
+
+  // Matched on the tree phase 1 read, not on time: that is exactly what the gate writes down about
+  // the review it gated, so an older round on the same branch cannot be mistaken for this verdict.
+  const tree = previous.session.tree;
+  if (tree === null) return frozen;
+  const round = readRounds(repoRoot, previous.session.sourceBranch)
+    .filter((one) => one.tree === tree)
+    .at(-1);
+  if (round === undefined) return frozen;
+
+  const survivors = new Set(round.findings.map((one) => one.id));
+  return {
+    ...frozen,
+    round: round.round,
+    findings: previous.findings.map((one) => ({ ...one, survived: survivors.has(one.id) })),
+  };
 }
