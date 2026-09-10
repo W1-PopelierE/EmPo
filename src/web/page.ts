@@ -194,13 +194,13 @@ function renderDiff(files) {
     return;
   }
   const marks = new Set(lines);
-  el("diff").innerHTML = changed.hunks.map((hunk) => hunkBlock(hunk, marks)).join("");
+  el("diff").innerHTML = changed.hunks.map((hunk) => hunkBlock(hunk, marks, file.path)).join("");
 }
 
-function hunkBlock(hunk, marks) {
+function hunkBlock(hunk, marks, path) {
   const head = "@@ -" + hunk.oldStart + "," + hunk.oldLines
     + " +" + hunk.newStart + "," + hunk.newLines + " @@";
-  const rows = hunkRows(hunk).map((r) => row(r, marks));
+  const rows = hunkRows(hunk).map((r) => row(r, marks, path));
   return '<div class="hunk"><div class="head">' + esc(head) + "</div>" + rows.join("") + "</div>";
 }
 
@@ -208,12 +208,12 @@ const SIGN = { add: "+", del: "-", context: " " };
 
 // Escape first, colour second. highlight() puts spans into the string, so what it is handed has to
 // be text already: the reverse order would escape the spans and leave the diff's own markup live.
-function row(r, marks) {
+function row(r, marks, path) {
   const hit = r.newLine !== null && marks.has(r.newLine);
   return '<div class="row ' + r.kind + (hit ? " hit" : "") + '">'
     + '<span class="ln">' + (r.oldLine === null ? "" : Number(r.oldLine)) + "</span>"
     + '<span class="ln">' + (r.newLine === null ? "" : Number(r.newLine)) + "</span>"
-    + "<span>" + SIGN[r.kind] + highlight(esc(r.text)) + "</span></div>";
+    + "<span>" + SIGN[r.kind] + highlight(esc(r.text), path) + "</span></div>";
 }
 
 function renderFindings() {

@@ -81,37 +81,52 @@ describe("hunkRows", () => {
   });
 });
 
+/** Every case below is a line out of a TypeScript file, which is what the page colours. */
+const colour = (text: string) => highlight(text, "src/x.ts");
+
 describe("highlight", () => {
   test("leaves escaped markup escaped and adds only spans", () => {
     // The input is what `esc()` produced, so a diff line holding a closing script tag arrives here
     // already defanged. Nothing in the output may put a raw `<` back into it except this file's own
     // spans, which is the page's entire XSS story now that it renders every line of a diff.
     const escaped = "const end = &quot;&lt;/script&gt;&quot;;";
-    const out = highlight(escaped);
+    const out = highlight(escaped, "src/x.ts");
 
     expect(out).toContain("&lt;/script&gt;");
     expect(out.replace(/<\/?span[^>]*>/g, "")).toBe(escaped);
   });
 
   test("colours a keyword, a number, a string and a comment", () => {
-    const out = highlight("const n = 42; // a note");
+    const out = colour("const n = 42; // a note");
 
     expect(out).toContain('<span class="k">const</span>');
     expect(out).toContain('<span class="n">42</span>');
     expect(out).toContain('<span class="c">// a note</span>');
-    expect(highlight("&quot;hi&quot;")).toBe('<span class="s">&quot;hi&quot;</span>');
+    expect(colour("&quot;hi&quot;")).toBe('<span class="s">&quot;hi&quot;</span>');
   });
 
   test("does not read a comment inside a string", () => {
-    expect(highlight("&quot;http://x&quot;")).toBe('<span class="s">&quot;http://x&quot;</span>');
+    expect(colour("&quot;http://x&quot;")).toBe('<span class="s">&quot;http://x&quot;</span>');
   });
 
   test("does not colour a keyword that is part of a longer word", () => {
-    expect(highlight("constant")).toBe("constant");
+    expect(colour("constant")).toBe("constant");
   });
 
   test("returns an empty line unchanged", () => {
-    expect(highlight("")).toBe("");
+    expect(colour("")).toBe("");
+  });
+
+  test("leaves a prose file alone", () => {
+    // A markdown diff is full of "for", "while" and "of" in sentences. Colouring them turns a
+    // documentation change into confetti and tells the reader nothing.
+    expect(highlight("a note for the reader", "docs/06-cli.md")).toBe("a note for the reader");
+  });
+
+  test("reads a jsdoc continuation line as a comment", () => {
+    expect(highlight(" * this is prose", "src/x.ts")).toBe(
+      '<span class="c"> * this is prose</span>',
+    );
   });
 });
 

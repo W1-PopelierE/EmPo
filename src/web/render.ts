@@ -62,11 +62,18 @@ export function hunkRows(hunk: ChangedHunk): DiffRow[] {
  * line and why an unterminated string colours nothing: there is no state between rows, and a diff
  * hands you the middle of a file anyway. Deliberately small — this is a viewer, not an editor.
  */
-export function highlight(escaped: string): string {
+export function highlight(escaped: string, path: string): string {
+  // Prose is not code. Colouring "for" and "while" inside a sentence turns a documentation diff into
+  // confetti, so a file this does not recognise is shown as it is.
+  if (
+    !/\.(?:ts|tsx|js|jsx|mjs|cjs|json|css|scss|html|py|go|rs|rb|java|c|h|cc|cpp|sh|zsh)$/.test(path)
+  ) {
+    return escaped;
+  }
   // `&quot;` is what escaping left of a double quote. Strings come first so a `//` inside one is not
   // read as a comment, and comments come before the rest so code inside one is not coloured twice.
   const token =
-    /(&quot;.*?&quot;|'[^']*'|`[^`]*`)|(\/\/.*|\/\*.*?(?:\*\/|$))|(\b\d[\w.]*)|(\b(?:as|async|await|break|case|catch|class|const|continue|default|delete|do|else|enum|export|extends|finally|for|from|function|if|implements|import|in|instanceof|interface|let|new|of|private|protected|public|readonly|return|static|super|switch|this|throw|try|type|typeof|var|void|while|yield|null|undefined|true|false)\b)/g;
+    /(&quot;.*?&quot;|'[^']*'|`[^`]*`)|(\/\/.*|\/\*.*?(?:\*\/|$)|^\s*\*.*)|(\b\d[\w.]*)|(\b(?:as|async|await|break|case|catch|class|const|continue|default|delete|do|else|enum|export|extends|finally|for|from|function|if|implements|import|in|instanceof|interface|let|new|of|private|protected|public|readonly|return|static|super|switch|this|throw|try|type|typeof|var|void|while|yield|null|undefined|true|false)\b)/g;
   return escaped.replace(token, (match, str, comment, num) => {
     const kind =
       str !== undefined ? "s" : comment !== undefined ? "c" : num !== undefined ? "n" : "k";
