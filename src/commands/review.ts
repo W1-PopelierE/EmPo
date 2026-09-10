@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createForge, type HostPullRequestInput } from "../adapters/forge/create";
 import { type ForgeAdapter, hasCapability, type PullRequest } from "../adapters/forge/types";
@@ -29,15 +28,14 @@ import { type GuardedTouch, guardedTouches } from "../engine/guard";
 import { compareStrings } from "../engine/order";
 import {
   branchesGatedUnder,
-  canonicalRoot,
   lastRound,
-  pathKey,
   type RoundFinding,
   type RoundRecord,
   recordRound,
   resetRounds,
   roundsDir,
 } from "../engine/rounds";
+import { type ReviewSession, readSession, sessionDir } from "../engine/session";
 import {
   type CitationDrift,
   type LoadedSpine,
@@ -110,31 +108,6 @@ export interface ReviewOptions {
    * looks exactly like one that had none to forget.
    */
   reset?: boolean;
-}
-
-/** What phase 1 leaves behind so phase 2 can verify against the same code the review read. */
-interface ReviewSession {
-  id: string;
-  repoRoot: string;
-  /** Where citations are resolved: a detached worktree for a PR, the checkout for a local diff. */
-  readRoot: string;
-  worktree: string | null;
-  base: string;
-  sourceBranch: string | null;
-  /**
-   * The revision phase 1 actually read, so the gate records that and not wherever HEAD has since
-   * gone. A local review is the case that bites: commit or amend between the brief and the gate and
-   * a round taken at gate time would name a commit nobody reviewed, and the next round would skip
-   * past it unread. Null where git could not answer, which records nothing rather than a guess.
-   */
-  sha: string | null;
-  /**
-   * The tree phase 1 read, which is what the next round narrows against. Not the same thing as
-   * `sha`: a local review is mostly uncommitted work, so a round that recorded only the commit
-   * would tell the next round nothing about the lines it had actually read.
-   */
-  tree: string | null;
-  diffPath: string;
 }
 
 interface FileFacts {
@@ -2201,32 +2174,6 @@ function teardown(repoRoot: string, id: string, session: ReviewSession | null): 
 // ---------------------------------------------------------------------------------------------
 // Session plumbing
 // ---------------------------------------------------------------------------------------------
-
-/**
- * Scratch lives in the OS temp directory, never under .empo/. `generated/` is machine-owned by
- * empo index alone (docs/02-on-disk-layout.md), and a review must disturb nothing in the repository
- * it is reviewing.
- *
- * The repository is half the key because the id alone does not identify a review: a local one is
- * always "local", so every checkout on one machine would share one directory and each review would
- * tear down the one already running. That is not merely lost scratch. Phase 2 recovers its read root
- * from session.json, so a shared directory hands one repository's findings the other repository's
- * source to verify against, and a claim that stands on nothing comes back verified. The readable id
- * stays in the name so a human can still find the directory a brief just named.
- */
-function sessionDir(repoRoot: string, id: string): string {
-  return join(tmpdir(), "empo-review", pathKey(id, canonicalRoot(repoRoot)));
-}
-
-function readSession(repoRoot: string, id: string): ReviewSession | null {
-  const file = join(sessionDir(repoRoot, id), "session.json");
-  if (!existsSync(file)) return null;
-  try {
-    return JSON.parse(readFileSync(file, "utf8")) as ReviewSession;
-  } catch {
-    return null;
-  }
-}
 
 /** Remove a previous session's worktree before its directory, or git keeps a dangling entry. */
 function rmSession(repoRoot: string, dir: string): void {
