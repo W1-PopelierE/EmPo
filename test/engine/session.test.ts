@@ -1,8 +1,27 @@
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { activityPath, readSession, sessionDir, sessionDirs } from "../../src/engine/session";
+
+/**
+ * Lets one test decide what order the session directories are enumerated in. A tie-break test that
+ * reads the real directory proves nothing: this filesystem happens to return names alphabetically,
+ * which is the answer a broken comparator falls back to, so the test would pass without the
+ * tie-break and fail only on a machine that enumerates differently — the exact failure mode the
+ * tie-break exists to remove. Off by default, so every other test here sees the real readdir.
+ */
+const listing = vi.hoisted(() => ({ reversed: false }));
+vi.mock("node:fs", async (importActual) => {
+  const real = await importActual<typeof import("node:fs")>();
+  return {
+    ...real,
+    readdirSync: (...args: Parameters<typeof real.readdirSync>) => {
+      const names = real.readdirSync(...args);
+      return listing.reversed ? [...names].reverse() : names;
+    },
+  };
+});
 
 const temps: string[] = [];
 
@@ -101,6 +120,26 @@ describe("where a review session lives", () => {
     writeFileSync(join(older, "findings.json"), "[]");
 
     expect(sessionDirs(root)).toEqual([newer, older]);
+  });
+
+  test("breaks an mtime tie on the directory name, not on enumeration order", () => {
+    const root = repo();
+    // One timestamp for both, which is what a coarse-granularity filesystem hands every session a
+    // review creates in the same moment. They are created in the opposite order to the one the
+    // names sort in, so creation order — what readdir returns here — cannot be mistaken for a pass.
+    const at = Date.now();
+    const local = session(sessionDir(root, "local"), at);
+    const numbered = session(sessionDir(root, "42"), at);
+
+    expect(sessionDirs(root)).toEqual([numbered, local]);
+
+    // Same sessions, enumerated the other way round: the answer may not move.
+    listing.reversed = true;
+    try {
+      expect(sessionDirs(root)).toEqual([numbered, local]);
+    } finally {
+      listing.reversed = false;
+    }
   });
 
   test("puts the activity log beside the sessions, one per repository", () => {
