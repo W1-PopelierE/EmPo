@@ -64,6 +64,44 @@ constraints travel with it. Moving a lesson into a public repository does not re
 it was learned on. When in doubt about whether something is safe to publish, treat it as private and
 ask. The cost of asking is a message; the cost of leaking is unrecoverable.
 
+## The one runtime listener
+
+Everything above is about what this repository ships. `empo web` is a different kind of boundary,
+and the first of its kind here: it is the only command that opens a socket and keeps it open. It
+serves a private codebase's diff and source to a browser, so the rules it follows are not
+conveniences.
+
+**It binds `127.0.0.1`, and there is no flag to change that.** Not `0.0.0.0`, not an interface the
+user picks. A viewer that can be reached from the network is a code-exfiltration route wearing a
+UI, and the flag that would allow it is the way that happens quietly, later.
+
+**Every route is a GET, and none of them writes.** The viewer cannot change a finding, a config, a
+file or a round. That is by design in this version and not by omission: acting on findings from the
+browser is the obvious next feature and it is deliberately not built yet
+([the design](superpowers/specs/2026-09-10-empo-web-design.md)).
+
+**No route serves file bytes.** The page renders the diff out of the snapshot, so nothing on the
+listener reads a file and streams it back, and there is no path parameter to contain. A viewer that
+served whole files would be the one place on this surface where a containment mistake mattered, and
+the rule it would need is not written down as a guarantee here until something exercises it.
+
+**The `Host` header is checked, and anything but loopback is refused.** Binding loopback keeps the
+network out but not the reader's own browser: any page they visit while the viewer is up can point
+its own domain at `127.0.0.1` and then read this origin as its own, which is DNS rebinding. The
+`Host` header is what tells a request for `localhost` apart from a request for `evil.example`
+resolved to `127.0.0.1`, so it is the check that closes it.
+
+The viewer holds a diff and the suspected findings in memory, because the gate deletes them from
+disk. That memory lives in one process on one machine, for as long as the reader leaves the window
+open, and goes nowhere.
+
+**What feeds it is a file, and that file is `0600`.** The activity log the `tool-use` hook writes
+([10-distribution](10-distribution.md)) names every file the reviewer opened, which is a map of a
+private codebase whoever can read it. It sits under `os.tmpdir()`, private per user on macOS and the
+shared `/tmp` on a Linux box with no `XDG_RUNTIME_DIR`, so the mode is set on the file rather than
+assumed from the directory — on creation, and again on every append, because a mode argument does
+nothing to a file that already exists.
+
 ## A publish checklist
 
 Run this before any commit that touches `examples/` or docs, and before any release:

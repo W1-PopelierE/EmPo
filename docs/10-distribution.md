@@ -393,7 +393,7 @@ That second clause exists because the wiring once had a second spelling, and out
 only the bare command now, but a repository wired by the release that wrote
 `${CLAUDE_PROJECT_DIR}/node_modules/.bin/empo hook` still carries that entry, and a rule that
 recognized only what the generator writes would leave it unclaimed beside the new one rather than
-replacing it. The section on the three hooks below states the trap in full; it is repeated here
+replacing it. The section on the four hooks below states the trap in full; it is repeated here
 because this is the paragraph somebody edits when they add or drop a spelling.
 
 Regenerating means: parse, drop every entry matching that rule wherever it appears, insert the
@@ -430,7 +430,7 @@ Four rules govern the merge. Three make it safe and the fourth states what it co
   empty, which is what keeps it worth reading when it is not: a hook a human wired by hand should
   not disappear inside a diff that looks like a routine regenerate.
 
-### The three hooks
+### The four hooks
 
 Each is one entry in `settings.json` calling `empo hook <event>` ([06-cli](06-cli.md)), with
 `${CLAUDE_PROJECT_DIR}` expanded by the host so a hook resolves the repository it was configured for
@@ -459,6 +459,25 @@ and not whatever directory the session sits in, and with a `timeout` in seconds.
   that touches a spine's guarded files with no added value-asserting test, from the same computation
   `empo check` prints, naming the spine, the files and the terms it wanted. Bypassable only by
   explicit human decision with a reason on the record, never by unstaging the spine file.
+- **PostToolUse on `Read`** runs `empo hook tool-use`: it appends one line per call (timestamp, tool,
+  path) to the activity log, so a viewer can show what a review is looking at while it works. The
+  path is repo-relative where the file lies inside the repository and absolute where it does not,
+  which is what a PR review reading a detached worktree under the OS temp directory writes; `empo
+  web` resolves that back against the session's read root before it shows anything. It is silent
+  outside a review on purpose: a log of every file read all day is not this tool's business, so the
+  hook checks for a session directory first and writes nothing when there is none, which is the
+  cheapest signal that a review is what this is — and a session directory counts as a review for
+  twelve hours, because nothing else expires one and a review abandoned after phase 1 would
+  otherwise keep this hook logging for as long as the OS leaves its directory in the temp root. The
+  log is created `0600` and narrowed to `0600` on every append: it holds the absolute path of every
+  file the reviewer opened, and `os.tmpdir()` is a private directory on macOS but the shared `/tmp`
+  on a Linux box with no `XDG_RUNTIME_DIR`. Past a megabyte it is trimmed to its last lines rather
+  than deleted, because `empo web` reads a review's phase from the log having any lines at all, so
+  emptying it mid-review would redraw a running review as one that had not started. `Read` alone,
+  not the other reading tools: the
+  question the log answers is which file the reviewer opened, and Grep and Glob carry a pattern and
+  a directory rather than a file, so matching them would spawn a process per call and record nothing.
+  An edit is left out for a different reason: the diff already records it.
 
 **The hooks fail open.** A machine with no `empo` on its PATH exits 127, which the host treats as
 "other", which is non-blocking for every event. That is deliberate: a gate that blocks every edit on

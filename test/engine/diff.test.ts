@@ -588,3 +588,64 @@ function emptyFile() {
     isBinary: false,
   };
 }
+
+/**
+ * The context lines a hunk carries alongside its changes. `empo web` renders a hunk as a diff, which
+ * means the unchanged code between a removal and an addition has to survive the parse — it was
+ * counted for the line numbering and thrown away before. Nothing here may move `added` or `removed`:
+ * the findings gate stands on those two, and this field is additive on purpose.
+ */
+describe("hunk context", () => {
+  test("keeps an unchanged line with both its old and its new number", () => {
+    const text = diff(
+      "diff --git a/src/total.ts b/src/total.ts",
+      "--- a/src/total.ts",
+      "+++ b/src/total.ts",
+      "@@ -12,3 +12,4 @@ export function total() {",
+      "   const base = 1;",
+      "-  const vat = 2;",
+      "+  const vat = 3;",
+      "+  const fee = 4;",
+      "   return base;",
+    );
+
+    expect(parseDiff(text)[0]?.hunks[0]?.context).toEqual([
+      { oldLine: 12, newLine: 12, text: "  const base = 1;" },
+      { oldLine: 14, newLine: 15, text: "  return base;" },
+    ]);
+  });
+
+  test("keeps a blank context line that lost its leading space", () => {
+    // A mailer or an editor strips the trailing space off a blank context line. The parser already
+    // counts that line; dropping its text would leave the renderer a hole where a blank line is.
+    const text = diff(
+      "diff --git a/src/gap.ts b/src/gap.ts",
+      "--- a/src/gap.ts",
+      "+++ b/src/gap.ts",
+      "@@ -1,3 +1,3 @@",
+      " const a = 1;",
+      "",
+      "-const b = 2;",
+      "+const b = 3;",
+    );
+
+    expect(parseDiff(text)[0]?.hunks[0]?.context).toEqual([
+      { oldLine: 1, newLine: 1, text: "const a = 1;" },
+      { oldLine: 2, newLine: 2, text: "" },
+    ]);
+  });
+
+  test("leaves no context on a hunk that is all addition", () => {
+    const text = diff(
+      "diff --git a/src/new.ts b/src/new.ts",
+      "new file mode 100644",
+      "--- /dev/null",
+      "+++ b/src/new.ts",
+      "@@ -0,0 +1,2 @@",
+      "+const a = 1;",
+      "+const b = 2;",
+    );
+
+    expect(parseDiff(text)[0]?.hunks[0]?.context).toEqual([]);
+  });
+});

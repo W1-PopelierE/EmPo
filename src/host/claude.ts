@@ -151,12 +151,14 @@ function command(event: string, timeout: number): HookCommand {
 }
 
 /**
- * The three hooks of docs/10, turned from prose into configuration. `SessionStart` takes no matcher
+ * The four hooks of docs/10, turned from prose into configuration. `SessionStart` takes no matcher
  * (its matchers are `startup|resume|clear|compact|fork`, and all of them want the health answer);
- * the two `PreToolUse` groups match on tool name. `pre-commit` gets the longer timeout because it
- * computes the same gate `empo check` does over a staged diff.
+ * the `PreToolUse` groups match on tool name, and `PostToolUse` matches `Read` alone: the log answers
+ * which file the reviewer opened, and Grep and Glob carry a pattern and a directory rather than a
+ * file, so matching them would buy a process spawn per call and record nothing. `pre-commit` gets
+ * the longer timeout because it computes the same gate `empo check` does over a staged diff.
  *
- * The same three entries for every target: there is one channel left and it puts `empo` on PATH, so
+ * The same four entries for every target: there is one channel left and it puts `empo` on PATH, so
  * there is nothing about the repository left to branch on.
  */
 export function empoHooks(): HookEntries {
@@ -166,6 +168,7 @@ export function empoHooks(): HookEntries {
       { matcher: "Edit|Write", hooks: [command("pre-edit", 10)] },
       { matcher: "Bash", hooks: [command("pre-commit", 20)] },
     ],
+    PostToolUse: [{ matcher: "Read", hooks: [command("tool-use", 5)] }],
   };
 }
 

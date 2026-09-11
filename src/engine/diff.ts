@@ -21,6 +21,16 @@ export interface DiffLine {
   text: string;
 }
 
+/**
+ * An unchanged line inside a hunk. It carries both numbers because it is the one row that exists on
+ * both sides, and a viewer rendering a hunk as a diff has to place it against either column.
+ */
+export interface ContextLine {
+  oldLine: number;
+  newLine: number;
+  text: string;
+}
+
 export interface ChangedHunk {
   oldStart: number;
   oldLines: number;
@@ -30,6 +40,13 @@ export interface ChangedHunk {
   added: DiffLine[];
   /** Line numbers are in the OLD file. */
   removed: DiffLine[];
+  /**
+   * The unchanged lines between them, in the order the hunk lists them. Nothing in the review
+   * discipline reads this — `changedLines` and the findings gate stand on `added` alone — it exists
+   * so `empo web` can render a hunk as a diff instead of a block of removals above a block of
+   * additions.
+   */
+  context: ContextLine[];
 }
 
 export type ChangeStatus = "added" | "modified" | "deleted" | "renamed";
@@ -228,6 +245,7 @@ function parseHunk(lines: string[], start: number): HunkParse | null {
 
   const added: DiffLine[] = [];
   const removed: DiffLine[] = [];
+  const context: ContextLine[] = [];
   let oldLine = oldStart;
   let newLine = newStart;
   let oldLeft = oldLines;
@@ -255,6 +273,7 @@ function parseHunk(lines: string[], start: number): HunkParse | null {
       // A zero-length line is blank context. Git writes a single space, but plenty of diffs that
       // reach EmPo have been through an editor or a mailer that stripped the trailing space, and
       // dropping the line there would shift every line number after it.
+      context.push({ oldLine, newLine, text: line.slice(1) });
       oldLine += 1;
       newLine += 1;
       oldLeft -= 1;
@@ -264,7 +283,10 @@ function parseHunk(lines: string[], start: number): HunkParse | null {
     index += 1;
   }
 
-  return { hunk: { oldStart, oldLines, newStart, newLines, added, removed }, next: index };
+  return {
+    hunk: { oldStart, oldLines, newStart, newLines, added, removed, context },
+    next: index,
+  };
 }
 
 /**

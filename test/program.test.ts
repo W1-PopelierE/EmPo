@@ -34,3 +34,19 @@ describe("the version the CLI reports", () => {
     expect(declared).not.toBe("0.0.0");
   });
 });
+
+/**
+ * Commander calls an option's coercion as `fn(value, previousValue)`, which is a trap for any
+ * function whose second parameter means something else. `Number.parseInt` reads it as the radix, so
+ * `empo web --port 7373 --port 8080` handed the second call a radix of 7373 and bound `NaN`.
+ * Repeating a flag is a normal thing to do; the coercion is checked here rather than through
+ * `parse`, which would run the action and start the server.
+ */
+describe("the coercion on --port", () => {
+  test("reads the value as decimal even when a previous value was parsed", () => {
+    const web = buildProgram().commands.find((one) => one.name() === "web");
+    const port = web?.options.find((one) => one.long === "--port");
+
+    expect(port?.parseArg?.("8080", 7373)).toBe(8080);
+  });
+});
