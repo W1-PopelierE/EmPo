@@ -554,7 +554,10 @@ the same seven hundred lines eleven times while each round had changed a few doz
 appends to a round log — one file per gated round, holding that round's number, the commit and the
 tree phase 1 read, the time, the id of the review it belonged to, the branch, and the findings that
 round got through the gate — in a directory keyed to this repository and this branch, outside the
-repository entirely ([09-adapters](09-adapters.md)) and never in it. A log and not a counter,
+repository entirely ([09-adapters](09-adapters.md)) and never in it. Beside each round file the gate
+also saves `NNN.review.json`, the picture `empo web` draws of that round, which nothing in a review
+ever reads: it is there so a finished review can still be opened afterwards, and dropping it costs a
+window and never a round. A log and not a counter,
 because a counter answers how many rounds there have been and never what round two found, and a
 reader on round five has the second question far more often than the first. The brief prints the
 head of it back as one line under `branch`, `round 3 against this branch, last reviewed at 56abad4,
@@ -892,12 +895,24 @@ Nothing on it is reported by the agent. Every phase — brief, reading, findings
 from a file `empo review` writes for its own reasons, so nothing on the page depends on an agent
 being honest about its own progress.
 
-**Start it before the review, not after.** Phase 2 deletes the session directory, which is where the
-diff and the suspected findings live ([07-review-discipline](07-review-discipline.md), invariant 2).
-A viewer that was up while the review ran holds both in memory and keeps showing them after the
-gate, marked as finished; one started afterwards has nothing to read and says so, rather than
-showing an empty review. This is the lifecycle's shape and not a bug in the viewer: making `review`
-preserve state for a UI would put a window's needs inside the discipline.
+**A finished review is still there to read.** Phase 2 deletes the session directory, which is where
+the diff and the suspected findings live ([07-review-discipline](07-review-discipline.md), invariant
+2) — so the gate saves the picture the viewer draws beside the round it just recorded, as
+`NNN.review.json` next to `NNN.json` in the round log, and deletes the session afterwards exactly as
+it did. The discipline is unchanged: nothing is kept inside the repository, nothing the agent
+reports is trusted, and a gate whose snapshot cannot be written says nothing and gates anyway.
+
+What that buys is a review you can open after it ended, from a viewer that was never running while
+it ran: the diff, every finding with the claim it stood on, and which of them survived. Saved rounds
+appear in the `Reviews` block beside the live ones, each row carrying its round number and the day
+it was gated, and with no review running the page opens on the newest of them instead of on an empty
+window. They live where the round log lives — a temp directory the OS sweeps
+([09-adapters](09-adapters.md)) — and the newest twenty per repository are kept; past that the
+oldest snapshot is dropped while its round record stays, because the record is what the next review
+reads and it is six fields, not a diff. `empo review --reset` forgets both.
+
+A viewer that was up while the review ran keeps showing its own copy after the gate rather than
+swapping to the saved one, which is the same content without the redraw.
 
 **Under Codex there is no live tool stream.** The activity column is fed by a `PostToolUse` hook, and
 Codex has no hook mechanism (`empo update` ships it skills and nothing else), so under Codex the
@@ -924,14 +939,15 @@ viewer, which is the cost of not having a heartbeat, and not one worth a heartbe
 **Several reviews at once.** A viewer serves one repository — `--repo` picks it, and the sessions it
 can see are that repository's — so reviews running in separate worktrees are separate repository
 roots and want one viewer per worktree on its own port. Within one repository, every live review is
-listed: when more than one is running the left column opens with a `Reviews` block, one row per
-review carrying what it is (`#1234`, or `local`), the branch it reads, and the phase that review is
-in right now — so the column answers "which of the three is still reading" without switching to each
+listed: when there is more than one — a second live review, or a round saved earlier —
+the left column opens with a `Reviews` block, one row per review carrying what it is (`#1234`, or
+`local`), the branch it reads, and either the phase a live review is in right now or the round
+number and date a saved one was gated — so the column answers "which of the three is still reading" without switching to each
 of them. Clicking a row switches the whole page to it. The choice lives in the URL as `?session=<key>`, so
 three tabs pointed at the same viewer each stay on their own review across a reload; the key is the
-session directory's name, and one that names no live review — a stale bookmark, or a review torn
-down while the tab sat open — falls back to the newest rather than erroring, so the tab keeps
-showing something.
+session directory's name, or `saved:` and the round for a finished one, and a key that names
+neither — a stale bookmark, or a snapshot dropped past the cap — falls back to the newest rather
+than erroring, so the tab keeps showing something.
 
 Which review opened which file is worked out from the path. The activity log is one file per
 repository and the hook that writes it knows nothing about sessions, so a line is attributed to the

@@ -109,17 +109,22 @@ function roundKeyOf(readable: string, material: string): string {
 function roundsOf(repoRoot: string, branch: string) {
   const dir = roundsDirOf(repoRoot, branch);
   if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .sort()
-    .flatMap((name) => {
-      // A file that will not parse drops out here exactly as it does in the code under test, so a
-      // test about the wedge it used to cause can still read the rounds around it.
-      try {
-        return [JSON.parse(readFileSync(join(dir, name), "utf8"))];
-      } catch {
-        return [];
-      }
-    });
+  return (
+    readdirSync(dir)
+      // Round records only. The gate saves a viewer snapshot beside each one (`NNN.review.json`),
+      // which `roundFilesIn` skips for the same reason: it is a picture of a round, not a round.
+      .filter((name) => /^\d+\.json$/.test(name))
+      .sort()
+      .flatMap((name) => {
+        // A file that will not parse drops out here exactly as it does in the code under test, so a
+        // test about the wedge it used to cause can still read the rounds around it.
+        try {
+          return [JSON.parse(readFileSync(join(dir, name), "utf8"))];
+        } catch {
+          return [];
+        }
+      })
+  );
 }
 
 /** The rows of the brief's changed files table, which is the one place the review's scope is listed. */
@@ -3221,7 +3226,12 @@ describe("round awareness", () => {
 
     gate([realFinding()]);
 
-    expect(readdirSync(roundsDirOf(repo, "main")).sort()).toEqual(["001.json", "002.json"]);
+    expect(readdirSync(roundsDirOf(repo, "main")).sort()).toEqual([
+      "001.json",
+      "001.review.json",
+      "002.json",
+      "002.review.json",
+    ]);
     expect(roundsOf(repo, "main")).toMatchObject([{ round: 2 }]);
   });
 

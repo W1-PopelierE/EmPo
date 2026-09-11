@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { createForge, type HostPullRequestInput } from "../adapters/forge/create";
 import { type ForgeAdapter, hasCapability, type PullRequest } from "../adapters/forge/types";
 import { readHostPullRequest, readHostTicket, verifyPullRequest } from "../adapters/host-input";
@@ -26,6 +26,7 @@ import {
 import { readGraph, stalenessLines } from "../engine/graph";
 import { type GuardedTouch, guardedTouches } from "../engine/guard";
 import { compareStrings } from "../engine/order";
+import { emptySnapshot, readReviewState, writeArchive } from "../engine/review-state";
 import {
   branchesGatedUnder,
   lastRound,
@@ -1904,6 +1905,18 @@ function gatePhase(repoRoot: string, pr: string | undefined, options: ReviewOpti
         id,
         loggable(result),
       );
+      // Saved before teardown and not after, because teardown is what takes the diff and the
+      // findings with it: this is the last moment the picture the viewer draws still exists. Read
+      // through the same function the viewer reads through, so what is saved is what it would have
+      // shown, verdicts and all — the round record is already on disk one statement above.
+      if (recorded !== null) {
+        writeArchive(
+          repoRoot,
+          session.sourceBranch,
+          recorded.round,
+          readReviewState(repoRoot, emptySnapshot(), basename(sessionDir(repoRoot, id))),
+        );
+      }
       if (recorded === null) {
         console.log("");
         console.log(

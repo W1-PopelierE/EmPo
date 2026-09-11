@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { emptySnapshot, readReviewState } from "../../src/engine/review-state";
+import { emptySnapshot, readReviewState, writeArchive } from "../../src/engine/review-state";
 import { recordRound } from "../../src/engine/rounds";
 import { activityPath, sessionDir } from "../../src/engine/session";
 
@@ -361,8 +361,15 @@ describe("with a second review live in the same repository", () => {
     const state = readReviewState(root, emptySnapshot());
 
     expect(state.sessions).toEqual([
-      { key: basename(dir), id: "1234", branch: "feat/x", phase: "brief" },
-      { key: basename(local), id: "local", branch: "feat/x", phase: "brief" },
+      { key: basename(dir), id: "1234", branch: "feat/x", phase: "brief", round: null, at: null },
+      {
+        key: basename(local),
+        id: "local",
+        branch: "feat/x",
+        phase: "brief",
+        round: null,
+        at: null,
+      },
     ]);
     expect(state.selected).toBe(basename(dir));
     // The switcher shows what is live now, so the note that used to count sessions is gone.
@@ -705,5 +712,69 @@ describe("when the session went away without a gate", () => {
     expect(after.phase).toBe("gated");
     expect(after.round).toBe(1);
     expect(after.findings).toEqual([]);
+  });
+});
+
+/**
+ * What the viewer can still draw once the session directory is gone and this process never saw the
+ * review run. Before the archive that was nothing at all: a review finished while the window was
+ * closed left only a round record, which holds no diff and no claim.
+ */
+describe("saved rounds", () => {
+  /** A review taken all the way through the gate, as `empo review` does it. */
+  function gate(root: string, dir: string, round = 1): void {
+    writeFindings(dir, ["f1"]);
+    recordRound(root, "feat/x", "abc123", "def456", "local", [
+      { id: "f1", kind: "diff", severity: "major", title: "f1 title", file: "src/a.ts", line: 2 },
+    ]);
+    writeArchive(root, "feat/x", round, readReviewState(root, emptySnapshot(), basename(dir)));
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  test("a finished review a fresh viewer never saw is still readable in full", () => {
+    const root = repo();
+    gate(root, startReview(root));
+
+    // `emptySnapshot` is the viewer started after the fact: nothing carried, nothing in memory.
+    const state = readReviewState(root, emptySnapshot());
+
+    expect(state.phase).toBe("gated");
+    expect(state.round).toBe(1);
+    expect(state.selected).toMatch(/^saved:/);
+    expect(state.note).toContain("round 1");
+    // The two things teardown used to take with it: the diff, and the text of the claim.
+    expect(state.files.map((one) => one.path)).toEqual(["src/a.ts", "src/b.ts"]);
+    expect(state.findings).toHaveLength(1);
+    expect(state.findings[0]).toMatchObject({ claim: "f1 claim", line: 2, survived: true });
+    expect(state.sessions).toEqual([
+      expect.objectContaining({ key: state.selected, id: "local", branch: "feat/x", round: 1 }),
+    ]);
+  });
+
+  test("a live review is what a viewer with no choice gets, the saved one only when asked for", () => {
+    const root = repo();
+    gate(root, startReview(root));
+    const saved = readReviewState(root, emptySnapshot()).selected;
+    const live = startReview(root);
+
+    const byDefault = readReviewState(root, emptySnapshot());
+    expect(byDefault.selected).toBe(basename(live));
+    expect(byDefault.phase).not.toBe("gated");
+    expect(byDefault.sessions.map((one) => one.key)).toEqual([basename(live), saved]);
+
+    const asked = readReviewState(root, emptySnapshot(), saved);
+    expect(asked.selected).toBe(saved);
+    expect(asked.findings[0]).toMatchObject({ claim: "f1 claim" });
+  });
+
+  // A key whose snapshot was pruned, or that was never one, is the same thing: unknown. Falling
+  // back is what keeps a bookmarked tab useful instead of blank.
+  test("an unknown saved key falls back to the newest live review", () => {
+    const root = repo();
+    const live = startReview(root);
+
+    const state = readReviewState(root, emptySnapshot(), "saved:gone/003");
+
+    expect(state.selected).toBe(basename(live));
   });
 });
