@@ -397,8 +397,20 @@ function toolUse(repoRoot: string, payload: Record<string, unknown>): string | n
       // "brief" with every check mark gone. Keeping the last lines costs old history, which is the
       // activity list alone, and the viewer never shows more than its last 200 lines anyway.
       if (statSync(log).size > 1_000_000) {
-        const kept = readFileSync(log, "utf8").split("\n").slice(-500).join("\n");
-        writeFileSync(log, kept, { encoding: "utf8", mode: 0o600 });
+        // Over-long records are dropped and not kept, because the cap has to hold in bytes and not
+        // only in records: a single pathological line survives `slice` intact, leaves the file over
+        // the cap, and makes every later hook repeat this whole read and write for nothing. No line
+        // this hook writes comes near 1 kB, so anything past that is junk rather than history, and
+        // dropping every one of them still cannot empty the log that `derive` reads a phase from —
+        // the append below always follows.
+        // ponytail: 500 records of at most 1 kB is a 500 kB ceiling rather than a true byte budget;
+        // sum the tail's lengths instead if a record ever legitimately runs long.
+        const kept = readFileSync(log, "utf8")
+          .split("\n")
+          .slice(-500)
+          .filter((record) => record !== "" && record.length <= 1_000)
+          .join("\n");
+        writeFileSync(log, kept === "" ? "" : `${kept}\n`, { encoding: "utf8", mode: 0o600 });
       }
     }
     appendFileSync(log, line, { encoding: "utf8", mode: 0o600 });

@@ -926,6 +926,21 @@ describe("the tool-use event", () => {
   });
 
   /**
+   * A record count is not a byte count: one oversized line with no trailing newline is a tail of
+   * exactly one record, so a trim that only slices records rewrites the same over-cap file and
+   * leaves every later hook repeating the full read and write.
+   */
+  test("holds the cap against a single oversized record", () => {
+    startReview(repo);
+    writeFileSync(activityPath(repo), "x".repeat(1_100_000), "utf8");
+
+    hookAnswer("tool-use", toolUse(repo, "Read", "README.md"), { repo });
+
+    expect(statSync(activityPath(repo)).size).toBeLessThanOrEqual(1_000_000);
+    expect(activity(repo).at(-1)?.path).toBe("README.md");
+  });
+
+  /**
    * Every line here is an absolute path the reviewer opened, and on Linux the log sits in the shared
    * /tmp, so the mode is asserted in both directions a file arrives in: created by the hook, and
    * already on disk from an earlier version that made it world-readable.
