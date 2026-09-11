@@ -175,4 +175,14 @@ describe("page", () => {
     expect(html).toContain("hunkRows(hunk)");
     expect(html).toContain("highlight(esc(r.text), path)");
   });
+
+  // The page's own script is a template string, so nothing typechecks it and a stray bracket in it
+  // ships as a blank viewer. Parsing it is the cheapest thing that catches that; `Function` compiles
+  // without running, so the `connect()` at the end of the script is never called here.
+  test("ships a script that parses", () => {
+    const script = page().split("<script>")[1]?.split("</script>")[0] ?? "";
+
+    expect(script).not.toBe("");
+    expect(() => new Function(script)).not.toThrow();
+  });
 });

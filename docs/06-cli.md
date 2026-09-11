@@ -882,6 +882,13 @@ survivors with the claim each one stood on. Two columns: the changed files, the 
 the diff and the live tool stream on the left; the selected file's changed lines with findings marked
 on their line, and the findings list, on the right.
 
+**A finding is read where the code is.** Each one is drawn into the hunk directly under the line it
+cites, the way a review comment sits on a line, with its claim and its suggestion and whether the
+gate kept it — so the case and the code it is about are read together instead of three scrolls
+apart. The findings list below is then an index: one row per finding, clicking it jumps to that
+line and flashes the comment there. A finding whose line no hunk covers has nowhere to be drawn, so
+that row carries its full text instead.
+
 **The right-hand pane is the hunks, not the file.** Each hunk is rebuilt in the order git wrote it
 — removals, additions, and the unchanged context between them — with an old and a new number column
 on every row, so a number is never ambiguous about which revision it belongs to. Code is coloured by
