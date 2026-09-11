@@ -1,9 +1,17 @@
-import { mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { emptySnapshot, readReviewState, writeArchive } from "../../src/engine/review-state";
-import { recordRound } from "../../src/engine/rounds";
+import { archivePath, recordRound } from "../../src/engine/rounds";
 import { activityPath, sessionDir } from "../../src/engine/session";
 
 /**
@@ -765,6 +773,41 @@ describe("saved rounds", () => {
     const asked = readReviewState(root, emptySnapshot(), saved);
     expect(asked.selected).toBe(saved);
     expect(asked.findings[0]).toMatchObject({ claim: "f1 claim" });
+  });
+
+  // The flag and not only the mode: `wx` is what keeps a derived path from being written through,
+  // the way `recordRound` protects the record beside it. A second write landing on the file would
+  // mean the O_EXCL is gone.
+  test("an archive already on disk is never written through", () => {
+    const root = repo();
+    gate(root, startReview(root));
+    const path = archivePath(root, "feat/x", 1);
+    const first = readFileSync(path, "utf8");
+
+    writeArchive(root, "feat/x", 1, { ...emptySnapshot(), note: "second" });
+
+    expect(readFileSync(path, "utf8")).toBe(first);
+  });
+
+  // `savedRounds` only checks that a snapshot file is there, never that it parses, so the newest
+  // one can be a write cut short. Stopping at it would hide every readable round behind it, which
+  // is the one failure this whole archive exists to prevent.
+  test("a newest snapshot that will not parse falls through to an older one", () => {
+    const root = repo();
+    gate(root, startReview(root));
+    gate(root, startReview(root), 2);
+
+    // Whichever round the switcher puts first, without assuming which: two gates in one
+    // millisecond carry the same `at`, and the fix has to hold either way round.
+    const newest = readReviewState(root, emptySnapshot());
+    expect(newest.round).not.toBeNull();
+    writeFileSync(archivePath(root, "feat/x", newest.round as number), "{ truncated", "utf8");
+
+    const state = readReviewState(root, emptySnapshot());
+
+    expect(state.phase).toBe("gated");
+    expect(state.round).not.toBe(newest.round);
+    expect(state.findings[0]).toMatchObject({ claim: "f1 claim" });
   });
 
   // A key whose snapshot was pruned, or that was never one, is the same thing: unknown. Falling

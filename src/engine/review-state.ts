@@ -261,11 +261,15 @@ function withoutLive(
   const frozen = afterTeardown(repoRoot, previous);
   if (frozen.session !== null) return { ...frozen, sessions };
 
-  const newest = saved[0];
-  if (newest === undefined) return { ...emptySnapshot(), sessions };
-  return (
-    pickArchive(saved, sessions, SAVED_PREFIX + newest.key) ?? { ...emptySnapshot(), sessions }
-  );
+  // Down the list and not just at its head: `savedRounds` only checked that a snapshot file is
+  // there, so the newest one can still be unreadable — a write cut short, or a file written by a
+  // version this one cannot parse. One of those would otherwise hide every older round behind an
+  // empty window, which is the whole thing this archive exists to prevent.
+  for (const one of saved) {
+    const opened = pickArchive(saved, sessions, SAVED_PREFIX + one.key);
+    if (opened !== null) return opened;
+  }
+  return { ...emptySnapshot(), sessions };
 }
 
 /** A gate time a header can hold, or nothing at all where the record carries none. */
@@ -292,7 +296,11 @@ export function writeArchive(
     writeFileSync(
       archivePath(repoRoot, branch, round),
       JSON.stringify({ ...snapshot, sessions: [], selected: null, note: null }),
-      { encoding: "utf8", mode: 0o600 },
+      // `wx` is O_CREAT|O_EXCL, for the reason `recordRound` uses it on the record beside this
+      // file: the path is derived rather than random, and O_EXCL on each file is what
+      // `src/engine/rounds.ts` says stops one being replaced through a symlink. A round number is
+      // never reused, so there is nothing legitimate here to overwrite.
+      { encoding: "utf8", flag: "wx", mode: 0o600 },
     );
     pruneArchives(repoRoot);
   } catch {

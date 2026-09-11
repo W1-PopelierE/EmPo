@@ -912,8 +912,9 @@ reports is trusted, and a gate whose snapshot cannot be written says nothing and
 What that buys is a review you can open after it ended, from a viewer that was never running while
 it ran: the diff, every finding with the claim it stood on, and which of them survived. Saved rounds
 appear in the `Reviews` block beside the live ones, each row carrying its round number and the day
-it was gated, and with no review running the page opens on the newest of them instead of on an empty
-window. They live where the round log lives — a temp directory the OS sweeps
+it was gated, and with no review running the page opens on the newest readable one of them instead
+of on an empty window — a snapshot cut short by a write that died is stepped over rather than
+shown. They live where the round log lives — a temp directory the OS sweeps
 ([09-adapters](09-adapters.md)) — and the newest twenty per repository are kept; past that the
 oldest snapshot is dropped while its round record stays, because the record is what the next review
 reads and it is six fields, not a diff. `empo review --reset` forgets both.

@@ -11,12 +11,12 @@
  * adds markup after escaping is `highlight`, which is why it only ever wraps spans around text that
  * has already been through `esc()`.
  *
- * The three functions with real logic in them live in `./render` and are pasted in here as source.
+ * The four functions with real logic in them live in `./render` and are pasted in here as source.
  * That keeps them under test — a template string is not runnable by the suite — without a build
  * step, a bundle or a second copy that drifts from the first. They are assigned to a name declared
  * here rather than injected as declarations, so a bundler renaming them cannot break the call sites.
  */
-import { esc, highlight, hunkRows } from "./render";
+import { anchored, esc, highlight, hunkRows } from "./render";
 
 export function page(): string {
   return `<!doctype html>
@@ -119,6 +119,7 @@ const el = (id) => document.getElementById(id);
 const esc = ${esc};
 const hunkRows = ${hunkRows};
 const highlight = ${highlight};
+const anchored = ${anchored};
 
 let snapshot = null;
 let selected = null;
@@ -294,7 +295,7 @@ function renderFindings() {
     .sort((a, b) => order(a) - order(b))
     // A finding the diff already carries is listed as a line to click, not repeated in full: its
     // claim is up there against the code. One on a line no hunk covers has nowhere else to be read.
-    .map((f) => findingBlock(f, anchored(f)))
+    .map((f) => findingBlock(f, anchored((snapshot.hunks || {})[f.file], f.line)))
     .join("");
   for (const button of document.querySelectorAll("#findings .finding[data-path]")) {
     button.onclick = () => {
@@ -303,14 +304,6 @@ function renderFindings() {
       focusFinding(button.dataset.finding);
     };
   }
-}
-
-// Whether some hunk of the diff covers this finding's line, which is what decides if jumping to it
-// has anywhere to land.
-function anchored(f) {
-  const changed = (snapshot.hunks || {})[f.file];
-  if (!changed || changed.isBinary) return false;
-  return (changed.hunks || []).some((h) => f.line >= h.newStart && f.line < h.newStart + h.newLines);
 }
 
 // The id is whatever the reviewer wrote, so it is compared as data and never built into a selector.

@@ -1,10 +1,10 @@
 import { describe, expect, test } from "vitest";
-import type { ChangedHunk } from "../../src/engine/diff";
+import type { ChangedFile, ChangedHunk } from "../../src/engine/diff";
 import { page } from "../../src/web/page";
-import { esc, highlight, hunkRows } from "../../src/web/render";
+import { anchored, esc, highlight, hunkRows } from "../../src/web/render";
 
 /**
- * The page's three pieces of real logic. They live in a module so they can be run here and are
+ * The page's four pieces of real logic. They live in a module so they can be run here and are
  * serialised into the page from there, which is why the last test in this file checks that the page
  * still carries them: a rename that silently stopped inlining them would leave a page whose diff
  * panel throws on the first snapshot, and no test on the string alone would notice.
@@ -165,6 +165,46 @@ describe("highlight", () => {
   });
 });
 
+/** A file of the diff carrying the hunks under test; the counts are what `anchored` never reads. */
+function file(parts: Partial<ChangedFile>): ChangedFile {
+  return {
+    path: "src/x.ts",
+    oldPath: null,
+    status: "modified",
+    hunks: [],
+    addedCount: 0,
+    removedCount: 0,
+    isBinary: false,
+    ...parts,
+  };
+}
+
+describe("anchored", () => {
+  const changed = file({ hunks: [hunk({ newStart: 12, newLines: 3 })] });
+
+  test("anchors a line the hunk covers", () => {
+    expect(anchored(changed, 12)).toBe(true);
+    expect(anchored(changed, 14)).toBe(true);
+  });
+
+  test("does not anchor a line outside every hunk's range", () => {
+    // 15 is the first line past a hunk starting at 12 and three lines long, and a finding there has
+    // nowhere in the diff to scroll to.
+    expect(anchored(changed, 11)).toBe(false);
+    expect(anchored(changed, 15)).toBe(false);
+  });
+
+  test("does not anchor a file the diff never touched", () => {
+    expect(anchored(undefined, 12)).toBe(false);
+  });
+
+  test("does not anchor a binary file, which has no lines to land on", () => {
+    expect(
+      anchored(file({ isBinary: true, hunks: [hunk({ newStart: 12, newLines: 3 })] }), 12),
+    ).toBe(false);
+  });
+});
+
 describe("page", () => {
   test("inlines every render function under the names its script calls", () => {
     const html = page();
@@ -172,6 +212,7 @@ describe("page", () => {
     expect(html).toContain("const esc =");
     expect(html).toContain("const hunkRows =");
     expect(html).toContain("const highlight =");
+    expect(html).toContain("const anchored =");
     expect(html).toContain("hunkRows(hunk)");
     expect(html).toContain("highlight(esc(r.text), path)");
   });
