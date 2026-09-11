@@ -284,9 +284,11 @@ function readFindingsFile(dir: string): ReviewFinding[] {
  * it — so on branch and time alone both sessions adopt whichever of them gated first, and the other
  * one shows a round number, a phase and a set of verdicts belonging to a gate that never read it.
  *
- * `afterTeardown` discriminates harder still, on the tree phase 1 read: there the session is gone
- * and only the carried snapshot is left, so it matches on what the record says about the work rather
- * than on which review wrote it.
+ * `afterTeardown` needs the same id for the same reason, and has it: the carried snapshot holds the
+ * whole session phase 1 wrote, id included, and phase 2 hands `recordRound` that session's id and
+ * that session's tree (`src/commands/review.ts`), so the round belonging to a frozen review carries
+ * both. It narrows on the tree as well, because there the session is gone and time is no longer a
+ * usable bound: an older round of this same review would otherwise be read as its verdict.
  */
 function newestRound(
   repoRoot: string,
@@ -482,14 +484,19 @@ function afterTeardown(repoRoot: string, previous: Snapshot): Snapshot {
   };
   if (previous.round !== null) return { ...frozen, phase: "gated" };
 
-  // Matched on the tree phase 1 read, not on time: that is exactly what the gate writes down about
-  // the review it gated, so an older round on the same branch cannot be mistaken for this verdict.
-  // Falling back to the sha the way `recordRound` does, since a record whose tree could not be read
-  // carries the sha in that field and would otherwise match nothing at all.
-  const tree = previous.session.tree ?? previous.session.sha;
+  // Matched on the review that wrote it and on the tree phase 1 read, not on time: together those
+  // are exactly what the gate writes down about the review it gated, so neither an older round on
+  // the same branch nor a round of the other review sharing it can be mistaken for this verdict.
+  // The id alone is not enough — this review's own earlier rounds carry it too — and the tree alone
+  // is not either, because `isolate` gives a pull request reviewed from the branch you are standing
+  // on the same `sourceBranch` as the local review beside it, and with nothing uncommitted between
+  // them the same tree as well. Falling back to the sha the way `recordRound` does, since a record
+  // whose tree could not be read carries the sha in that field and would otherwise match nothing.
+  const { id, tree: read, sha, sourceBranch } = previous.session;
+  const tree = read ?? sha;
   if (tree === null || tree === "") return frozen;
-  const round = readRounds(repoRoot, previous.session.sourceBranch)
-    .filter((one) => one.tree === tree)
+  const round = readRounds(repoRoot, sourceBranch)
+    .filter((one) => one.id === id && one.tree === tree)
     .at(-1);
   if (round === undefined) return frozen;
 

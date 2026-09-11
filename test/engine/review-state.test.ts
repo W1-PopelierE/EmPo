@@ -596,6 +596,25 @@ describe("once the reviewer has written findings", () => {
     expect(after.findings[0]?.survived).toBeNull();
   });
 
+  // `isolate` gives a pull request reviewed from the branch you are standing on the same
+  // `sourceBranch` as the local review beside it, and with nothing uncommitted between them the
+  // same tree as well — so on tree alone the pull request's gate assigned its verdict to the local
+  // review's frozen findings, marking dropped what its own gate never read.
+  test("leaves the carried findings ungraded when the round is the other review's on this tree", () => {
+    const root = repo();
+    const dir = startReview(root);
+    writeFindings(dir, ["f1"]);
+    const before = readReviewState(root, emptySnapshot());
+
+    // Same branch, same tree, other review: session "42" gating, not this one.
+    recordRound(root, "feat/x", "abc123", "def456", "42", []);
+    rmSync(dir, { recursive: true, force: true });
+    const after = readReviewState(root, before);
+
+    expect(after.round).toBeNull();
+    expect(after.findings[0]?.survived).toBeNull();
+  });
+
   // A round record with no session and no previous snapshot cannot be crossed with anything: with
   // no session directory there is no sourceBranch to read the record with, so the viewer stays idle
   // rather than showing a review it arrived too late to have witnessed.
