@@ -1,9 +1,16 @@
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import type { ReviewFinding } from "../discipline/findings";
 import { parseFindingsFile } from "../schema/findings.schema";
 import { type ChangedFile, type ChangeStatus, parseDiff } from "./diff";
-import { type RoundRecord, readRounds } from "./rounds";
+import {
+  archivePath,
+  pruneArchives,
+  type RoundRecord,
+  readRounds,
+  type SavedRound,
+  savedRounds,
+} from "./rounds";
 import { activityPath, type ReviewSession, sessionDirs } from "./session";
 
 /**
@@ -60,6 +67,10 @@ export interface SessionChoice {
   /** The branch under review, falling back to the short sha, then to "working tree". */
   branch: string;
   phase: Phase;
+  /** The round this is a saved picture of, or null while the review is still live. */
+  round: number | null;
+  /** When the gate that saved it ran, or null for a live review. */
+  at: string | null;
 }
 
 export interface Snapshot {
@@ -104,8 +115,23 @@ export function readReviewState(
   previous: Snapshot,
   selected?: string | null,
 ): Snapshot {
+  // Every gate this repository ran that still has a picture, whether or not anything is live now:
+  // they are rows in the switcher either way, and the one thing a reader cannot get back by waiting
+  // is the review that already finished.
+  const saved = savedRounds(repoRoot);
+  const savedChoices: SessionChoice[] = saved.map((one) => ({
+    key: SAVED_PREFIX + one.key,
+    id: one.record.id,
+    branch: one.record.branch === "" ? "working tree" : one.record.branch,
+    phase: "gated",
+    round: one.record.round,
+    at: one.record.at,
+  }));
+
   const dirs = sessionDirs(repoRoot);
-  if (dirs.length === 0) return afterTeardown(repoRoot, previous);
+  if (dirs.length === 0) {
+    return withoutLive(repoRoot, previous, selected ?? "", saved, savedChoices);
+  }
 
   // Read once for every session rather than once per session: the log is one file per repository
   // and this whole function runs on a poll, so parsing it four times over would be three times the
@@ -114,18 +140,30 @@ export function readReviewState(
   const log = readActivityLog(repoRoot);
   const onDisk = liveSessions(dirs);
   const live = onDisk.map((one) => ({ ...one, ...derive(repoRoot, one, log, onDisk) }));
-  const sessions = live.map((one) => ({
-    key: one.key,
-    id: one.session.id,
-    branch: branchOf(one.session),
-    phase: one.phase,
-  }));
+  const sessions: SessionChoice[] = [
+    ...live.map((one) => ({
+      key: one.key,
+      id: one.session.id,
+      branch: branchOf(one.session),
+      phase: one.phase,
+      round: null,
+      at: null,
+    })),
+    ...savedChoices,
+  ];
+
+  // A saved round is picked explicitly and never fallen back to: the newest live review is what a
+  // viewer with no choice should see, and a key naming a snapshot that has since been pruned means
+  // the same as any other unknown key.
+  const archived = pickArchive(saved, sessions, selected ?? "");
+  if (archived !== null) return archived;
+
   const found = live.find((one) => one.key === selected) ?? live[0];
   // A session directory with no readable `session.json` is a teardown mid-delete or a session
   // mid-write, and neither is a reason to throw away what the viewer already holds: `src/commands/
   // web.ts` stores this result, so returning an empty snapshot here would make the next poll see
   // `previous.session === null` and lose the finished review's frozen picture and its verdict.
-  if (found === undefined) return afterTeardown(repoRoot, previous);
+  if (found === undefined) return { ...afterTeardown(repoRoot, previous), sessions };
   const { session, round } = found;
 
   const changed = readDiff(session);
@@ -162,6 +200,127 @@ export function readReviewState(
     selected: found.key,
     note: null,
   };
+}
+
+/**
+ * What `?session=` names a saved round by, kept apart from a live key by a prefix a session
+ * directory basename cannot contain: `sessionDir` sanitises its slug and hashes the rest, so no
+ * live key ever carries a colon.
+ */
+const SAVED_PREFIX = "saved:";
+
+/**
+ * The snapshot a gated round saved, when that is what was asked for. Null for any other key,
+ * including one naming a round whose snapshot has since been pruned — which is an unknown key and
+ * falls back the way every unknown key does.
+ */
+function pickArchive(
+  saved: SavedRound[],
+  sessions: SessionChoice[],
+  selected: string,
+): Snapshot | null {
+  if (!selected.startsWith(SAVED_PREFIX)) return null;
+  const one = saved.find((round) => SAVED_PREFIX + round.key === selected);
+  if (one === undefined) return null;
+  const snapshot = readArchive(one.path);
+  if (snapshot === null) return null;
+  return {
+    ...snapshot,
+    phase: "gated",
+    round: one.record.round,
+    sessions,
+    selected,
+    note: `finished review, round ${one.record.round}${when(one.record.at)}`,
+  };
+}
+
+/**
+ * What to show with no session directory left. The order is what the reader means by "the review I
+ * was looking at": the one this viewer watched finish, then anything saved, then nothing.
+ *
+ * The frozen copy wins over its own saved snapshot because they are the same review and the frozen
+ * one is the one already on screen — swapping it for a file would redraw the diff and drop the
+ * reader's scroll at the exact moment the gate landed.
+ */
+function withoutLive(
+  repoRoot: string,
+  previous: Snapshot,
+  selected: string,
+  saved: SavedRound[],
+  sessions: SessionChoice[],
+): Snapshot {
+  const archived = pickArchive(saved, sessions, selected);
+  if (archived !== null) return archived;
+
+  // The picture already on screen is a saved round, so it stays that: `afterTeardown` below would
+  // carry the same content forward under a note about a session that finished, which is not what a
+  // reader looking at round three from yesterday is being told.
+  const again = pickArchive(saved, sessions, previous.selected ?? "");
+  if (again !== null) return again;
+
+  const frozen = afterTeardown(repoRoot, previous);
+  if (frozen.session !== null) return { ...frozen, sessions };
+
+  // Down the list and not just at its head: `savedRounds` only checked that a snapshot file is
+  // there, so the newest one can still be unreadable — a write cut short, or a file written by a
+  // version this one cannot parse. One of those would otherwise hide every older round behind an
+  // empty window, which is the whole thing this archive exists to prevent.
+  for (const one of saved) {
+    const opened = pickArchive(saved, sessions, SAVED_PREFIX + one.key);
+    if (opened !== null) return opened;
+  }
+  return { ...emptySnapshot(), sessions };
+}
+
+/** A gate time a header can hold, or nothing at all where the record carries none. */
+function when(at: string): string {
+  return at === "" ? "" : `, gated ${at.slice(0, 16).replace("T", " ")}`;
+}
+
+/**
+ * Keep this round's picture where the gate's own record lives, so the viewer can still draw it once
+ * teardown has taken the session directory. Best-effort by design: a snapshot nobody could write
+ * costs a reader some history, and failing the gate over it would cost them the review.
+ *
+ * The three view fields are dropped rather than saved. `sessions` and `selected` are about the
+ * window that happens to be open, and a note saved here would outlive the reason for it.
+ */
+export function writeArchive(
+  repoRoot: string,
+  branch: string | null,
+  round: number,
+  snapshot: Snapshot,
+): void {
+  if (branch === null || branch === "") return;
+  try {
+    writeFileSync(
+      archivePath(repoRoot, branch, round),
+      JSON.stringify({ ...snapshot, sessions: [], selected: null, note: null }),
+      // `wx` is O_CREAT|O_EXCL, for the reason `recordRound` uses it on the record beside this
+      // file: the path is derived rather than random, and O_EXCL on each file is what
+      // `src/engine/rounds.ts` says stops one being replaced through a symlink. A round number is
+      // never reused, so there is nothing legitimate here to overwrite.
+      { encoding: "utf8", flag: "wx", mode: 0o600 },
+    );
+    pruneArchives(repoRoot);
+  } catch {
+    // A picture we cannot save is a viewer that shows less, never a gate that fails.
+  }
+}
+
+/**
+ * A saved snapshot, or null where the file is gone or unreadable. Spread onto an empty snapshot so
+ * a file written by an older version, missing a field this one draws, renders as that field empty
+ * rather than as a page that throws on it.
+ */
+function readArchive(path: string): Snapshot | null {
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<Snapshot>;
+    if (parsed.session === undefined) return null;
+    return { ...emptySnapshot(), ...parsed };
+  } catch {
+    return null;
+  }
 }
 
 /** What every live session needs derived, whether it is on screen or only a line in the switcher. */

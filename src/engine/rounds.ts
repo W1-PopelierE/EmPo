@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  existsSync,
   lstatSync,
   mkdirSync,
   readdirSync,
@@ -82,6 +83,23 @@ export interface RoundFinding {
   line: number;
 }
 
+/** A gated round whose viewer snapshot is still on disk. `key` is what `?session=` names it by. */
+export interface SavedRound {
+  /** Branch directory and round number, unique inside one repository and stable across polls. */
+  key: string;
+  /** The snapshot file itself, so a reader who picked this key needs no second lookup. */
+  path: string;
+  record: RoundRecord;
+}
+
+const ARCHIVE_SUFFIX = ".review.json";
+
+/**
+ * ponytail: a flat cap on snapshots kept per repository, oldest dropped. Twenty reviews back is
+ * further than anyone scrolls and bounds a directory that would otherwise grow one diff per gate.
+ */
+const ARCHIVE_KEEP = 20;
+
 /**
  * Both phases and every future run have to land on the same directory, so the repository key is the
  * one the root git and the OS agree on: /var and /private/var are one checkout on macOS, and a
@@ -97,8 +115,67 @@ export function canonicalRoot(repoRoot: string): string {
 
 /** Where this branch's rounds are kept. Named readably, keyed by digest: see the type above. */
 export function roundsDir(repoRoot: string, branch: string): string {
+  return join(repoRoundsDir(repoRoot), pathKey(branch, branch));
+}
+
+/** Every branch of this repository under one directory, which is what a repo-wide scan walks. */
+function repoRoundsDir(repoRoot: string): string {
   const root = canonicalRoot(repoRoot);
-  return join(roundsRoot(), pathKey(basename(root), root), pathKey(branch, branch));
+  return join(roundsRoot(), pathKey(basename(root), root));
+}
+
+/**
+ * Where a gated round keeps the picture a viewer can still draw once the session is gone. Beside
+ * the record and not inside it: the record is read on every review to decide what the next round
+ * diffs against, and a diff of a few hundred kilobytes in that file would be parsed every time to
+ * answer a question about six fields.
+ */
+export function archivePath(repoRoot: string, branch: string, round: number): string {
+  return join(roundsDir(repoRoot, branch), `${String(round).padStart(3, "0")}${ARCHIVE_SUFFIX}`);
+}
+
+/**
+ * Every gated round of this repository that still has its viewer snapshot, newest gate first and
+ * across every branch: what the reader lost when the session directory went is not branch-shaped,
+ * it is "the review I was just looking at".
+ *
+ * The record is what this reads and the snapshot is only checked for existence, because this runs
+ * on the viewer's poll and the snapshot is the one large file here.
+ */
+export function savedRounds(repoRoot: string): SavedRound[] {
+  const dir = repoRoundsDir(repoRoot);
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const saved: SavedRound[] = [];
+  for (const name of names) {
+    for (const [number, file] of roundFilesIn(join(dir, name))) {
+      const path = file.replace(/\.json$/, ARCHIVE_SUFFIX);
+      if (!existsSync(path)) continue;
+      const record = parseRound(file);
+      if (record === null) continue;
+      saved.push({ key: `${name}/${String(number).padStart(3, "0")}`, path, record });
+    }
+  }
+  // A record written before `at` existed parses to "", which is not a time; those sort oldest.
+  return saved.sort((a, b) => (Date.parse(b.record.at) || 0) - (Date.parse(a.record.at) || 0));
+}
+
+/**
+ * Forget the snapshots past the cap, oldest first. The records themselves stay: they are what the
+ * next review reads to know what it can skip, and they are six fields, not a diff.
+ */
+export function pruneArchives(repoRoot: string, keep: number = ARCHIVE_KEEP): void {
+  for (const old of savedRounds(repoRoot).slice(keep)) {
+    try {
+      rmSync(old.path, { force: true });
+    } catch {
+      // A snapshot we cannot remove costs disk, never a gate.
+    }
+  }
 }
 
 /**

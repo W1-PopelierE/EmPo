@@ -1,4 +1,4 @@
-import type { ChangedHunk } from "../engine/diff";
+import type { ChangedFile, ChangedHunk } from "../engine/diff";
 
 /**
  * The pieces of the page that are real logic rather than string concatenation, kept here so the
@@ -100,4 +100,15 @@ export function highlight(escaped: string, path: string): string {
       str !== undefined ? "s" : comment !== undefined ? "c" : num !== undefined ? "n" : "k";
     return `<span class="${kind}">${match}</span>`;
   });
+}
+
+/**
+ * Whether some hunk of the diff covers this finding's line, which is what decides if jumping to it
+ * has anywhere to land. The file is the snapshot's entry for the finding's path, so it can be
+ * missing entirely — a finding on a file the diff never touched — and a binary one has no lines to
+ * land on at all.
+ */
+export function anchored(changed: ChangedFile | undefined, line: number): boolean {
+  if (!changed || changed.isBinary) return false;
+  return (changed.hunks || []).some((h) => line >= h.newStart && line < h.newStart + h.newLines);
 }
