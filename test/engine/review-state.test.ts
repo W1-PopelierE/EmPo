@@ -765,6 +765,14 @@ describe("saved rounds", () => {
     gate(root, startReview(root));
     const saved = readReviewState(root, emptySnapshot()).selected;
     const live = startReview(root);
+    // Stamped a millisecond past the gate rather than left to the clock. `newestRound` adopts a
+    // round whose `at` is at or after `startedAt`, and `startedAt` is this file's mtime floored to
+    // the millisecond — so a machine quick enough to gate and start the next review inside one
+    // millisecond hands this session its predecessor's round and reads it as "gated". Inside that
+    // millisecond the two cases are the same two numbers: a round is either the previous review's
+    // or this one's own, and `at` carries no more precision to tell them apart with. The fixture
+    // says which it means instead of racing for it, the way `backdate` does above.
+    utimesSync(join(live, "session.json"), new Date(), new Date(Date.now() + 1));
 
     const byDefault = readReviewState(root, emptySnapshot());
     expect(byDefault.selected).toBe(basename(live));
