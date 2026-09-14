@@ -13,9 +13,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+  archivePath,
   branchesGatedUnder,
   canonicalRoot,
   lastRound,
+  pruneArchives,
   readRounds,
   recordRound,
   resetRounds,
@@ -329,6 +331,35 @@ describe("branchesGatedUnder", () => {
 
     expect(branchesGatedUnder(repo, "27")).toEqual([]);
     expect(branchesGatedUnder(join(sandbox, "other-repo"), "27")).toEqual([]);
+  });
+});
+
+describe("pruneArchives", () => {
+  test("drops the oldest snapshots past the cap and keeps every round record", () => {
+    // The only automatic bound on a directory that gains one whole diff per gate, and nothing else
+    // calls it in a test: a cap that dropped nothing, dropped the newest, or took the record along
+    // with the snapshot would all go unnoticed — the third silently costs the next review a re-read.
+    // The clock is faked because `recordRound` stamps `at` itself and two gates in one millisecond
+    // would make "oldest" a coin toss.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    recordRound(repo, "feat/x", "sha-1", null, "local", []);
+    vi.setSystemTime(new Date("2026-01-02T00:00:00Z"));
+    recordRound(repo, "feat/x", "sha-2", null, "local", []);
+    vi.useRealTimers();
+    for (const round of [1, 2]) {
+      writeFileSync(archivePath(repo, "feat/x", round), `{"round":${round}}\n`);
+    }
+
+    pruneArchives(repo, 1);
+
+    expect(existsSync(archivePath(repo, "feat/x", 2))).toBe(true);
+    expect(existsSync(archivePath(repo, "feat/x", 1))).toBe(false);
+    expect(readdirSync(roundsDir(repo, "feat/x")).sort()).toEqual([
+      "001.json",
+      "002.json",
+      "002.review.json",
+    ]);
   });
 });
 

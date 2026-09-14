@@ -11,12 +11,12 @@
  * adds markup after escaping is `highlight`, which is why it only ever wraps spans around text that
  * has already been through `esc()`.
  *
- * The three functions with real logic in them live in `./render` and are pasted in here as source.
+ * The four functions with real logic in them live in `./render` and are pasted in here as source.
  * That keeps them under test — a template string is not runnable by the suite — without a build
  * step, a bundle or a second copy that drifts from the first. They are assigned to a name declared
  * here rather than injected as declarations, so a bundler renaming them cannot break the call sites.
  */
-import { esc, highlight, hunkRows } from "./render";
+import { anchored, esc, highlight, hunkRows } from "./render";
 
 export function page(): string {
   return `<!doctype html>
@@ -67,6 +67,14 @@ li { padding:2px 0; }
 .row.context .k, .row.context .s, .row.context .n, .row.context .c { color:inherit; }
 .row.hit { box-shadow:inset 3px 0 0 var(--mark); }
 .finding { border:1px solid var(--line); border-radius:4px; padding:8px 10px; margin:0 0 8px; }
+/* A finding on the line it is about, inside the hunk, so the claim is read with the code under it
+   rather than three scrolls below it. */
+.comment { border-top:1px solid var(--line); border-bottom:1px solid var(--line); background:var(--panel); padding:6px 8px; }
+.comment .finding { margin:0; background:var(--bg); }
+.comment .finding + .finding { margin-top:6px; }
+.flash { outline:2px solid var(--mark); }
+button.finding { display:block; width:100%; text-align:left; font:inherit; color:inherit; background:none; cursor:pointer; }
+button.finding:hover { background:var(--panel); }
 .finding.dropped { opacity:.65; }
 .finding .t { font-weight:600; }
 .finding p { margin:4px 0 0; white-space:pre-wrap; }
@@ -111,6 +119,7 @@ const el = (id) => document.getElementById(id);
 const esc = ${esc};
 const hunkRows = ${hunkRows};
 const highlight = ${highlight};
+const anchored = ${anchored};
 
 let snapshot = null;
 let selected = null;
@@ -183,11 +192,16 @@ function renderSessions() {
 }
 
 function reviewRow(one) {
+  // A saved round says which round it was and when; a live one has neither and says its phase,
+  // which is the only thing about it that is still moving.
+  const what = one.round === null
+    ? esc(one.phase)
+    : "round " + Number(one.round) + (one.at ? "  " + esc(one.at.slice(0, 10)) : "");
   return '<li><button class="review" data-key="' + esc(one.key) + '" aria-current="'
     + (one.key === snapshot.selected) + '">'
     + '<span class="who" title="' + esc(one.branch) + '">' + esc(one.id) + "  "
     + '<span class="dim">' + esc(one.branch) + "</span></span>"
-    + '<span class="tag">' + esc(one.phase) + "</span></button></li>";
+    + '<span class="tag">' + what + "</span></button></li>";
 }
 
 function fileRow(file) {
@@ -218,11 +232,11 @@ function renderDiff(files) {
   el("diffTitle").textContent = file ? file.path + "  (" + file.status + ")" : "Diff";
   const changed = file === null ? null : (snapshot.hunks || {})[file.path] || null;
   // Findings sit on lines in the new file, which is where the added lines are numbered.
-  const lines = (snapshot.findings || [])
-    .filter((f) => file !== null && f.file === file.path)
-    .map((f) => f.line);
+  const mine = (snapshot.findings || []).filter((f) => file !== null && f.file === file.path);
 
-  const key = JSON.stringify([selected, changed, lines, snapshot.session === null]);
+  // The whole finding and not only its line: the comment drawn into the hunk carries the claim, the
+  // suggestion and the verdict, so a gate that only changed "suspected" to "dropped" has to redraw.
+  const key = JSON.stringify([selected, changed, mine, snapshot.session === null]);
   if (key === drawn) return;
   drawn = key;
 
@@ -236,23 +250,32 @@ function renderDiff(files) {
       + (changed && changed.isBinary ? "Binary file." : "No hunks in the diff.") + "</p>";
     return;
   }
-  const marks = new Set(lines);
-  el("diff").innerHTML = changed.hunks.map((hunk) => hunkBlock(hunk, marks, file.path)).join("");
+  const byLine = new Map();
+  for (const f of mine) byLine.set(f.line, (byLine.get(f.line) || []).concat([f]));
+  el("diff").innerHTML = changed.hunks.map((hunk) => hunkBlock(hunk, byLine, file.path)).join("");
 }
 
-function hunkBlock(hunk, marks, path) {
+function hunkBlock(hunk, byLine, path) {
   const head = "@@ -" + hunk.oldStart + "," + hunk.oldLines
     + " +" + hunk.newStart + "," + hunk.newLines + " @@";
-  const rows = hunkRows(hunk).map((r) => row(r, marks, path));
+  const rows = hunkRows(hunk).map((r) => row(r, byLine, path) + comment(r, byLine));
   return '<div class="hunk"><div class="head">' + esc(head) + "</div>" + rows.join("") + "</div>";
+}
+
+// Everything said about this line, under it. Nothing at all on a line nobody wrote about, which is
+// almost every line.
+function comment(r, byLine) {
+  const here = r.newLine === null ? null : byLine.get(r.newLine);
+  if (!here) return "";
+  return '<div class="comment">' + here.map((f) => findingBlock(f, false)).join("") + "</div>";
 }
 
 const SIGN = { add: "+", del: "-", context: " " };
 
 // Escape first, colour second. highlight() puts spans into the string, so what it is handed has to
 // be text already: the reverse order would escape the spans and leave the diff's own markup live.
-function row(r, marks, path) {
-  const hit = r.newLine !== null && marks.has(r.newLine);
+function row(r, byLine, path) {
+  const hit = r.newLine !== null && byLine.has(r.newLine);
   return '<div class="row ' + r.kind + (hit ? " hit" : "") + '">'
     + '<span class="ln">' + (r.oldLine === null ? "" : Number(r.oldLine)) + "</span>"
     + '<span class="ln">' + (r.newLine === null ? "" : Number(r.newLine)) + "</span>"
@@ -270,21 +293,48 @@ function renderFindings() {
   const order = (f) => (f.survived === true ? 0 : f.survived === null ? 1 : 2);
   el("findings").innerHTML = findings.slice()
     .sort((a, b) => order(a) - order(b))
-    .map(findingBlock).join("");
+    // A finding the diff already carries is listed as a line to click, not repeated in full: its
+    // claim is up there against the code. One on a line no hunk covers has nowhere else to be read.
+    .map((f) => findingBlock(f, anchored((snapshot.hunks || {})[f.file], f.line)))
+    .join("");
+  for (const button of document.querySelectorAll("#findings .finding[data-path]")) {
+    button.onclick = () => {
+      selected = button.dataset.path;
+      render(snapshot);
+      focusFinding(button.dataset.finding);
+    };
+  }
 }
 
-function findingBlock(f) {
+// The id is whatever the reviewer wrote, so it is compared as data and never built into a selector.
+function focusFinding(id) {
+  for (const node of document.querySelectorAll("#diff .finding")) {
+    if (node.dataset.finding !== id) continue;
+    node.scrollIntoView({ block: "center" });
+    node.classList.add("flash");
+    setTimeout(() => node.classList.remove("flash"), 1200);
+    return;
+  }
+}
+
+function findingBlock(f, compact) {
   const state = f.survived === true ? "survived" : f.survived === false ? "dropped" : "";
   const label = f.survived === true ? "survived" : f.survived === false ? "dropped" : "suspected";
-  return '<div class="finding ' + state + '">'
+  // A button only where clicking it goes somewhere; the same markup as a div otherwise, so the
+  // inline copy and an unanchored one read the same.
+  const tag = compact ? "button" : "div";
+  const jump = compact
+    ? ' data-path="' + esc(f.file) + '"'
+    : "";
+  return "<" + tag + ' class="finding ' + state + '" data-finding="' + esc(f.id) + '"' + jump + ">"
     + '<span class="tag">' + esc(f.severity) + '</span> '
     + '<span class="tag">' + esc(f.kind) + '</span> '
     + '<span class="tag">' + label + "</span> "
     + '<span class="t">' + esc(f.title) + "</span>"
     + '<p class="dim">' + esc(f.file) + ":" + Number(f.line) + "</p>"
-    + (f.claim ? "<p>" + esc(f.claim) + "</p>" : "")
-    + (f.suggestion ? '<p class="dim">' + esc(f.suggestion) + "</p>" : "")
-    + "</div>";
+    + (compact || !f.claim ? "" : "<p>" + esc(f.claim) + "</p>")
+    + (compact || !f.suggestion ? "" : '<p class="dim">' + esc(f.suggestion) + "</p>")
+    + "</" + tag + ">";
 }
 
 function status(text) { el("link").textContent = text; }
