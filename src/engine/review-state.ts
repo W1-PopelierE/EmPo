@@ -327,7 +327,14 @@ export function writeArchive(
   } catch {
     // A picture we cannot save is a viewer that shows less, never a gate that fails.
   } finally {
-    rmSync(staging, { force: true });
+    try {
+      // `force` swallows a missing file and nothing else, and this runs in a `finally`: an EPERM
+      // or EBUSY here would come out of the function past the catch above and fail the gate over
+      // a leftover temp file, which is the one thing this whole write refuses to do.
+      rmSync(staging, { force: true });
+    } catch {
+      // Costs a stale file in a swept directory. `empo review --reset` is the broom.
+    }
   }
 }
 
