@@ -1,6 +1,7 @@
 import {
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -773,6 +774,26 @@ describe("saved rounds", () => {
     const asked = readReviewState(root, emptySnapshot(), saved);
     expect(asked.selected).toBe(saved);
     expect(asked.findings[0]).toMatchObject({ claim: "f1 claim" });
+  });
+
+  // The snapshot is staged beside the archive and linked into place, so a gate killed mid-write
+  // leaves no truncated file at the real path — `savedRounds` counts files and never reads them,
+  // so one of those would hold a retention slot and push a readable round off `pruneArchives`.
+  // What that staging must not do is outlive the write, on the way through or on the way out.
+  test("the staged copy never outlives the write, whether it lands or not", () => {
+    const root = repo();
+    gate(root, startReview(root));
+    const path = archivePath(root, "feat/x", 1);
+    const stray = (): string[] =>
+      readdirSync(dirname(path)).filter((name) => name.endsWith(".tmp"));
+
+    expect(stray()).toEqual([]);
+    expect(JSON.parse(readFileSync(path, "utf8")).files).toHaveLength(2);
+
+    // And the refused write, which stages a file too: round 1 is already on disk.
+    writeArchive(root, "feat/x", 1, emptySnapshot());
+
+    expect(stray()).toEqual([]);
   });
 
   // The flag and not only the mode: `wx` is what keeps a derived path from being written through,

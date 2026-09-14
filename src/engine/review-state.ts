@@ -1,4 +1,13 @@
-import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+  existsSync,
+  linkSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import type { ReviewFinding } from "../discipline/findings";
 import { parseFindingsFile } from "../schema/findings.schema";
@@ -292,19 +301,33 @@ export function writeArchive(
   snapshot: Snapshot,
 ): void {
   if (branch === null || branch === "") return;
+  const path = archivePath(repoRoot, branch, round);
+  // Written aside and linked into place, because this is the one large file here and a gate killed
+  // mid-write would otherwise leave a truncated snapshot at the real path. That file exists, so
+  // `savedRounds` counts it, so it takes a slot under the retention cap and pushes a readable round
+  // off the end of `pruneArchives` — a crashed write costing a review that had been saved fine.
+  // The link is atomic: the path holds a whole snapshot or it holds nothing.
+  const staging = `${path}.${randomUUID()}.tmp`;
   try {
     writeFileSync(
-      archivePath(repoRoot, branch, round),
+      staging,
       JSON.stringify({ ...snapshot, sessions: [], selected: null, note: null }),
       // `wx` is O_CREAT|O_EXCL, for the reason `recordRound` uses it on the record beside this
       // file: the path is derived rather than random, and O_EXCL on each file is what
-      // `src/engine/rounds.ts` says stops one being replaced through a symlink. A round number is
-      // never reused, so there is nothing legitimate here to overwrite.
+      // `src/engine/rounds.ts` says stops one being replaced through a symlink. The unguessable
+      // suffix puts the staging file itself out of reach of the same trick.
       { encoding: "utf8", flag: "wx", mode: 0o600 },
     );
+    // `link` and not `rename`, to keep what `wx` bought at the real path: it fails with EEXIST
+    // rather than replacing what is there, and it will not follow a symlink standing at the
+    // destination. So a round is still never written twice and never written through, and now it
+    // is never half-written either.
+    linkSync(staging, path);
     pruneArchives(repoRoot);
   } catch {
     // A picture we cannot save is a viewer that shows less, never a gate that fails.
+  } finally {
+    rmSync(staging, { force: true });
   }
 }
 
