@@ -22,7 +22,6 @@ import { reviewCommand } from "./commands/review";
 import { updateCommand } from "./commands/update";
 import { upgradeCommand } from "./commands/upgrade";
 import { verifyCommand } from "./commands/verify";
-import { webCommand } from "./commands/web";
 import { EMBEDDED_VERSION } from "./embedded";
 
 /**
@@ -233,17 +232,6 @@ export function buildProgram(): Command {
         reviewCommand(options.repo, pr, options);
       },
     );
-
-  program
-    .command("web")
-    .description("Serve a local viewer for the review in progress")
-    .option("--repo <path>", "repository root", process.cwd())
-    // Commander calls a coercion as `fn(value, previous)`, and `Number.parseInt` would read that
-    // second argument as a radix: a repeated `--port` parsed the second value in base 7373.
-    .option("--port <number>", "port to bind on 127.0.0.1", (value) => Number.parseInt(value, 10))
-    .action(async (options: { repo: string; port?: number }) => {
-      await webCommand(options.repo, { port: options.port });
-    });
 
   const pack = program.command("pack").description("Language pack tooling");
 

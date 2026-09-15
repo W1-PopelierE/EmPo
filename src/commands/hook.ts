@@ -391,11 +391,12 @@ function toolUse(repoRoot: string, payload: Record<string, unknown>): string | n
       // is the private /var/folders/... on macOS but the world-traversable /tmp on a Linux box.
       // engine/rounds.ts reasons the same way about where the rounds log may live.
       chmodSync(log, 0o600);
-      // A trim and not a delete, and not rotation either. `empo web` reads a review's phase and its
-      // opened check marks from this log having any lines at all rather than from its tail (see
-      // `derive` in engine/review-state.ts), so deleting it mid-review redraws a running review as
-      // "brief" with every check mark gone. Keeping the last lines costs old history, which is the
-      // activity list alone, and the viewer never shows more than its last 200 lines anyway.
+      // A trim and not a delete, and not rotation either. This log is the running review's own
+      // record of which files were opened, so the cap is here to bound a temp file, not to throw
+      // that record away mid-flight: emptying it loses the history of a review still in progress,
+      // where keeping the tail loses only entries old enough that nothing looks back at them.
+      // Rotation would keep those too, at the price of a second file to name and sweep in a temp
+      // directory nothing else cleans.
       if (statSync(log).size > 1_000_000) {
         // Over-long records are dropped and not kept, because the cap has to hold in bytes and not
         // only in records: a single pathological line survives `slice` intact, leaves the file over

@@ -902,10 +902,10 @@ describe("the tool-use event", () => {
   });
 
   /**
-   * The cap trims and never deletes, and the difference is the whole point: `empo web` reads a
-   * review's phase and its opened check marks from this log having lines at all, so a log emptied
-   * mid-review redraws that review as one that has read nothing. Hence the tail is asserted by
-   * value — an assertion that the file merely got smaller passes against deleting it outright.
+   * The cap trims and never deletes, and the difference is the whole point: the log is the running
+   * review's record of what it opened, so a log emptied mid-review loses the history of a review
+   * still in progress. Hence the tail is asserted by value — an assertion that the file merely got
+   * smaller passes just as well against deleting it outright.
    */
   test("trims the log to its tail rather than letting it grow without bound", () => {
     startReview(repo);

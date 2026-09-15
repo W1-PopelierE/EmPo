@@ -27,7 +27,6 @@ tool, and adding the call quietly later would be the way that happens.
 | `empo verify` | Resolve every spine citation, report drift | no | no |
 | `empo check` | Commit gate: spine touched without a value-asserting test? | no | no |
 | `empo review [<pr>]` | Run the review discipline over a PR or local diff | yes | only via `gh`; an `mcp` forge makes none |
-| `empo web` | Serve a local, read-only viewer of the review in progress on `127.0.0.1` | no | no, and it binds loopback only |
 | `empo update` | Regenerate the host wiring, `AGENTS.md`, `.claude/` and `.codex/`, from this config | no | no |
 | `empo upgrade` | Replace this standalone binary with the latest GitHub Release | no | **yes**, and it is the only one |
 | `empo doctor` | Health: staleness, config validity, unmapped dirs, bridge match rates, unclaimed files, wired hooks that do not run, `commit` vs git | no | no |
@@ -554,10 +553,7 @@ the same seven hundred lines eleven times while each round had changed a few doz
 appends to a round log — one file per gated round, holding that round's number, the commit and the
 tree phase 1 read, the time, the id of the review it belonged to, the branch, and the findings that
 round got through the gate — in a directory keyed to this repository and this branch, outside the
-repository entirely ([09-adapters](09-adapters.md)) and never in it. Beside each round file the gate
-also saves `NNN.review.json`, the picture `empo web` draws of that round, which nothing in a review
-ever reads: it is there so a finished review can still be opened afterwards, and dropping it costs a
-window and never a round. A log and not a counter,
+repository entirely ([09-adapters](09-adapters.md)) and never in it. A log and not a counter,
 because a counter answers how many rounds there have been and never what round two found, and a
 reader on round five has the second question far more often than the first. The brief prints the
 head of it back as one line under `branch`, `round 3 against this branch, last reviewed at 56abad4,
@@ -877,107 +873,6 @@ verified findings to the PR, off by default, and unavailable on an `mcp` forge, 
 diff against the base instead of narrowing to what has changed since the last gated round),
 `--reset` (forget every gated round on the branch under review and print what was thrown away),
 `--rounds` (print the gated-round log for the branch under review and stop), and `--repo <path>`.
-
-## `empo web`
-
-A viewer, on `127.0.0.1`, for a review while it is happening. It is long-running: start it in its
-own terminal, leave it up, and run reviews beside it. It reads and never writes, so starting it
-changes nothing about a review and killing it loses nothing but the window.
-
-The page shows what the terminal structurally cannot. The terminal prints a brief, goes quiet for
-some minutes, and then prints the survivors. The page shows the in-between: which changed file the
-reviewer is reading right now, **which changed files it opened and which it never did** (the opened
-ones carry a `✓`; the rest are the rows without one), what it read *outside*
-the diff (the blast radius it actually checked), and, after the gate, the dropped findings beside the
-survivors with the claim each one stood on. Two columns: the changed files, the files read outside
-the diff and the live tool stream on the left; the selected file's changed lines with findings marked
-on their line, and the findings list, on the right.
-
-**A finding is read where the code is.** Each one is drawn into the hunk directly under the line it
-cites, the way a review comment sits on a line, with its claim and its suggestion and whether the
-gate kept it — so the case and the code it is about are read together instead of three scrolls
-apart. The findings list below is then an index: one row per finding, clicking it jumps to that
-line and flashes the comment there. A finding whose line no hunk covers has nowhere to be drawn, so
-that row carries its full text instead.
-
-**The right-hand pane is the hunks, not the file.** Each hunk is rebuilt in the order git wrote it
-— removals, additions, and the unchanged context between them — with an old and a new number column
-on every row, so a number is never ambiguous about which revision it belongs to. Code is coloured by
-a small tokeniser built into the page: strings, comments, numbers and keywords, nothing fetched from
-a network, nothing coloured in a file whose extension is not code, and one line at a time, so an
-unterminated block comment stops colouring at the end of its line. What falls outside the hunks is
-not there. It answers "what changed here, and which findings sit on it", not "how does this file
-read now"; for that, open the file.
-
-Nothing on it is reported by the agent. Every phase — brief, reading, findings, gated — is derived
-from a file `empo review` writes for its own reasons, so nothing on the page depends on an agent
-being honest about its own progress.
-
-**A finished review is still there to read.** Phase 2 deletes the session directory, which is where
-the diff and the suspected findings live ([07-review-discipline](07-review-discipline.md), invariant
-2) — so the gate saves the picture the viewer draws beside the round it just recorded, as
-`NNN.review.json` next to `NNN.json` in the round log, and deletes the session afterwards exactly as
-it did. The discipline is unchanged: nothing is kept inside the repository, nothing the agent
-reports is trusted, and a gate whose snapshot cannot be written says nothing and gates anyway.
-
-What that buys is a review you can open after it ended, from a viewer that was never running while
-it ran: the diff, every finding with the claim it stood on, and which of them survived. Saved rounds
-appear in the `Reviews` block beside the live ones, each row carrying its round number and the day
-it was gated, and with no review running the page opens on the newest readable one of them instead
-of on an empty window — a snapshot cut short by a write that died is stepped over rather than
-shown. They live where the round log lives — a temp directory the OS sweeps
-([09-adapters](09-adapters.md)) — and the newest twenty per repository are kept; past that the
-oldest snapshot is dropped while its round record stays, because the record is what the next review
-reads and it is six fields, not a diff. `empo review --reset` forgets both.
-
-A viewer that was up while the review ran keeps showing its own copy after the gate rather than
-swapping to the saved one, which is the same content without the redraw.
-
-**Under Codex there is no live tool stream.** The activity column is fed by a `PostToolUse` hook, and
-Codex has no hook mechanism (`empo update` ships it skills and nothing else), so under Codex the
-page still shows the diff, the findings and the gate's verdict, and the phase moves from brief
-straight to findings with nothing in between. The same hook feeds the `✓` beside a changed file, so
-under Codex no file is marked as opened either — an empty mark column there means unknown, not
-unread. The hook matches `Read` alone, so a file the reviewer only grepped or edited is unmarked
-under Claude too.
-
-It binds `127.0.0.1` and nothing else, serves GET and nothing else, and has no route that changes
-anything ([11-security-boundaries](11-security-boundaries.md)). Default port `7373`, walking upward
-over at most ten ports until one is free, because the usual collision is a viewer a previous review
-left running; the address the socket actually bound is printed, which is not always the one asked
-for, since `--port 0` is a legal way to say "whatever is free". It fails rather than walking further.
-Flags: `--port <n>` (pin it, and fail rather than walk) and `--repo <path>`.
-
-**A review is live for twelve hours.** Nothing else expires a session: the gate tears its own down,
-but a review abandoned after the brief leaves its directory in the temp root until the OS sweeps it,
-and it would otherwise sit in the switcher as a live review forever and keep the `tool-use` hook
-logging every file you open. Twelve hours is old enough that no real review is cut off and short
-enough that yesterday's abandoned one is gone. A review still running past it disappears from the
-viewer, which is the cost of not having a heartbeat, and not one worth a heartbeat yet.
-
-**Several reviews at once.** A viewer serves one repository — `--repo` picks it, and the sessions it
-can see are that repository's — so reviews running in separate worktrees are separate repository
-roots and want one viewer per worktree on its own port. Within one repository, every live review is
-listed: when there is more than one — a second live review, or a round saved earlier —
-the left column opens with a `Reviews` block, one row per review carrying what it is (`#1234`, or
-`local`), the branch it reads, and either the phase a live review is in right now or the round
-number and date a saved one was gated — so the column answers "which of the three is still reading" without switching to each
-of them. Clicking a row switches the whole page to it. The choice lives in the URL as `?session=<key>`, so
-three tabs pointed at the same viewer each stay on their own review across a reload; the key is the
-session directory's name, or `saved:` and the round for a finished one, and a key that names
-neither — a stale bookmark, or a snapshot dropped past the cap — falls back to the newest rather
-than erroring, so the tab keeps showing something.
-
-Which review opened which file is worked out from the path. The activity log is one file per
-repository and the hook that writes it knows nothing about sessions, so a line is attributed to the
-review whose read root contains its path most specifically. That separates a PR review — which reads
-a detached worktree under the temp directory — from a local one reading the checkout, and two PR
-reviews from each other. **It does not separate two local reviews of the same checkout**: they read
-literally the same files, so both claim every line and both show it. That is a limit worth knowing
-and not one worth working around, since two local reviews in one checkout also share one session
-directory (the scratch is keyed on the review's id plus the repository root, and a local review is
-always `local`), so the second tears down the first's state and the switcher has nothing to offer
-between them anyway. Run the second one in its own worktree.
 
 ## `empo update`
 

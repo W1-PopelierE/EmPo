@@ -5,10 +5,10 @@ import { readJson } from "../errors";
 import { canonicalRoot, pathKey } from "./rounds";
 
 /**
- * Where phase 1 of a review leaves what phase 2 verifies against, and what a viewer reads while it
- * is happening. This lives in the engine rather than in `empo review` because three callers need
- * the same path — review itself, the `tool-use` hook, and `empo web` — and a second copy of the
- * formula is a drift waiting to happen. Nothing here writes; review owns creation and teardown.
+ * Where phase 1 of a review leaves what phase 2 verifies against. This lives in the engine rather
+ * than in `empo review` because more than one caller needs the same path — review itself and the
+ * `tool-use` hook — and a second copy of the formula is a drift waiting to happen. Nothing here
+ * writes; review owns creation and teardown.
  */
 
 const ROOT = join(tmpdir(), "empo-review");
@@ -109,11 +109,11 @@ export function sessionDirs(repoRoot: string): string[] {
   }
   // Equal mtimes are the normal case, not the corner one: several sessions a review creates land
   // inside a single filesystem timestamp granule, and Linux's is coarse enough to hand all of them
-  // the same millisecond. Without a second key the order is whatever readdir returned, and since
-  // `readReviewState` shows the first entry to a viewer who has not picked a session, the review on
-  // screen would differ between two machines listing the same directory. The directory name breaks
-  // the tie ascending — it is the only other thing we have that is stable, and it is the readable
-  // id, so a tie resolves to a name a human can predict from the switcher. Compared by code unit
+  // the same millisecond. Without a second key the order is whatever readdir returned, so a caller
+  // taking the first entry as "the current session" would get a different session on two machines
+  // listing the same directory. The directory name breaks the tie ascending — it is the only other
+  // thing we have that is stable, and it is the readable id, so a tie resolves to a name a human
+  // can predict from a listing rather than to a coin flip. Compared by code unit
   // rather than `localeCompare`, which is exactly the kind of platform-dependent answer this sort
   // is here to stop having.
   return live

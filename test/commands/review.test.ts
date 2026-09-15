@@ -3239,12 +3239,7 @@ describe("round awareness", () => {
 
     gate([realFinding()]);
 
-    expect(readdirSync(roundsDirOf(repo, "main")).sort()).toEqual([
-      "001.json",
-      "001.review.json",
-      "002.json",
-      "002.review.json",
-    ]);
+    expect(readdirSync(roundsDirOf(repo, "main")).sort()).toEqual(["001.json", "002.json"]);
     expect(roundsOf(repo, "main")).toMatchObject([{ round: 2 }]);
   });
 

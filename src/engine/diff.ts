@@ -43,8 +43,9 @@ export interface ChangedHunk {
   /**
    * The unchanged lines between them, in the order the hunk lists them. Nothing in the review
    * discipline reads this — `changedLines` and the findings gate stand on `added` alone — it exists
-   * so `empo web` can render a hunk as a diff instead of a block of removals above a block of
-   * additions.
+   * so anything showing a hunk can show it as a diff instead of a block of removals above a block
+   * of additions. Keeping it is the cheap half of that: the parse has already walked these lines to
+   * number the changed ones, and dropping them here is what would make them unrecoverable later.
    */
   context: ContextLine[];
 }
