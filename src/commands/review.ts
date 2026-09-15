@@ -32,6 +32,7 @@ import {
   lastRound,
   type RoundFinding,
   type RoundRecord,
+  readRounds,
   recordRound,
   resetRounds,
   roundsDir,
@@ -109,6 +110,14 @@ export interface ReviewOptions {
    * looks exactly like one that had none to forget.
    */
   reset?: boolean;
+  /**
+   * `--rounds`: print the gated round log for this branch and stop. It exists because the only way
+   * to learn which round is next used to be to run a review, and a brief is not free: it tears the
+   * session directory down, rebuilds it and, for a pull request, adds a worktree. An agent deciding
+   * whether to review at all should not have to pay for that decision, so this path reads the log
+   * and never calls `isolate`.
+   */
+  rounds?: boolean;
 }
 
 interface FileFacts {
@@ -161,6 +170,23 @@ export function reviewCommand(
     throw configError("--post and --readonly contradict each other", [
       "--readonly suppresses every mutating action, which is what --post asks for.",
     ]);
+  }
+
+  if (options.rounds === true && options.reset === true) {
+    throw configError("--rounds and --reset contradict each other", [
+      "--rounds reports the gated rounds, which is what --reset throws away.",
+    ]);
+  }
+
+  if (options.rounds === true && options.findings !== undefined && options.findings !== "") {
+    throw configError("--rounds and --findings contradict each other", [
+      "--rounds reads the round log and stops, which is not a gate that could record one.",
+    ]);
+  }
+
+  if (options.rounds === true) {
+    roundsPhase(repoRoot, pr);
+    return;
   }
 
   if (options.reset === true) {
@@ -2014,6 +2040,48 @@ function resetPhase(repoRoot: string, pr: string | undefined): void {
   }
 }
 
+/**
+ * `empo review --rounds`. The read half of `--reset`, and the reason it is a flag and not a fact of
+ * the brief: an agent asking how many rounds this branch carries is asking so it can decide whether
+ * to review, and answering through a brief charges it a session teardown, a rebuild and, for a pull
+ * request, a worktree for the answer. Nothing here calls `isolate`.
+ */
+function roundsPhase(repoRoot: string, pr: string | undefined): void {
+  // Same reasoning as `--reset`: a pull request is reviewed from a detached worktree and never from
+  // its own branch, so the branch whose rounds `empo review 412 --rounds` means is not the checkout.
+  const branches = pr === undefined ? [currentBranch(repoRoot)] : branchesGatedUnder(repoRoot, pr);
+  if (branches.length === 0 || branches[0] === null) {
+    console.log(
+      pr === undefined
+        ? "This checkout is detached, and rounds are recorded per branch, so there are none to report."
+        : `No gated rounds for ${pr} in this repository, so there are none to report.`,
+    );
+    return;
+  }
+
+  for (const branch of branches) {
+    const rounds = readRounds(repoRoot, branch);
+    if (rounds.length === 0) {
+      // One line, naming the branch, because this is the line an agent branches on.
+      console.log(
+        `No gated rounds on ${branch}, so the next review is round 1 and reads the whole diff against the base.`,
+      );
+      continue;
+    }
+    console.log(`${rounds.length} gated round${rounds.length === 1 ? "" : "s"} on ${branch}:`);
+    for (const round of rounds) {
+      const found = round.findings.length === 1 ? "1 finding" : `${round.findings.length} findings`;
+      console.log(`  round ${round.round}  ${shortSha(round.sha)}  ${round.at}  ${found}`);
+    }
+    // Off the last record and not off the count: a number can be missing from the middle of the
+    // log, because the gate skips past a number an unparseable file already took.
+    const last = rounds.at(-1)?.round ?? rounds.length;
+    console.log(
+      `The next review is round ${last + 1} and narrows to what has been written since round ${last}.`,
+    );
+  }
+}
+
 function printGate(
   id: string,
   readRoot: string,
@@ -2033,7 +2101,7 @@ function printGate(
     if (rows.length === 0) console.log("  none survived verification");
     for (const row of rows) {
       console.log("");
-      console.log(`  [${row.finding.severity}] ${row.finding.title}`);
+      console.log(`  ${row.finding.id}  [${row.finding.severity}] ${row.finding.title}`);
       console.log(
         `  ${row.citation.file}:${row.citation.line}${row.corrected ? "  (citation corrected: the anchor had moved)" : ""}`,
       );

@@ -43,6 +43,28 @@ first round does, for when the narrowing has the wrong subject, and `empo review
 forgets every gated round on this branch and starts clean. The gate is what records a round,
 so a round that skipped phase 2 is a round the next review will not skip over.
 
+**Ask before you choose between them, and ask first of all.** Start with:
+
+```sh
+empo review --rounds
+```
+
+It reads the gated-round log for this branch and prints it. It starts no review, builds no
+worktree and changes nothing, so it is cheap to run before you have decided anything.
+
+- It says there are **no gated rounds**: this is round one, there is nothing to choose between,
+  so ask nothing and run `empo review` straight away.
+- It says there are **rounds**: put one multiple-choice question to the user before running
+  anything, using your host's prompt for it (`AskUserQuestion` in Claude Code,
+  `ask_user_question` in Codex). Offer exactly the options that apply, named with the round
+  numbers and dates the command just printed: continue with the narrowed next round, which is
+  the plain command and the default; `--whole`, for when the narrowing has the wrong subject;
+  or `--reset`, which forgets the history. Then run `empo review` once, with what they chose.
+
+Do not offer `--reset` as though it were equivalent to the other two. It throws away every
+round on the branch, and a user who picks it by accident has lost the log that makes the next
+review narrow at all.
+
 ## The second phase is not optional
 
 The CLI makes no model call anywhere, so a review is two phases.
@@ -56,6 +78,36 @@ A finding that has not been through phase 2 has not been verified, whatever it c
 Read `.empo/conventions.md` before flagging anything. It is the register of what this team has
 already judged correct as it stands, and a review that raises a settled question twice is how
 a review stops being read.
+
+## What to do with what survived
+
+A finding that survived the gate is a verified statement about the code. It is not yet a task,
+and the decision of which ones to act on is the author's, not yours. So the review does not
+end when the gate prints: it ends when they have told you what to do with each survivor.
+
+Wait until the whole review is actually finished before you ask. Phase 2 has printed, every
+check you dispatched has come back, and the report is written. A question asked while a check
+is still out is a question asked about a finding list that is about to change.
+
+Then ask **one question per finding**, using your host's multiple-choice prompt
+(`AskUserQuestion` in Claude Code, `ask_user_question` in Codex). Address each finding by the
+id the gate printed beside it, and give the question the finding's severity, title and
+`file:line` so it can be answered without scrolling back. Two options:
+
+- The finding's own `suggestion`, quoted as it stands, because a concrete fix is a decision the
+  author can make at a glance where "fix it" is a decision they have to reconstruct first.
+  Where the finding carries no `suggestion`, say what you would do instead, in one line.
+- Skip this one.
+
+Your host's prompt always leaves room for an answer you did not offer, and that is the answer
+worth having: it is where "this is a false positive, and here is why" arrives. When one does,
+append it to `.empo/conventions.md` as the register describes, so the next review does not
+raise it again.
+
+Collect every answer before you change a line. Then do only what was chosen, and leave the
+skipped findings in the report exactly as the gate verified them: a finding the author declined
+is still a true thing about this pull request, and quietly dropping it from the report rewrites
+the review to agree with the decision.
 
 ## This repository, as EmPo sees it
 

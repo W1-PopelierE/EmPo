@@ -198,6 +198,7 @@ export function buildProgram(): Command {
       false,
     )
     .option("--reset", "forget every gated round on this branch and start clean", false)
+    .option("--rounds", "read this branch's gated round log and print it, changing nothing", false)
     // Not --pr: the pull request id is already the positional argument, and one line reading
     // `empo review 412 --pr payload.json` would spend "pr" on two different things.
     .option("--pr-payload <path>", "the pull request an mcp host fetched, as JSON")
@@ -219,6 +220,7 @@ export function buildProgram(): Command {
           findings?: string;
           whole: boolean;
           reset: boolean;
+          rounds: boolean;
           prPayload?: string;
           ticketPayload?: string;
           ticket: boolean;

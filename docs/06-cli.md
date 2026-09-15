@@ -621,6 +621,17 @@ drifted somewhere a reader no longer trusts, gets to begin again at round one ra
 with a log nobody believes, and the print is there because deleting history silently is the one
 thing a command about forgetting must not do.
 
+`empo review --rounds` reads that same log and prints it: the rounds on this branch, the commit and
+timestamp each was gated at, and how many findings came through. Then it stops. It exists because
+choosing between the narrowed round, `--whole` and `--reset` is a decision about what the author has
+written since the last round, which is the one input no caller can read off the repository, and the
+only way to ask them was to run a review first and throw the brief away when the answer was
+`--whole`. So this is the cheap half of the brief's `round` line, available before anything has been
+committed to: it resolves the branch exactly as `--reset` does, including through a pull request id,
+and it never calls `isolate()`, so no worktree is built, no forge is called and nothing on disk moves.
+A branch with no rounds says so by name, because that is the answer that means there is nothing to
+choose between.
+
 **The brief also prints every dispatch a changed file makes from inside a loop**, under the heading
 `dispatches inside a loop  (step 2: what changed files can put on the queue)`, one row per site naming
 the `file:line`, the job it dispatches and the line the loop opened on. Under each row, where the
@@ -864,8 +875,8 @@ verified findings to the PR, off by default, and unavailable on an `mcp` forge, 
 `--post` is a config error, and nothing else in a review writes anything), `--json`, `--no-workflow`
 (leave the discipline out of the brief, for a reader who already has it), `--whole` (read the entire
 diff against the base instead of narrowing to what has changed since the last gated round),
-`--reset` (forget every gated round on the branch under review and print what was thrown away), and
-`--repo <path>`.
+`--reset` (forget every gated round on the branch under review and print what was thrown away),
+`--rounds` (print the gated-round log for the branch under review and stop), and `--repo <path>`.
 
 ## `empo web`
 

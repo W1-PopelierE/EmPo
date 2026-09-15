@@ -137,7 +137,8 @@ On top of that graph:
   has been written since the last one, plus the files the graph says those hunks can reach, which is
   the half a naive incremental review drops. `--whole` reads the entire diff again and `--reset`
   forgets the branch's rounds; which of the two subjects a brief is holding is stated in it and
-  never left to be worked out.
+  never left to be worked out. `--rounds` prints that log and stops, so which of the three to run is
+  a question the author can be asked before a review has been paid for.
 - **`empo verify` and `empo check`** hold hand-curated critical chains, and `empo hook` makes those
   fire while an agent works rather than only when somebody types them.
 
