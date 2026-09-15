@@ -397,7 +397,10 @@ describe("the generated skills", () => {
     // subject; the cheap read that makes asking possible is the thing to name.
     const skill = renderSkill("empo-review", FULL);
 
-    expect(skill).toContain("empo review --rounds");
+    // With the id, not bare. A pull request is reviewed from a detached worktree, so a bare
+    // `--rounds` reports the checkout's rounds and the agent answers for the wrong branch.
+    expect(skill).toContain("empo review $ARGUMENTS --rounds");
+    expect(skill).not.toContain("run `empo review` straight away");
     expect(skill).toContain("AskUserQuestion");
     // Codex has the same prompt under a different name, and the body is shared with .codex/.
     expect(skill).toContain("ask_user_question");

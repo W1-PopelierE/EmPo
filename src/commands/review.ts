@@ -29,6 +29,7 @@ import { compareStrings } from "../engine/order";
 import {
   branchesGatedUnder,
   lastRound,
+  nextRound,
   type RoundFinding,
   type RoundRecord,
   readRounds,
@@ -2048,10 +2049,14 @@ function roundsPhase(repoRoot: string, pr: string | undefined): void {
 
   for (const branch of branches) {
     const rounds = readRounds(repoRoot, branch);
+    // Never derived from the records printed below. A round file that will not parse is dropped by
+    // `readRounds` and still holds its number against the gate, so counting the readable ones
+    // promises a number the next gate will not take. `nextRound` is the allocation itself.
+    const next = nextRound(repoRoot, branch);
     if (rounds.length === 0) {
       // One line, naming the branch, because this is the line an agent branches on.
       console.log(
-        `No gated rounds on ${branch}, so the next review is round 1 and reads the whole diff against the base.`,
+        `No gated rounds on ${branch}, so the next review is round ${next} and reads the whole diff against the base.`,
       );
       continue;
     }
@@ -2060,11 +2065,11 @@ function roundsPhase(repoRoot: string, pr: string | undefined): void {
       const found = round.findings.length === 1 ? "1 finding" : `${round.findings.length} findings`;
       console.log(`  round ${round.round}  ${shortSha(round.sha)}  ${round.at}  ${found}`);
     }
-    // Off the last record and not off the count: a number can be missing from the middle of the
-    // log, because the gate skips past a number an unparseable file already took.
+    // The last readable round and not `next - 1`: this half is what the narrowing actually diffs
+    // against, and the narrowing reads `lastRound`, which skips an unparseable file the same way.
     const last = rounds.at(-1)?.round ?? rounds.length;
     console.log(
-      `The next review is round ${last + 1} and narrows to what has been written since round ${last}.`,
+      `The next review is round ${next} and narrows to what has been written since round ${last}.`,
     );
   }
 }

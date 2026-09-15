@@ -46,20 +46,27 @@ so a round that skipped phase 2 is a round the next review will not skip over.
 **Ask before you choose between them, and ask first of all.** Start with:
 
 ```sh
-empo review --rounds
+empo review $ARGUMENTS --rounds
 ```
 
-It reads the gated-round log for this branch and prints it. It starts no review, builds no
-worktree and changes nothing, so it is cheap to run before you have decided anything.
+It reads the gated-round log for the branch under review and prints it. It starts no review,
+builds no worktree and changes nothing, so it is cheap to run before you have decided anything.
+
+**Keep `$ARGUMENTS` on it**, exactly as on the review itself. A pull request is reviewed from a
+detached worktree and never from its own branch, so without the id this reads the rounds of
+whatever happens to be checked out: it would answer for `main` while the pull request's own
+branch carried three rounds, and you would report a first round to the user while the command
+narrowed to the fourth. Empty on a local review, which is the case it already handled.
 
 - It says there are **no gated rounds**: this is round one, there is nothing to choose between,
-  so ask nothing and run `empo review` straight away.
+  so ask nothing and run `empo review $ARGUMENTS` straight away.
 - It says there are **rounds**: put one multiple-choice question to the user before running
   anything, using your host's prompt for it (`AskUserQuestion` in Claude Code,
   `ask_user_question` in Codex). Offer exactly the options that apply, named with the round
   numbers and dates the command just printed: continue with the narrowed next round, which is
   the plain command and the default; `--whole`, for when the narrowing has the wrong subject;
-  or `--reset`, which forgets the history. Then run `empo review` once, with what they chose.
+  or `--reset`, which forgets the history. Then run `empo review $ARGUMENTS` once, with the
+  flag they chose, if any.
 
 Do not offer `--reset` as though it were equivalent to the other two. It throws away every
 round on the branch, and a user who picks it by accident has lost the log that makes the next

@@ -159,6 +159,20 @@ function roundFiles(repoRoot: string, branch: string | null): [number, string][]
   return branch === null || branch === "" ? [] : roundFilesIn(roundsDir(repoRoot, branch));
 }
 
+/**
+ * The number the next gated round will take, off the file names for the reason above.
+ *
+ * Exported because two places answer this question and they have to answer it the same way. The
+ * gate allocates it; `empo review --rounds` prints it so a caller can decide what to run. Deriving
+ * the printed one from `readRounds` instead looked equivalent and is not: `readRounds` drops a file
+ * that will not parse and the allocation does not, so a branch whose newest round file is corrupt
+ * printed one number and then recorded another. A number an agent branches on is worth deriving
+ * once.
+ */
+export function nextRound(repoRoot: string, branch: string | null): number {
+  return (roundFiles(repoRoot, branch).at(-1)?.[0] ?? 0) + 1;
+}
+
 function roundFilesIn(dir: string): [number, string][] {
   try {
     if (!ours(dir)) return [];
@@ -207,7 +221,7 @@ export function recordRound(
   // on one branch at once, which the discipline says can happen. Dropping the loser's round there
   // would lose its findings and cost the next review a whole re-read, for a collision that the
   // next free number settles.
-  let round = (roundFiles(repoRoot, branch).at(-1)?.[0] ?? 0) + 1;
+  let round = nextRound(repoRoot, branch);
   for (let attempt = 0; attempt < 16; attempt++, round++) {
     const record: RoundRecord = {
       round,

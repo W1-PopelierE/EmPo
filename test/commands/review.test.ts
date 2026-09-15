@@ -3244,6 +3244,33 @@ describe("round awareness", () => {
   });
 
   /**
+   * The number `--rounds` prints is the number the next gate will take, and the two used to come
+   * from different places: the print counted the rounds that parse and the gate allocated off the
+   * file names. A branch whose newest round file is corrupt then promised a number the gate would
+   * skip, which is the one number an agent reads this command for.
+   */
+  test("the next round it reports is the number the gate will actually take", () => {
+    changeCalculator();
+    gate([realFinding()]);
+    writeFileSync(join(roundsDirOf(repo, "main"), "002.json"), "{ not json");
+
+    expect(capture(() => reviewCommand(repo, undefined, { rounds: true }))).toContain(
+      "The next review is round 3",
+    );
+  });
+
+  /** The same, where the only round file there is unreadable: no rounds to list, still round 2. */
+  test("a branch whose only round file is unreadable still reports the next number", () => {
+    changeCalculator();
+    gate([realFinding()]);
+    writeFileSync(join(roundsDirOf(repo, "main"), "001.json"), "{ not json");
+
+    expect(capture(() => reviewCommand(repo, undefined, { rounds: true }))).toContain(
+      "No gated rounds on main, so the next review is round 2",
+    );
+  });
+
+  /**
    * The rounds of a pull request are on its own branch, and reviewing one never checks that branch
    * out, so a reset that keyed off the checkout would report nothing to forget while the rounds sat
    * there — or forget the wrong branch's.
