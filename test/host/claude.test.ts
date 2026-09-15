@@ -391,6 +391,57 @@ describe("the generated skills", () => {
     expect(skill).toContain("--reset");
   });
 
+  test("empo-review asks which round to run rather than picking one for the author", () => {
+    // Which of continue/--whole/--reset is right depends on what the author did since the last
+    // round, which is the one input no agent can read. Guessing costs a whole review of the wrong
+    // subject; the cheap read that makes asking possible is the thing to name.
+    const skill = renderSkill("empo-review", FULL);
+
+    // With the id, not bare. A pull request is reviewed from a detached worktree, so a bare
+    // `--rounds` reports the checkout's rounds and the agent answers for the wrong branch.
+    expect(skill).toContain("empo review $ARGUMENTS --rounds");
+    expect(skill).not.toContain("run `empo review` straight away");
+    expect(skill).toContain("AskUserQuestion");
+    // Codex has the same prompt under a different name, and the body is shared with .codex/.
+    expect(skill).toContain("ask_user_question");
+    // Round one has nothing to choose between, so a question there is a round trip spent on
+    // nothing, and an agent that asks anyway trains the author to stop reading the questions.
+    expect(skill).toContain("no gated rounds");
+  });
+
+  test("empo-review ends by asking what to do with each survivor, not by fixing them", () => {
+    // A verified finding is a true statement about the code, not work the author asked for. An
+    // agent that starts fixing all nine has answered a question nobody put to it.
+    const skill = renderSkill("empo-review", FULL);
+
+    expect(skill).toContain("one question per finding");
+    // The finding's own suggestion, because "fix it" is a decision the author has to reconstruct.
+    expect(skill).toContain("`suggestion`");
+    // Asked while a dispatched check is still out, the question is about a list about to change.
+    expect(skill).toContain("check you dispatched has come back");
+    // Nothing is edited on a half-answered list either.
+    expect(skill).toContain("Collect every answer before you change a line");
+    // A declined finding stays in the report: dropping it rewrites the review to agree.
+    expect(skill).toContain("skipped findings in the report exactly as the gate verified them");
+    // The free-text answer is where a false positive arrives, and the register is where it goes.
+    expect(skill).toContain(".empo/conventions.md");
+  });
+
+  test("empo-review answers a teammate's pull request in comments, not by editing their branch", () => {
+    // Most reviews are of somebody else's work, where the verb is not "fix" at all. A menu that
+    // only offers fixing turns every review of a teammate into a rewrite of their branch.
+    const skill = renderSkill("empo-review", FULL);
+
+    expect(skill).toContain("offer posting an inline comment first");
+    // Anchored where the finding stands, or it is a comment about the pull request and not about
+    // the line, which is the whole difference between an inline comment and a note.
+    expect(skill).toContain("`citation` file and line");
+    // The one line an impact comment needs that a diff comment does not.
+    expect(skill).toContain("`introducedBy`");
+    // What the CLI already does for the all-of-them case, so the loop is not reinvented for it.
+    expect(skill).toContain("--post");
+  });
+
   test("point at the discipline each command prints instead of copying it", () => {
     // The copy `empo review` and `empo init` hand over is the one the verification gate is built
     // around. A second copy in a generated file drifts from it and teaches a workflow the gate does

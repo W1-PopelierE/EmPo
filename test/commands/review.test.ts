@@ -1530,6 +1530,19 @@ describe("what the brief says about a ticket's comments", () => {
 });
 
 describe("the gate", () => {
+  /**
+   * A dropped finding has always printed its id, and a survivor had not, so the one set of findings
+   * anybody has to answer was the one set nobody could name. The author replying to a review, and
+   * the round log reading its own survivors back, both address a finding by its id.
+   */
+  test("names the surviving finding by its id, the way a dropped one is named", () => {
+    changeCalculator();
+
+    const printed = gate([realFinding()]);
+
+    expect(printed).toContain(`  ${realFinding().id}  [major] ${realFinding().title}`);
+  });
+
   test("keeps what was checked and drops what was not", () => {
     changeCalculator();
 
@@ -3226,13 +3239,35 @@ describe("round awareness", () => {
 
     gate([realFinding()]);
 
-    expect(readdirSync(roundsDirOf(repo, "main")).sort()).toEqual([
-      "001.json",
-      "001.review.json",
-      "002.json",
-      "002.review.json",
-    ]);
+    expect(readdirSync(roundsDirOf(repo, "main")).sort()).toEqual(["001.json", "002.json"]);
     expect(roundsOf(repo, "main")).toMatchObject([{ round: 2 }]);
+  });
+
+  /**
+   * The number `--rounds` prints is the number the next gate will take, and the two used to come
+   * from different places: the print counted the rounds that parse and the gate allocated off the
+   * file names. A branch whose newest round file is corrupt then promised a number the gate would
+   * skip, which is the one number an agent reads this command for.
+   */
+  test("the next round it reports is the number the gate will actually take", () => {
+    changeCalculator();
+    gate([realFinding()]);
+    writeFileSync(join(roundsDirOf(repo, "main"), "002.json"), "{ not json");
+
+    expect(capture(() => reviewCommand(repo, undefined, { rounds: true }))).toContain(
+      "The next review is round 3",
+    );
+  });
+
+  /** The same, where the only round file there is unreadable: no rounds to list, still round 2. */
+  test("a branch whose only round file is unreadable still reports the next number", () => {
+    changeCalculator();
+    gate([realFinding()]);
+    writeFileSync(join(roundsDirOf(repo, "main"), "001.json"), "{ not json");
+
+    expect(capture(() => reviewCommand(repo, undefined, { rounds: true }))).toContain(
+      "No gated rounds on main, so the next review is round 2",
+    );
   });
 
   /**
@@ -3311,5 +3346,67 @@ describe("round awareness", () => {
 
     expect(printed).toContain("the tree round 1 read (0000000) is no longer in this repository");
     expect(printed).not.toContain(`${round.sha.slice(0, 7)} is no longer`);
+  });
+
+  test("--rounds is a flag the real CLI accepts", () => {
+    expect(() => parseArgv(argvOf("empo review --rounds"))).not.toThrow();
+  });
+
+  /**
+   * Reading the log is what an agent does before deciding whether to review at all, and the reason
+   * it needed a flag of its own: `--json` reports the round, but only from the far side of a brief
+   * that has already torn the session down, rebuilt it and possibly added a worktree.
+   */
+  test("--rounds reports the branch's rounds without starting a review", () => {
+    changeCalculator();
+    gate([realFinding()]);
+
+    const printed = capture(() => reviewCommand(repo, undefined, { rounds: true }));
+
+    expect(printed).toContain("1 gated round on main:");
+    // One survivor came through that gate, so the count reads singular the way the report does.
+    expect(printed).toMatch(/\n {2}round 1 {2}[0-9a-f]{7} {2}\S+ {2}1 finding\n/);
+    expect(printed).toContain(
+      "The next review is round 2 and narrows to what has been written since round 1.",
+    );
+    // The round log is read, never written, and the round is still there afterwards.
+    expect(roundsOf(repo, "main")).toHaveLength(1);
+  });
+
+  /** The line an agent branches on, so it names the branch and never reads as an error. */
+  test("--rounds on a branch nobody has gated says round 1 is next, by name", () => {
+    git(repo, ["checkout", "-q", "-b", "feat/foo"]);
+
+    const printed = capture(() => reviewCommand(repo, undefined, { rounds: true }));
+
+    expect(printed).toBe(
+      "No gated rounds on feat/foo, so the next review is round 1 and reads the whole diff against the base.",
+    );
+  });
+
+  test("--rounds says so when the checkout is detached, rounds being kept per branch", () => {
+    git(repo, ["checkout", "-q", "--detach"]);
+
+    const printed = capture(() => reviewCommand(repo, undefined, { rounds: true }));
+
+    expect(printed).toContain("This checkout is detached");
+    expect(printed).toContain("there are none to report");
+  });
+
+  /** Same reasoning as `--reset`: a pull request is reviewed from a worktree, never from its branch. */
+  test("--rounds with a pull request reports that pull request's branch, not the checkout", () => {
+    recordRound(repo, "feat/from-a-pr", headSha(repo), headSha(repo), PR_ID, []);
+
+    const printed = capture(() => reviewCommand(repo, PR_ID, { rounds: true }));
+
+    expect(printed).toContain("1 gated round on feat/from-a-pr:");
+    expect(printed).toContain("0 findings");
+  });
+
+  test("--rounds refuses to run alongside --reset or --findings, with exit code 2", () => {
+    expectEmpoError(2, () => reviewCommand(repo, undefined, { rounds: true, reset: true }));
+    expectEmpoError(2, () =>
+      reviewCommand(repo, undefined, { rounds: true, findings: findingsPathOf(repo) }),
+    );
   });
 });

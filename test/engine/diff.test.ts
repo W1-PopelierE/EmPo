@@ -590,9 +590,11 @@ function emptyFile() {
 }
 
 /**
- * The context lines a hunk carries alongside its changes. `empo web` renders a hunk as a diff, which
- * means the unchanged code between a removal and an addition has to survive the parse — it was
- * counted for the line numbering and thrown away before. Nothing here may move `added` or `removed`:
+ * The context lines a hunk carries alongside its changes. Showing a hunk as a diff rather than as a
+ * block of removals above a block of additions means the unchanged code between the two has to
+ * survive the parse — it was counted for the line numbering and thrown away before. The parse is
+ * the only place it can be kept, since nothing downstream still has the raw hunk to recover it
+ * from. Nothing here may move `added` or `removed`:
  * the findings gate stands on those two, and this field is additive on purpose.
  */
 describe("hunk context", () => {

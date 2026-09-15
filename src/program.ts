@@ -22,7 +22,6 @@ import { reviewCommand } from "./commands/review";
 import { updateCommand } from "./commands/update";
 import { upgradeCommand } from "./commands/upgrade";
 import { verifyCommand } from "./commands/verify";
-import { webCommand } from "./commands/web";
 import { EMBEDDED_VERSION } from "./embedded";
 
 /**
@@ -198,6 +197,7 @@ export function buildProgram(): Command {
       false,
     )
     .option("--reset", "forget every gated round on this branch and start clean", false)
+    .option("--rounds", "read this branch's gated round log and print it, changing nothing", false)
     // Not --pr: the pull request id is already the positional argument, and one line reading
     // `empo review 412 --pr payload.json` would spend "pr" on two different things.
     .option("--pr-payload <path>", "the pull request an mcp host fetched, as JSON")
@@ -219,6 +219,7 @@ export function buildProgram(): Command {
           findings?: string;
           whole: boolean;
           reset: boolean;
+          rounds: boolean;
           prPayload?: string;
           ticketPayload?: string;
           ticket: boolean;
@@ -231,17 +232,6 @@ export function buildProgram(): Command {
         reviewCommand(options.repo, pr, options);
       },
     );
-
-  program
-    .command("web")
-    .description("Serve a local viewer for the review in progress")
-    .option("--repo <path>", "repository root", process.cwd())
-    // Commander calls a coercion as `fn(value, previous)`, and `Number.parseInt` would read that
-    // second argument as a radix: a repeated `--port` parsed the second value in base 7373.
-    .option("--port <number>", "port to bind on 127.0.0.1", (value) => Number.parseInt(value, 10))
-    .action(async (options: { repo: string; port?: number }) => {
-      await webCommand(options.repo, { port: options.port });
-    });
 
   const pack = program.command("pack").description("Language pack tooling");
 
