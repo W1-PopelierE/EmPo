@@ -424,6 +424,21 @@ describe("the generated skills", () => {
     expect(skill).toContain(".empo/conventions.md");
   });
 
+  test("empo-review answers a teammate's pull request in comments, not by editing their branch", () => {
+    // Most reviews are of somebody else's work, where the verb is not "fix" at all. A menu that
+    // only offers fixing turns every review of a teammate into a rewrite of their branch.
+    const skill = renderSkill("empo-review", FULL);
+
+    expect(skill).toContain("offer posting an inline comment first");
+    // Anchored where the finding stands, or it is a comment about the pull request and not about
+    // the line, which is the whole difference between an inline comment and a note.
+    expect(skill).toContain("`citation` file and line");
+    // The one line an impact comment needs that a diff comment does not.
+    expect(skill).toContain("`introducedBy`");
+    // What the CLI already does for the all-of-them case, so the loop is not reinvented for it.
+    expect(skill).toContain("--post");
+  });
+
   test("point at the discipline each command prints instead of copying it", () => {
     // The copy `empo review` and `empo init` hand over is the one the verification gate is built
     // around. A second copy in a generated file drifts from it and teaches a workflow the gate does

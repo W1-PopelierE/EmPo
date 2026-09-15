@@ -93,12 +93,27 @@ is still out is a question asked about a finding list that is about to change.
 Then ask **one question per finding**, using your host's multiple-choice prompt
 (`AskUserQuestion` in Claude Code, `ask_user_question` in Codex). Address each finding by the
 id the gate printed beside it, and give the question the finding's severity, title and
-`file:line` so it can be answered without scrolling back. Two options:
+`file:line` so it can be answered without scrolling back. The options:
 
+- **Where the review is of a pull request, offer posting an inline comment first.** A review
+  of somebody else's branch is answered in comments, not by rewriting their work, and this is
+  the common case: most reviews are of a teammate's pull request.
 - The finding's own `suggestion`, quoted as it stands, because a concrete fix is a decision the
   author can make at a glance where "fix it" is a decision they have to reconstruct first.
   Where the finding carries no `suggestion`, say what you would do instead, in one line.
 - Skip this one.
+
+Post the comments with whatever tool reaches this repository's forge, once every answer is in.
+One comment per finding, anchored at the finding's `citation` file and line, carrying the
+title, then the claim, then the suggestion where it has one. An `impact` or `coverage` finding
+gets one line more, naming the `introducedBy` coordinate, because it lands on code this pull
+request never wrote and the first question its author asks is what in the diff made it theirs.
+Write no em dashes: EmPo strips them from everything it posts, and a comment that keeps them
+reads as machine-written next to the ones that do not.
+
+Where the answer is every finding, `empo review <pr> --findings <path> --post` posts the whole
+verified set from inside the gate and is one command rather than a loop. It is all of them or
+none, which is why it is not the way to answer this question, only the way to skip it.
 
 Your host's prompt always leaves room for an answer you did not offer, and that is the answer
 worth having: it is where "this is a false positive, and here is why" arrives. When one does,
