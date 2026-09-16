@@ -7,7 +7,9 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -2025,6 +2027,27 @@ describe("the session directory", () => {
 });
 
 describe("exit codes", () => {
+  test("refuses a symlinked .empo/reviews at the gate rather than tearing down through it", () => {
+    // `.empo/` is committed, so a checkout can swap `.empo/reviews` for a symlink between the phases.
+    // The gate's teardown `rmSync`s the session directory, which would then be outside the repository.
+    capture(() => reviewCommand(repo, undefined, { workflow: false }));
+    const outside = join(mkdtempSync(join(tmpdir(), "empo-review-outside-")), "reviews");
+    try {
+      renameSync(join(repo, ".empo", "reviews"), outside);
+      symlinkSync(outside, join(repo, ".empo", "reviews"));
+      const findings = findingsPathOf(repo);
+      writeFileSync(findings, `${JSON.stringify({ findings: [] })}\n`);
+
+      expectEmpoError(3, () => capture(() => reviewCommand(repo, undefined, { findings })));
+
+      expect(existsSync(join(outside, "sessions", basename(sessionDirOf(repo, "local"))))).toBe(
+        true,
+      );
+    } finally {
+      rmSync(dirname(outside), { recursive: true, force: true });
+    }
+  });
+
   test("refuses a findings path that does not exist, with exit code 2", () => {
     const missing = join(repo, "nowhere/findings.json");
 
