@@ -168,8 +168,8 @@ journey start here?", and a route file answers no to the first and yes to the se
 
 The brief then prints the shipped map discipline (`src/discipline/map.md`, loaded the same
 way `empo review` loads its own) and names the proposal file to write. That file lives in the OS
-temp directory and never under `.empo/`, the rule a review's scratch already follows: `.empo/` holds
-what a human approved, and a proposal is a draft passing between two processes.
+temp directory and never under `.empo/`: `.empo/` holds what a human approved, and a proposal is a
+draft passing between two processes.
 
 **Phase 2, the gate.** The agent writes the proposal and runs `empo init --proposal <path>`, which
 gates it against the graph and the real source and prints a verdict. Adding `--apply` writes only the
@@ -824,7 +824,7 @@ bad flag, since a review takes its scratch directory down with it when it finish
 command that worked once finds its own payload gone, and the request block is the useful answer to
 that, not a missing-file error.
 
-The payload paths are derived from the review's session directory in the OS temp directory and are
+The payload paths are derived from the review's session directory under `.empo/reviews/` and are
 **not configurable**, for the reason [09-adapters](09-adapters.md) gives: a payload carries ticket
 bodies from private trackers, and a configurable path is one somebody eventually points inside the
 repository they commit.
@@ -1307,7 +1307,7 @@ message on stderr, so the document stays parseable.
 ## `empo hook <event>`
 
 The host's half of the wiring in [10-distribution](10-distribution.md), and the one command here
-whose output is read by a machine rather than by a person. Four events, one command, because the
+whose output is read by a machine rather than by a person. Three events, one command, because the
 alternative is a shell one-liner inside generated JSON, and the hook contract belongs in code where
 it is tested.
 
@@ -1315,7 +1315,6 @@ it is tested.
 empo hook session-start    a graph behind HEAD, a drifted spine, a root or pack that is not there
 empo hook pre-edit         deny a write under .empo/generated/, warn on a spine's guarded file
 empo hook pre-commit       run the commit gate over the staged diff and deny a commit that fails it
-empo hook tool-use         log a read while a review is running, silent outside one
 ```
 
 It reads the hook payload as JSON on **stdin** and writes its answer as JSON on **stdout**. The one

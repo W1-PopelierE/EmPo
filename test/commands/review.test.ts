@@ -2,16 +2,17 @@ import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
-  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -54,52 +55,34 @@ const CHECKOUT_TEST_FILE = "apps/api/tests/Feature/CheckoutTest.php";
 const ORDER_TEST_FILE = "apps/api/tests/Feature/OrderTest.php";
 
 /**
- * Where phase 1 leaves the session a local review's phase 2 reads. Not exported, so the shape is
- * spelled out here: the readable id, then a digest of the resolved repository root, which is what
- * keeps two checkouts reviewed under the same id out of each other's scratch. Spelling it out is
- * also what lets afterEach remove a session a run threw before tearing down.
+ * Where a review keeps what it needs between runs: `.empo/reviews/` inside the repository itself.
+ * Worked out here rather than imported so that the layout on disk is a thing the tests assert and
+ * not a thing they inherit from the code under test.
+ */
+function reviewsDirOf(repoRoot: string): string {
+  return join(realpathSync(repoRoot), ".empo", "reviews");
+}
+
+/**
+ * Where phase 1 leaves the session a local review's phase 2 reads: the readable id, then a digest of
+ * the resolved repository root, which is what keeps two checkouts reviewed under the same id out of
+ * each other's scratch. Spelling it out is also what lets afterEach remove a worktree a run threw
+ * before tearing down.
  */
 function sessionDirOf(repoRoot: string, id = "local"): string {
-  const digest = createHash("sha256").update(realpathSync(repoRoot)).digest("hex");
-  return join(tmpdir(), "empo-review", `${id}-${digest}`);
+  return join(reviewsDirOf(repoRoot), "sessions", keyOf(id, realpathSync(repoRoot)));
 }
 
 function findingsPathOf(repoRoot: string): string {
   return join(sessionDirOf(repoRoot), "findings.json");
 }
 
-/**
- * Where a branch's gated rounds live, worked out here rather than imported so that the layout on
- * disk is a thing the tests assert and not a thing they inherit from the code under test. Keyed by
- * the repository and then the branch, under the temp root that is the user's own where the platform
- * has one, which is the same reasoning src/engine/rounds.ts sets out.
- */
-function roundsRepoDirOf(repoRoot: string): string {
-  const root = realpathSync(repoRoot);
-  return join(roundsRoot(), roundKeyOf(basename(root), root));
-}
-
-/** The same choice src/engine/rounds.ts makes: a temp root only where it is the user's own. */
-function roundsRoot(): string {
-  const runtime = process.env.XDG_RUNTIME_DIR;
-  if (runtime !== undefined && runtime !== "" && isPrivateDir(runtime)) {
-    return join(runtime, "empo-review", "rounds");
-  }
-  return isPrivateDir(tmpdir())
-    ? join(tmpdir(), "empo-review", "rounds")
-    : join(homedir(), ".empo", "rounds");
-}
-
-function isPrivateDir(dir: string): boolean {
-  const stat = lstatSync(dir);
-  return stat.isDirectory() && (stat.mode & 0o077) === 0 && stat.uid === process.getuid?.();
-}
-
+/** Where a branch's gated rounds live, keyed by the branch under the repository's own reviews. */
 function roundsDirOf(repoRoot: string, branch: string): string {
-  return join(roundsRepoDirOf(repoRoot), roundKeyOf(branch, branch));
+  return join(reviewsDirOf(repoRoot), "rounds", keyOf(branch, branch));
 }
 
-function roundKeyOf(readable: string, material: string): string {
+function keyOf(readable: string, material: string): string {
   const digest = createHash("sha256").update(material).digest("hex");
   const slug = readable.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 40);
   return `${slug === "" ? "x" : slug}-${digest}`;
@@ -448,9 +431,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   for (const dir of repos.splice(0)) {
-    // Scratch lives outside the repository, so a run that threw before teardown would otherwise
-    // hand the next test a session pointing at a read root that no longer exists. Its directory is
-    // named after the resolved root, so it has to be worked out while the repository is still there.
+    // Scratch and rounds live inside the repository, so removing it removes them. Only the session
+    // paths are worked out, while the repository is still there to resolve.
     const sessions = [sessionDirOf(dir), sessionDirOf(dir, PR_ID)];
     // A pull request review leaves a detached worktree behind when it never reached its own
     // teardown, and git keeps an administrative entry for it that outlives the directory.
@@ -458,10 +440,7 @@ afterEach(() => {
       const worktree = join(session, "worktree");
       if (existsSync(worktree)) run(dir, "git", ["worktree", "remove", "--force", worktree]);
     }
-    const rounds = roundsRepoDirOf(dir);
     rmSync(dir, { recursive: true, force: true });
-    for (const session of sessions) rmSync(session, { recursive: true, force: true });
-    rmSync(rounds, { recursive: true, force: true });
   }
 });
 
@@ -2048,6 +2027,27 @@ describe("the session directory", () => {
 });
 
 describe("exit codes", () => {
+  test("refuses a symlinked .empo/reviews at the gate rather than tearing down through it", () => {
+    // `.empo/` is committed, so a checkout can swap `.empo/reviews` for a symlink between the phases.
+    // The gate's teardown `rmSync`s the session directory, which would then be outside the repository.
+    capture(() => reviewCommand(repo, undefined, { workflow: false }));
+    const outside = join(mkdtempSync(join(tmpdir(), "empo-review-outside-")), "reviews");
+    try {
+      renameSync(join(repo, ".empo", "reviews"), outside);
+      symlinkSync(outside, join(repo, ".empo", "reviews"));
+      const findings = findingsPathOf(repo);
+      writeFileSync(findings, `${JSON.stringify({ findings: [] })}\n`);
+
+      expectEmpoError(3, () => capture(() => reviewCommand(repo, undefined, { findings })));
+
+      expect(existsSync(join(outside, "sessions", basename(sessionDirOf(repo, "local"))))).toBe(
+        true,
+      );
+    } finally {
+      rmSync(dirname(outside), { recursive: true, force: true });
+    }
+  });
+
   test("refuses a findings path that does not exist, with exit code 2", () => {
     const missing = join(repo, "nowhere/findings.json");
 

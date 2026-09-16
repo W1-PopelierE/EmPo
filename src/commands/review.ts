@@ -28,6 +28,7 @@ import { type GuardedTouch, guardedTouches } from "../engine/guard";
 import { compareStrings } from "../engine/order";
 import {
   branchesGatedUnder,
+  ensureReviewsDir,
   lastRound,
   nextRound,
   type RoundFinding,
@@ -219,6 +220,7 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
   // answers by re-running with --pr-payload. A local review never gets here, having no pull
   // request for anyone to fetch.
   if (pr !== undefined && awaitingHostFetch(config, options)) {
+    ensureReviewsDir(repoRoot);
     printHostRequest(
       config,
       { id: pr, base: provisionalBase, paths, given: options },
@@ -265,6 +267,7 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
   // It sits above `isolate` so that a stop costs no worktree.
   const wanted = prMeta === null ? null : ticketWanted(config, options, tracker.adapter, prMeta);
   if (wanted !== null) {
+    ensureReviewsDir(repoRoot);
     printTicketFetchRequest(
       config,
       { id, key: wanted, base: provisionalBase, paths, given: options },
@@ -441,10 +444,9 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
  *
  * That is a security decision rather than a convenience one. These files carry pull request
  * descriptions and ticket bodies out of private trackers, and `.empo/` is the directory a team
- * commits. A configurable path is a path somebody eventually points inside the repository, and then
- * the first team to configure a tracker commits a customer's ticket body into git. The temp
- * directory also hashes the canonical repo root into the name already, so two checkouts reviewing
- * the same pull request id cannot read each other's payload.
+ * commits. A configurable path is a path somebody eventually points at a committed directory, and
+ * then the first team to configure a tracker commits a customer's ticket body into git. The fixed
+ * path sits under `.empo/reviews/`, which `ensureReviewsDir` keeps ignored and refuses as a symlink.
  */
 function hostPayloadPaths(repoRoot: string, id: string): HostPayloadPaths {
   const dir = sessionDir(repoRoot, id);
@@ -2250,6 +2252,8 @@ function teardown(repoRoot: string, id: string, session: ReviewSession | null): 
 
 /** Remove a previous session's worktree before its directory, or git keeps a dangling entry. */
 function rmSession(repoRoot: string, dir: string): void {
+  // First, because a symlinked `.empo/reviews` would point the `rmSync` below outside the repository.
+  ensureReviewsDir(repoRoot);
   const file = join(dir, "session.json");
   if (existsSync(file)) {
     try {

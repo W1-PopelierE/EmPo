@@ -46,14 +46,8 @@ const ROOTS = [
   { path: "packages/shared", lang: "typescript" },
 ];
 
-/**
- * The review below is asked for under an id of its own rather than the default local one. A review
- * session lives at a fixed path under the system temp directory, keyed only by that id, so two
- * reviews running at once under one id delete each other's session halfway through. The process id
- * keeps this file's session to itself, whatever else is running against this checkout.
- */
+/** An id that names no pull request, so the review below falls back to the local diff. */
 const SESSION_ID = `empo-scaffold-seed-${process.pid}`;
-const SESSION_DIR = join(tmpdir(), "empo-review", SESSION_ID);
 
 let repo: string;
 const temps: string[] = [];
@@ -95,7 +89,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
-  rmSync(SESSION_DIR, { recursive: true, force: true });
 });
 
 describe("buildConfig", () => {

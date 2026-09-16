@@ -1,17 +1,19 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { readJson } from "../errors";
-import { canonicalRoot, pathKey } from "./rounds";
+import { canonicalRoot, pathKey, reviewsDir } from "./rounds";
 
 /**
  * Where phase 1 of a review leaves what phase 2 verifies against. This lives in the engine rather
- * than in `empo review` because more than one caller needs the same path — review itself and the
- * `tool-use` hook — and a second copy of the formula is a drift waiting to happen. Nothing here
+ * than in `empo review` because the path is engine knowledge, not command
+ * knowledge. Nothing here
  * writes; review owns creation and teardown.
  */
 
-const ROOT = join(tmpdir(), "empo-review");
+/** Session scratch, per repository, beside the round log. */
+function sessionsRoot(repoRoot: string): string {
+  return join(reviewsDir(repoRoot), "sessions");
+}
 
 /** What phase 1 leaves behind so phase 2 can verify against the same code the review read. */
 export interface ReviewSession {
@@ -39,9 +41,8 @@ export interface ReviewSession {
 }
 
 /**
- * Scratch lives in the OS temp directory, never under .empo/. `generated/` is machine-owned by
- * empo index alone (docs/02-on-disk-layout.md), and a review must disturb nothing in the repository
- * it is reviewing.
+ * Scratch lives in `.empo/reviews/sessions/`, which ignores itself, so a review survives a reboot and
+ * still commits nothing into the repository it is reviewing.
  *
  * The repository is half the key because the id alone does not identify a review: a local one is
  * always "local", so every checkout on one machine would share one directory and each review would
@@ -51,7 +52,7 @@ export interface ReviewSession {
  * stays in the name so a human can still find the directory a brief just named.
  */
 export function sessionDir(repoRoot: string, id: string): string {
-  return join(ROOT, pathKey(id, canonicalRoot(repoRoot)));
+  return join(sessionsRoot(repoRoot), pathKey(id, canonicalRoot(repoRoot)));
 }
 
 export function readSession(repoRoot: string, id: string): ReviewSession | null {
@@ -62,66 +63,4 @@ export function readSession(repoRoot: string, id: string): ReviewSession | null 
   } catch {
     return null;
   }
-}
-
-/**
- * How long a session directory counts as live. Nothing else expires one: teardown runs only in the
- * gate's `finally`, so a review abandoned after phase 1 would otherwise stay live until the OS sweeps
- * the temp root days later — listed forever in the viewer's switcher, and keeping the `tool-use`
- * hook logging every Read in the repository, which is exactly the all-day file log the hook promises
- * it does not keep.
- *
- * ponytail: a review still running after 12 hours disappears from the viewer and stops feeding the
- * hook. A heartbeat that touches session.json is the upgrade path if a review ever runs that long.
- */
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-
-/**
- * Every live session directory for this repository, newest first. The repository is the hash half
- * of the key, identical across ids, so the suffix of an empty-id key is exactly the filter.
- *
- * Age and order both come from session.json's own mtime, never the directory's: the filesystem bumps
- * a directory whenever an entry appears inside it, and the reviewing agent writes findings.json into
- * a session long after phase 1 wrote session.json once, so the directory mtime would sort by last
- * write instead of by age and swap the review on screen under the reader. A directory without a
- * readable session.json is skipped rather than fatal — it is either expired, mid-creation, or
- * vanishing under a sweep or a concurrent teardown, and none of those may cost the whole list.
- */
-export function sessionDirs(repoRoot: string): string[] {
-  const suffix = pathKey("", canonicalRoot(repoRoot)).slice(1);
-  const oldest = Date.now() - SESSION_TTL_MS;
-  let names: string[];
-  try {
-    names = readdirSync(ROOT);
-  } catch {
-    return [];
-  }
-  const live: { dir: string; mtimeMs: number }[] = [];
-  for (const name of names) {
-    if (!name.endsWith(suffix)) continue;
-    const dir = join(ROOT, name);
-    try {
-      const { mtimeMs } = statSync(join(dir, "session.json"));
-      if (mtimeMs >= oldest) live.push({ dir, mtimeMs });
-    } catch {
-      // Not a session directory we can read: skip it and keep the rest.
-    }
-  }
-  // Equal mtimes are the normal case, not the corner one: several sessions a review creates land
-  // inside a single filesystem timestamp granule, and Linux's is coarse enough to hand all of them
-  // the same millisecond. Without a second key the order is whatever readdir returned, so a caller
-  // taking the first entry as "the current session" would get a different session on two machines
-  // listing the same directory. The directory name breaks the tie ascending — it is the only other
-  // thing we have that is stable, and it is the readable id, so a tie resolves to a name a human
-  // can predict from a listing rather than to a coin flip. Compared by code unit
-  // rather than `localeCompare`, which is exactly the kind of platform-dependent answer this sort
-  // is here to stop having.
-  return live
-    .sort((a, b) => b.mtimeMs - a.mtimeMs || (a.dir < b.dir ? -1 : a.dir > b.dir ? 1 : 0))
-    .map((session) => session.dir);
-}
-
-/** One log per repository, beside the sessions, so the hook needs no session id to write it. */
-export function activityPath(repoRoot: string): string {
-  return join(ROOT, `activity-${pathKey("", canonicalRoot(repoRoot))}.jsonl`);
 }
