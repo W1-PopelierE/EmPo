@@ -1,9 +1,9 @@
 # 02. On-disk layout
 
 EmPo keeps everything for a target project in a single `.empo/` directory at the target repo
-root. The layout encodes one hard rule: **`generated/` is machine-owned, everything else is
-human-owned.** An agent may edit the human-owned files as it learns; it may never hand-edit the
-generated ones.
+root. The layout encodes one hard rule: **`generated/` and `reviews/` are machine-owned, everything
+else is human-owned.** An agent may edit the human-owned files as it learns; it may never hand-edit
+the machine-owned ones.
 
 ## The `.empo/` directory
 

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -10,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { environmentError } from "../errors";
 
 /**
  * What every gated round on a branch read, so the next review of that branch can be about what
@@ -104,12 +106,33 @@ export function reviewsDir(repoRoot: string): string {
  * Create `reviewsDir` ignoring itself. A `.gitignore` of `*` inside the directory rather than a line
  * in `.empo/.gitignore`, so a repository initialised before this existed is covered without a
  * rewrite of a file the team owns.
+ *
+ * `.empo/` is committed content, so a checkout can carry any part of this path as a symlink, and
+ * following one would write review state, diffs included, outside the repository. Every component
+ * is refused as a symlink before anything is created. The ignore file is rewritten whenever it says
+ * anything but `*`, because one that exists and ignores nothing would let a diff be staged.
  */
 export function ensureReviewsDir(repoRoot: string): string {
   const dir = reviewsDir(repoRoot);
+  const empo = join(canonicalRoot(repoRoot), ".empo");
+  for (const path of [
+    empo,
+    dir,
+    join(dir, "sessions"),
+    join(dir, "rounds"),
+    join(dir, ".gitignore"),
+  ]) {
+    if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) {
+      throw environmentError(`Refusing to keep review state under ${path}: it is a symlink.`);
+    }
+  }
   mkdirSync(dir, { recursive: true, mode: 0o700 });
+  // `mode` above applies only to a directory the call creates; one already there keeps its own.
+  chmodSync(dir, 0o700);
   const ignore = join(dir, ".gitignore");
-  if (!existsSync(ignore)) writeFileSync(ignore, "*\n", "utf8");
+  if (!existsSync(ignore) || readFileSync(ignore, "utf8") !== "*\n") {
+    writeFileSync(ignore, "*\n", "utf8");
+  }
   return dir;
 }
 

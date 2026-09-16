@@ -1020,9 +1020,10 @@ function isolate(
   options: ReviewOptions,
   notes: string[],
 ): ReviewSession {
+  // Before the teardown, not after: a symlinked `.empo/reviews` would point that `rmSync` outside.
+  ensureReviewsDir(repoRoot);
   const dir = sessionDir(repoRoot, id);
   rmSession(repoRoot, dir);
-  ensureReviewsDir(repoRoot);
   mkdirSync(dir, { recursive: true });
 
   let readRoot = repoRoot;

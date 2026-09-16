@@ -8,6 +8,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -17,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   branchesGatedUnder,
   canonicalRoot,
+  ensureReviewsDir,
   lastRound,
   readRounds,
   recordRound,
@@ -131,6 +133,29 @@ describe("recordRound", () => {
     expect(
       execFileSync("git", ["check-ignore", round], { cwd: repo, encoding: "utf8" }).trim(),
     ).toBe(round);
+  });
+
+  test("refuses a symlinked review directory rather than writing through it", () => {
+    // `.empo/` is committed content, so a checkout can point it anywhere.
+    const outside = mkdtempSync(join(tmpdir(), "empo-outside-"));
+    try {
+      mkdirSync(join(repo, ".empo"), { recursive: true });
+      symlinkSync(outside, join(repo, ".empo", "reviews"));
+      expect(() => ensureReviewsDir(repo)).toThrow(/symlink/);
+      expect(recordRound(repo, "feat/x", "sha-1", null, "local", [])).toBeNull();
+      expect(readdirSync(outside)).toEqual([]);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test("rewrites an ignore file that ignores nothing, and narrows a directory already there", () => {
+    mkdirSync(reviewsDir(repo), { recursive: true, mode: 0o755 });
+    chmodSync(reviewsDir(repo), 0o755);
+    writeFileSync(join(reviewsDir(repo), ".gitignore"), "", "utf8");
+    ensureReviewsDir(repo);
+    expect(readFileSync(join(reviewsDir(repo), ".gitignore"), "utf8")).toBe("*\n");
+    expect(statSync(reviewsDir(repo)).mode & 0o777).toBe(0o700);
   });
 
   test("falls back to the sha where no tree was created", () => {

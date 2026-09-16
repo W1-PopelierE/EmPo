@@ -456,7 +456,7 @@ wrong. The gid and the permalink belong in `url`, where nothing is matched again
 
 ## Where a review's scratch lives
 
-Everything a review writes goes to a per-review directory inside the repository,
+A review's session scratch goes to a per-review directory inside the repository,
 `.empo/reviews/sessions/<id>-<hash>/`, so a review survives a reboot. `.empo/reviews/` holds a
 `.gitignore` of `*`, written the first time a review creates the directory, so none of it is ever
 committed and none of it shows in the diff a local review reads; `empo index` skips it too. The
