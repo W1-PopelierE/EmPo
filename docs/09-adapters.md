@@ -477,7 +477,7 @@ is git's own worktree bookkeeping under `.git/worktrees/`, which teardown clears
 the worktree and the directory once it has printed the survivors, and starting a new review of the
 same id clears the previous session's worktree before it begins, so a crashed review costs a stale
 directory under `.empo/reviews/` and never a dangling worktree in the human's checkout. A session
-left behind counts as live for twelve hours by its `session.json` mtime and is ignored after that.
+left behind simply stays on disk until the next review of the same id replaces it.
 
 One tree outlives those directories, and it lives beside them rather than in them. It is the round
 log, and its shape is a path rather than a file: under `.empo/reviews/rounds/`, one directory per

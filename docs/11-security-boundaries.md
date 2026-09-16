@@ -64,17 +64,10 @@ constraints travel with it. Moving a lesson into a public repository does not re
 it was learned on. When in doubt about whether something is safe to publish, treat it as private and
 ask. The cost of asking is a message; the cost of leaking is unrecoverable.
 
-## The activity log is `0600`
+## No runtime listener
 
 EmPo ships no runtime listener. No command opens a socket, and nothing here serves a private
-codebase to anything. What is left of this boundary is one file.
-
-The activity log the `tool-use` hook writes ([10-distribution](10-distribution.md)) names every file
-the reviewer opened, which is a map of a private codebase to whoever can read it. It sits in the
-repository checkout under `.empo/reviews/sessions/`, git-ignored and so never committed, but readable
-by whoever can read the checkout, so the mode is set on the file rather than assumed from the
-directory: on creation, and again on every append, because a mode argument does nothing to a file
-that already exists.
+codebase to anything.
 
 ## A publish checklist
 
