@@ -18,6 +18,8 @@ reach the author.
 2. **A review disturbs nothing and can run in parallel.** Because it executes nothing, it only
    needs the branch's files. Get them with a detached worktree and no environment setup, so the
    human's checkout is untouched and several reviews can run at once. Remove the worktree when done.
+   The worktree and the rest of the review's state sit under `.empo/reviews/`, which ignores itself,
+   so nothing a review writes is committed or shows up in the diff it reads.
 3. **A review reports only what this pull request introduced or broke.** A defect the branch
    inherited is real, is sometimes worse than anything in the diff, and is not this author's to fix.
    A review that reports it anyway never converges, because the backlog it is really reviewing is

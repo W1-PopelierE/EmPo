@@ -387,9 +387,7 @@ function toolUse(repoRoot: string, payload: Record<string, unknown>): string | n
       // The mode is set on every append and not only on the first, because `mode` below applies
       // only to a file the call creates: a log already on disk keeps whatever mode it was made
       // with, and nothing here would ever narrow it. It is worth narrowing because this file holds
-      // the absolute path of every file the reviewer opened and it lives under os.tmpdir(), which
-      // is the private /var/folders/... on macOS but the world-traversable /tmp on a Linux box.
-      // engine/rounds.ts reasons the same way about where the rounds log may live.
+      // the absolute path of every file the reviewer opened.
       chmodSync(log, 0o600);
       // A trim and not a delete, and not rotation either. This log is the running review's own
       // record of which files were opened, so the cap is here to bound a temp file, not to throw

@@ -900,7 +900,10 @@ Eight things step 6 decided, recorded so none of them is reopened without new fa
   [07-review-discipline](07-review-discipline.md) is taken literally: a review writes nothing into
   the working tree it is reviewing. The one thing it does write there is git's own worktree
   bookkeeping under `.git/worktrees/`, which `git worktree remove` clears at teardown, and which is
-  the price of reading a branch without disturbing the checkout.
+  the price of reading a branch without disturbing the checkout. *Superseded:* the scratch has
+  since moved to `.empo/reviews/sessions/`, because a temp directory lost a review's state on every
+  reboot. `.empo/reviews/` holds a `.gitignore` of `*`, so the working tree still gains nothing git
+  or the review's own diff can see, and `generated/` is still untouched.
 - **A drifted citation is repaired, an absent one is fatal.** A finding whose anchor is not on the
   cited line but is somewhere else in the same file survives, reported against the line the anchor is
   really on, because the quoted source is there and only the coordinate moved. A finding whose anchor
@@ -1020,9 +1023,8 @@ Seven things step 7 decided, recorded the same way:
   `discipline/map.md` is loaded by `mapWorkflow()` exactly as `review.md` is by `reviewWorkflow()`,
   so a team can read, diff and version the workflow their agent was handed, and the generated
   `/empo-map` skill becomes a shortcut over the CLI rather than the place the workflow lives. The
-  proposal file itself goes to the OS temp directory and never under `.empo/`, the rule a review's
-  scratch already follows: `.empo/` holds what a human approved, and a proposal is a draft passing
-  between two processes.
+  proposal file itself goes to the OS temp directory and never under `.empo/`: `.empo/` holds what a
+  human approved, and a proposal is a draft passing between two processes.
 
 ## Testing discipline for this repo
 

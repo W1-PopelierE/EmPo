@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  existsSync,
   lstatSync,
   mkdirSync,
   readdirSync,
@@ -8,8 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 /**
  * What every gated round on a branch read, so the next review of that branch can be about what
@@ -24,22 +24,9 @@ import { basename, join, resolve } from "node:path";
  * four and being able to read what round two found. Rounds are only ever appended, never edited,
  * so each file is written once and with `wx`.
  *
- * Where it lives, and why not the two obvious places. Not in the repository: `.empo/generated/` is
- * machine-owned by `empo index` alone (docs/02-on-disk-layout.md) and a review disturbs nothing in
- * the checkout it reads (docs/07-review-discipline.md invariant 2). And a temp directory only where
- * that temp directory is the user's own, which `roundsRoot` decides and never assumes.
- *
- * The reason is worth stating in full, because the obvious hardening does not work. This path is
- * derived rather than random, so in a world-writable directory somebody can plant a symlink at it
- * ahead of time. Checking for that is not enough: `mkdirSync` with `recursive` follows a symlink
- * standing in for any parent component, and an `lstat` of the leaf passes because the leaf is the
- * directory we just created ourselves, under their parent. Even a per-component check loses the
- * race, since Node exposes no `openat` to pin a directory and work relative to the handle. What
- * `O_EXCL` on each round file buys is real but partial: nobody replaces a round through a symlink
- * on the file itself. So the decision is made one level up. A world-writable root is not used.
- *
- * Sweeping is the point rather than the cost: a lost log reads as no rounds, which is a whole
- * review, said out loud.
+ * Where it lives: `.empo/reviews/rounds/` in the repository itself, so the log survives a reboot,
+ * which a swept temp directory did not. `.empo/reviews/` ignores itself (`ensureReviewsDir`), so
+ * nothing here is ever committed and nothing here shows up in the diff a local review reads.
  *
  * Both the repository and the branch are in the path. Per branch because two branches under review
  * at once are two loops and a shared entry would tell the second it had already read the first
@@ -102,42 +89,28 @@ export function roundsDir(repoRoot: string, branch: string): string {
 
 /** Every branch of this repository under one directory, which is what a repo-wide scan walks. */
 function repoRoundsDir(repoRoot: string): string {
-  const root = canonicalRoot(repoRoot);
-  return join(roundsRoot(), pathKey(basename(root), root));
+  return join(reviewsDir(repoRoot), "rounds");
 }
 
 /**
- * The temp directory where it is the user's own, and the user's own directory otherwise.
- *
- * `XDG_RUNTIME_DIR` is exactly this by definition on Linux, and `os.tmpdir()` is the private
- * `/var/folders/...` on macOS, so on both the common case is a swept temp directory, which is what
- * a round log wants: history that expires on its own. Where neither is private — a Linux box with
- * no `XDG_RUNTIME_DIR`, where `os.tmpdir()` is the shared `/tmp` — the log goes under the home
- * directory instead, which nobody else can write and so nobody else can plant a path in. That
- * costs the automatic sweep, and `--reset` is the broom.
+ * Everything a review keeps between runs: session scratch and the round log. Inside the repository
+ * so it survives a reboot, never committed.
  */
-export function roundsRoot(): string {
-  const runtime = process.env.XDG_RUNTIME_DIR;
-  if (runtime !== undefined && runtime !== "" && isPrivate(runtime)) {
-    return join(runtime, "empo-review", "rounds");
-  }
-  const temp = tmpdir();
-  if (isPrivate(temp)) return join(temp, "empo-review", "rounds");
-  return join(homedir(), ".empo", "rounds");
+export function reviewsDir(repoRoot: string): string {
+  return join(canonicalRoot(repoRoot), ".empo", "reviews");
 }
 
-/** A directory that is ours and that no one else may write, which is the whole test that matters. */
-function isPrivate(dir: string): boolean {
-  try {
-    const stat = lstatSync(dir);
-    return (
-      stat.isDirectory() &&
-      (stat.mode & 0o077) === 0 &&
-      stat.uid === (process.getuid?.() ?? stat.uid)
-    );
-  } catch {
-    return false;
-  }
+/**
+ * Create `reviewsDir` ignoring itself. A `.gitignore` of `*` inside the directory rather than a line
+ * in `.empo/.gitignore`, so a repository initialised before this existed is covered without a
+ * rewrite of a file the team owns.
+ */
+export function ensureReviewsDir(repoRoot: string): string {
+  const dir = reviewsDir(repoRoot);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const ignore = join(dir, ".gitignore");
+  if (!existsSync(ignore)) writeFileSync(ignore, "*\n", "utf8");
+  return dir;
 }
 
 /** Every gated round on this branch, oldest first. Empty where none has been gated, or none read. */
@@ -181,7 +154,7 @@ function roundFilesIn(dir: string): [number, string][] {
       .map((name): [number, string] => [Number.parseInt(name, 10), join(dir, name)])
       .sort(([a], [b]) => a - b);
   } catch {
-    // The directory can go while we are reading it: a temp sweep, a logout, another `--reset`.
+    // The directory can go while we are reading it: someone deleting it, another `--reset`.
     // That is no rounds, which is a whole review, and never a review that fails to start.
     return [];
   }
@@ -211,6 +184,7 @@ export function recordRound(
   if (branch === null || branch === "" || sha === null || sha === "") return null;
   const dir = roundsDir(repoRoot, branch);
   try {
+    ensureReviewsDir(repoRoot);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     if (!ours(dir)) return null;
   } catch {
@@ -234,8 +208,7 @@ export function recordRound(
     };
     try {
       // `wx` is O_CREAT|O_EXCL, which refuses to follow a symlink and refuses to overwrite. A log
-      // that only ever appends needs nothing else, and it is what makes a shared temp root
-      // survivable.
+      // that only ever appends needs nothing else.
       writeFileSync(
         join(dir, `${String(round).padStart(3, "0")}.json`),
         `${JSON.stringify(record, null, 2)}\n`,
@@ -255,8 +228,7 @@ export function recordRound(
  * branch is usually not the one checked out, because reviewing a pull request never checks it out.
  */
 export function branchesGatedUnder(repoRoot: string, id: string): string[] {
-  const root = canonicalRoot(repoRoot);
-  const dir = join(roundsRoot(), pathKey(basename(root), root));
+  const dir = repoRoundsDir(repoRoot);
   try {
     return (
       readdirSync(dir)
@@ -303,10 +275,7 @@ export function pathKey(readable: string, material: string): string {
   return `${slug === "" ? "x" : slug}-${digest}`;
 }
 
-/**
- * A directory we made and still own. Cheap insurance for the case where the runtime root falls back
- * to a shared `/tmp`: somebody else's directory at our path is not one we read rounds out of.
- */
+/** A directory we made and still own: somebody else's directory at our path is not one we read. */
 function ours(dir: string): boolean {
   try {
     const stat = lstatSync(dir);

@@ -1,8 +1,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readJson } from "../errors";
-import { canonicalRoot, pathKey } from "./rounds";
+import { canonicalRoot, pathKey, reviewsDir } from "./rounds";
 
 /**
  * Where phase 1 of a review leaves what phase 2 verifies against. This lives in the engine rather
@@ -11,7 +10,10 @@ import { canonicalRoot, pathKey } from "./rounds";
  * writes; review owns creation and teardown.
  */
 
-const ROOT = join(tmpdir(), "empo-review");
+/** Session scratch, per repository, beside the round log. */
+function sessionsRoot(repoRoot: string): string {
+  return join(reviewsDir(repoRoot), "sessions");
+}
 
 /** What phase 1 leaves behind so phase 2 can verify against the same code the review read. */
 export interface ReviewSession {
@@ -39,9 +41,8 @@ export interface ReviewSession {
 }
 
 /**
- * Scratch lives in the OS temp directory, never under .empo/. `generated/` is machine-owned by
- * empo index alone (docs/02-on-disk-layout.md), and a review must disturb nothing in the repository
- * it is reviewing.
+ * Scratch lives in `.empo/reviews/sessions/`, which ignores itself, so a review survives a reboot and
+ * still commits nothing into the repository it is reviewing.
  *
  * The repository is half the key because the id alone does not identify a review: a local one is
  * always "local", so every checkout on one machine would share one directory and each review would
@@ -51,7 +52,7 @@ export interface ReviewSession {
  * stays in the name so a human can still find the directory a brief just named.
  */
 export function sessionDir(repoRoot: string, id: string): string {
-  return join(ROOT, pathKey(id, canonicalRoot(repoRoot)));
+  return join(sessionsRoot(repoRoot), pathKey(id, canonicalRoot(repoRoot)));
 }
 
 export function readSession(repoRoot: string, id: string): ReviewSession | null {
@@ -66,8 +67,7 @@ export function readSession(repoRoot: string, id: string): ReviewSession | null 
 
 /**
  * How long a session directory counts as live. Nothing else expires one: teardown runs only in the
- * gate's `finally`, so a review abandoned after phase 1 would otherwise stay live until the OS sweeps
- * the temp root days later — listed forever in the viewer's switcher, and keeping the `tool-use`
+ * gate's `finally`, so a review abandoned after phase 1 would otherwise stay live forever — listed in the viewer's switcher, and keeping the `tool-use`
  * hook logging every Read in the repository, which is exactly the all-day file log the hook promises
  * it does not keep.
  *
@@ -90,16 +90,17 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 export function sessionDirs(repoRoot: string): string[] {
   const suffix = pathKey("", canonicalRoot(repoRoot)).slice(1);
   const oldest = Date.now() - SESSION_TTL_MS;
+  const root = sessionsRoot(repoRoot);
   let names: string[];
   try {
-    names = readdirSync(ROOT);
+    names = readdirSync(root);
   } catch {
     return [];
   }
   const live: { dir: string; mtimeMs: number }[] = [];
   for (const name of names) {
     if (!name.endsWith(suffix)) continue;
-    const dir = join(ROOT, name);
+    const dir = join(root, name);
     try {
       const { mtimeMs } = statSync(join(dir, "session.json"));
       if (mtimeMs >= oldest) live.push({ dir, mtimeMs });
@@ -123,5 +124,5 @@ export function sessionDirs(repoRoot: string): string[] {
 
 /** One log per repository, beside the sessions, so the hook needs no session id to write it. */
 export function activityPath(repoRoot: string): string {
-  return join(ROOT, `activity-${pathKey("", canonicalRoot(repoRoot))}.jsonl`);
+  return join(sessionsRoot(repoRoot), `activity-${pathKey("", canonicalRoot(repoRoot))}.jsonl`);
 }

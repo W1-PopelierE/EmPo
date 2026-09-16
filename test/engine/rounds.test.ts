@@ -1,9 +1,11 @@
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -19,29 +21,15 @@ import {
   readRounds,
   recordRound,
   resetRounds,
+  reviewsDir,
   roundsDir,
-  roundsRoot,
 } from "../../src/engine/rounds";
 
 /**
- * The module's whole answer to a planted symlink is *which root it picks*, argued at length in the
- * header of src/engine/rounds.ts and in docs/09-adapters.md: a world-writable root is not used at
- * all, because no amount of checking afterwards wins the race. So `roundsRoot` is mocked at
- * `node:os` rather than exercised through whatever the machine running the suite happens to have:
- * the security-load-bearing branch is the one that only fires on a Linux box with no
- * `XDG_RUNTIME_DIR` and a shared `/tmp`, which is exactly the machine this suite is never run on.
- *
- * Everything else runs against a real directory rather than a stubbed filesystem, because the
+ * Everything here runs against a real directory rather than a stubbed filesystem, because the
  * contract is about what the filesystem does: `wx` refusing to overwrite, a mode a group can write,
  * a directory that is gone. A fake would be free to agree with us about all three.
  */
-
-/**
- * Read at call time by the mock below, so a test can move the two roots without re-importing the
- * module under test. Empty means "whatever this machine really has", which is what the test file
- * itself needs when it creates its own scratch directory.
- */
-const roots = vi.hoisted(() => ({ tmp: "", home: "" }));
 
 /**
  * How many of the next writes lose the `wx` race. The loser of two gates landing on one branch at
@@ -67,21 +55,8 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 
-vi.mock("node:os", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:os")>();
-  return {
-    ...actual,
-    tmpdir: () => (roots.tmp === "" ? actual.tmpdir() : roots.tmp),
-    homedir: () => (roots.home === "" ? actual.homedir() : roots.home),
-  };
-});
-
-/** The machine's real temp root, captured before any test redirects the mock at a scratch dir. */
-const REAL_TMP = tmpdir();
-
 let sandbox: string;
 let repo: string;
-const savedRuntime = process.env.XDG_RUNTIME_DIR;
 
 /** A directory at a mode of our choosing. Set after the fact, because a umask edits `mkdir`'s. */
 function dirAt(path: string, mode: number): string {
@@ -91,81 +66,13 @@ function dirAt(path: string, mode: number): string {
 }
 
 beforeEach(() => {
-  // mkdtemp creates 0o700 and, on macOS, inside the private /var/folders root, so the sandbox is
-  // itself a private temp directory: the common case, and the default these tests run under.
-  sandbox = mkdtempSync(join(REAL_TMP, "empo-rounds-"));
-  roots.tmp = sandbox;
-  // Never the developer's own ~/.empo: the fallback branch names a path under it, and a test that
-  // wrote there would leave rounds on the machine that runs the suite.
-  roots.home = join(sandbox, "home");
+  sandbox = mkdtempSync(join(tmpdir(), "empo-rounds-"));
   repo = dirAt(join(sandbox, "repo"), 0o755);
   writes.lose = 0;
-  delete process.env.XDG_RUNTIME_DIR;
 });
 
 afterEach(() => {
-  roots.tmp = "";
-  roots.home = "";
-  if (savedRuntime === undefined) delete process.env.XDG_RUNTIME_DIR;
-  else process.env.XDG_RUNTIME_DIR = savedRuntime;
   rmSync(sandbox, { recursive: true, force: true });
-});
-
-describe("roundsRoot", () => {
-  test("uses XDG_RUNTIME_DIR where it is the user's own", () => {
-    // Linux's answer, and by definition private, which is why it is consulted before the temp root.
-    const runtime = dirAt(join(sandbox, "runtime"), 0o700);
-    process.env.XDG_RUNTIME_DIR = runtime;
-
-    expect(roundsRoot()).toBe(join(runtime, "empo-review", "rounds"));
-  });
-
-  test("uses a private temp directory when XDG_RUNTIME_DIR is unset", () => {
-    // macOS's answer: os.tmpdir() is the per-user /var/folders/... root, which sweeps itself.
-    expect(roundsRoot()).toBe(join(sandbox, "empo-review", "rounds"));
-  });
-
-  test("ignores an XDG_RUNTIME_DIR that is empty", () => {
-    process.env.XDG_RUNTIME_DIR = "";
-
-    expect(roundsRoot()).toBe(join(sandbox, "empo-review", "rounds"));
-  });
-
-  test("ignores an XDG_RUNTIME_DIR that does not exist", () => {
-    // A stale value in a login environment names a directory a logout took away. Not an error, and
-    // above all not a directory to create: the next root down is a perfectly good one.
-    process.env.XDG_RUNTIME_DIR = join(sandbox, "gone");
-
-    expect(roundsRoot()).toBe(join(sandbox, "empo-review", "rounds"));
-  });
-
-  test("ignores an XDG_RUNTIME_DIR anyone else may write", () => {
-    process.env.XDG_RUNTIME_DIR = dirAt(join(sandbox, "shared-runtime"), 0o777);
-
-    expect(roundsRoot()).toBe(join(sandbox, "empo-review", "rounds"));
-  });
-
-  test("ignores a root the group may write, and not only one the world may", () => {
-    // 0o077 and not 0o007: a shared group is as good as a shared machine for planting a path, and a
-    // check that only looked at the other bits would have called this one ours.
-    process.env.XDG_RUNTIME_DIR = dirAt(join(sandbox, "group-runtime"), 0o770);
-
-    expect(roundsRoot()).toBe(join(sandbox, "empo-review", "rounds"));
-  });
-
-  test("falls back to the home directory where neither root is private", () => {
-    // The branch the module's header is written for, and the only one that is a security decision:
-    // a Linux box with no XDG_RUNTIME_DIR whose os.tmpdir() is the shared /tmp. Somebody else can
-    // plant a symlink at a derived path there ahead of time, and no check afterwards wins that
-    // race, so the world-writable root is not used at all. The home directory costs the automatic
-    // sweep and `--reset` is the broom.
-    const shared = dirAt(join(sandbox, "shared-tmp"), 0o777);
-    roots.tmp = shared;
-
-    expect(roundsRoot()).toBe(join(roots.home, ".empo", "rounds"));
-    // And nothing was created under the shared root on the way to deciding that.
-    expect(readdirSync(shared)).toEqual([]);
-  });
 });
 
 describe("canonicalRoot", () => {
@@ -209,6 +116,21 @@ describe("recordRound", () => {
     expect(lastRound(repo, "feat/x")?.sha).toBe("sha-2");
     // Written down and not only hashed into the path, so `--reset` can read the branch back.
     expect(lastRound(repo, "feat/x")?.branch).toBe("feat/x");
+  });
+
+  test("keeps the log inside the repository, ignored by git", () => {
+    // In the checkout so it survives a reboot, and ignoring itself so a review never commits it or
+    // reads it back as part of the diff it is reviewing.
+    execFileSync("git", ["init", "-q"], { cwd: repo });
+    recordRound(repo, "feat/x", "sha-1", null, "local", []);
+
+    const round = join(roundsDir(repo, "feat/x"), "001.json");
+    expect(round.startsWith(join(realpathSync(repo), ".empo", "reviews"))).toBe(true);
+    expect(readFileSync(join(reviewsDir(repo), ".gitignore"), "utf8")).toBe("*\n");
+    // Exits non-zero, and so throws, where the path is not ignored.
+    expect(
+      execFileSync("git", ["check-ignore", round], { cwd: repo, encoding: "utf8" }).trim(),
+    ).toBe(round);
   });
 
   test("falls back to the sha where no tree was created", () => {
@@ -293,8 +215,7 @@ describe("readRounds", () => {
   });
 
   test("reads no rounds where the path is not a directory we own", () => {
-    // A file standing where the branch's directory belongs is not a log to read out of. Same check
-    // as the one that makes a shared root survivable, reached here the only way a test can.
+    // A file standing where the branch's directory belongs is not a log to read out of.
     const dir = roundsDir(repo, "feat/x");
     mkdirSync(dirname(dir), { recursive: true });
     writeFileSync(dir, "planted\n");

@@ -168,8 +168,8 @@ journey start here?", and a route file answers no to the first and yes to the se
 
 The brief then prints the shipped map discipline (`src/discipline/map.md`, loaded the same
 way `empo review` loads its own) and names the proposal file to write. That file lives in the OS
-temp directory and never under `.empo/`, the rule a review's scratch already follows: `.empo/` holds
-what a human approved, and a proposal is a draft passing between two processes.
+temp directory and never under `.empo/`: `.empo/` holds what a human approved, and a proposal is a
+draft passing between two processes.
 
 **Phase 2, the gate.** The agent writes the proposal and runs `empo init --proposal <path>`, which
 gates it against the graph and the real source and prints a verdict. Adding `--apply` writes only the
@@ -824,7 +824,7 @@ bad flag, since a review takes its scratch directory down with it when it finish
 command that worked once finds its own payload gone, and the request block is the useful answer to
 that, not a missing-file error.
 
-The payload paths are derived from the review's session directory in the OS temp directory and are
+The payload paths are derived from the review's session directory under `.empo/reviews/` and are
 **not configurable**, for the reason [09-adapters](09-adapters.md) gives: a payload carries ticket
 bodies from private trackers, and a configurable path is one somebody eventually points inside the
 repository they commit.

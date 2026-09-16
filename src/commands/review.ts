@@ -28,6 +28,7 @@ import { type GuardedTouch, guardedTouches } from "../engine/guard";
 import { compareStrings } from "../engine/order";
 import {
   branchesGatedUnder,
+  ensureReviewsDir,
   lastRound,
   nextRound,
   type RoundFinding,
@@ -1021,6 +1022,7 @@ function isolate(
 ): ReviewSession {
   const dir = sessionDir(repoRoot, id);
   rmSession(repoRoot, dir);
+  ensureReviewsDir(repoRoot);
   mkdirSync(dir, { recursive: true });
 
   let readRoot = repoRoot;

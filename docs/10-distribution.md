@@ -461,17 +461,17 @@ and not whatever directory the session sits in, and with a `timeout` in seconds.
   explicit human decision with a reason on the record, never by unstaging the spine file.
 - **PostToolUse on `Read`** runs `empo hook tool-use`: it appends one line per call (timestamp, tool,
   path) to the activity log, a record of what a review opened while it ran. The
-  path is repo-relative where the file lies inside the repository and absolute where it does not,
-  which is what a PR review reading a detached worktree under the OS temp directory writes, so a
-  reader has to resolve it against the session's read root. It is silent
+  path is repo-relative where the file lies inside the repository and absolute where it does not.
+  A PR review's detached worktree sits under `.empo/reviews/sessions/`, inside the repository, so
+  what it opens is logged repo-relative with that worktree prefix in front. It is silent
   outside a review on purpose: a log of every file read all day is not this tool's business, so the
   hook checks for a session directory first and writes nothing when there is none, which is the
   cheapest signal that a review is what this is — and a session directory counts as a review for
   twelve hours, because nothing else expires one and a review abandoned after phase 1 would
-  otherwise keep this hook logging for as long as the OS leaves its directory in the temp root. The
+  otherwise keep this hook logging for as long as its directory is left in the checkout. The
   log is created `0600` and narrowed to `0600` on every append: it holds the absolute path of every
-  file the reviewer opened, and `os.tmpdir()` is a private directory on macOS but the shared `/tmp`
-  on a Linux box with no `XDG_RUNTIME_DIR`. Past a megabyte it is trimmed to its last lines rather
+  file the reviewer opened, and it lives in the repository checkout, where the directory's mode is
+  whatever the clone was given. Past a megabyte it is trimmed to its last lines rather
   than deleted, because the log having any lines at all is what marks a review as under way, so
   emptying it mid-review would present a running review as one that had not started. `Read` alone,
   not the other reading tools: the

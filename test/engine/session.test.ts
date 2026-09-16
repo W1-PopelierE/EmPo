@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -42,14 +42,8 @@ function session(dir: string, at?: number): string {
 }
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) {
-    // The activity log lives beside the sessions in the OS temp root, keyed on the repository path
-    // and never deleted by anything in `src`, so a test repo that is not swept here leaks one file
-    // per run into a directory `sessionDirs` enumerates on every Read the hook sees. Computed while
-    // the directory still exists, since the key runs through `realpathSync`.
-    rmSync(activityPath(dir), { force: true });
-    rmSync(dir, { recursive: true, force: true });
-  }
+  // Sessions and the activity log live inside the repository, so removing it removes them.
+  for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 describe("where a review session lives", () => {
@@ -57,7 +51,7 @@ describe("where a review session lives", () => {
     const root = repo();
     const dir = sessionDir(root, "local");
 
-    expect(dir.startsWith(join(tmpdir(), "empo-review"))).toBe(true);
+    expect(dir.startsWith(join(realpathSync(root), ".empo", "reviews", "sessions"))).toBe(true);
     expect(basename(dir).startsWith("local-")).toBe(true);
     expect(sessionDir(root, "local")).toBe(dir);
     expect(sessionDir(root, "42")).not.toBe(dir);
@@ -145,7 +139,13 @@ describe("where a review session lives", () => {
   test("puts the activity log beside the sessions, one per repository", () => {
     const root = repo();
     expect(activityPath(root)).toBe(
-      join(tmpdir(), "empo-review", `activity-${basename(sessionDir(root, ""))}.jsonl`),
+      join(
+        realpathSync(root),
+        ".empo",
+        "reviews",
+        "sessions",
+        `activity-${basename(sessionDir(root, ""))}.jsonl`,
+      ),
     );
   });
 });
