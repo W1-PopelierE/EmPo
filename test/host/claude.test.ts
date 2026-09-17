@@ -465,6 +465,8 @@ describe("the generated skills", () => {
 
       expect(skill).toContain("Redirect the output to a file and read that file in sections");
       expect(skill).toContain("SIGPIPE");
+      // A path of its own outside the repository, so no brief is left in the working tree.
+      expect(skill).toContain("mktemp -t empo-brief.XXXXXX");
     }
     // Neither of the other two prints a brief long enough to page, and a line every review pays
     // for on every run has to earn its place in the one file that needs it.

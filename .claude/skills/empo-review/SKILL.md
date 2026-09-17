@@ -24,7 +24,15 @@ Redirect the output to a file and read that file in sections. Never pipe it thro
 `more` or anything else that exits early: the reader exits, the write upstream of it takes
 SIGPIPE and dies, and the file keeps only the lines that got through, with nothing said. The
 brief is long by design and every section of it is load-bearing, so page through the file
-rather than cutting the output.
+rather than cutting the output. Let `mktemp` name the file, never a path in the repository:
+
+```sh
+brief=$(mktemp -t empo-brief.XXXXXX) && echo "$brief" && empo review $ARGUMENTS > "$brief"
+```
+
+A path you pick lands in the working tree as an untracked file, and one under `.empo/reviews/`
+is opened by the shell before `empo review` can refuse a symlinked directory. The echo is there
+because the variable does not outlive the command, and the path is what you page through.
 
 If you dispatch sub-agents, start the ticket fetch, the CI read and the read of
 `.empo/conventions.md` in the same message that runs the command. None of the three needs
