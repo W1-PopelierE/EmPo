@@ -1872,14 +1872,15 @@ function printTests(graph: Graph, facts: FileFacts[]): void {
     console.log("  none. Every behavioural change here is unasserted.");
     return;
   }
-  const graded = [...files].sort(compareStrings).map((file) => ({
-    file,
-    // Any node of the file asserting a value makes the file one that does. The grade is read off
-    // the nodes because it is a fact about the code and only the nodes carry it, and folding it
-    // with `some` is the same rule coverage.ts applies to a flow: one assertion in a file is what
-    // stops that file being the reassuring line beside an unchecked change.
-    asserts: graph.nodes.some((node) => node.file === file && node.assertsValue),
-  }));
+  // Any node of the file asserting a value makes the file one that does. The grade is read off
+  // the nodes because it is a fact about the code and only the nodes carry it, and it is the same
+  // rule coverage.ts applies to a flow: one assertion in a file is what stops that file being the
+  // reassuring line beside an unchecked change. One pass over the nodes, not one per file.
+  const asserting = new Set<string>();
+  for (const node of graph.nodes) if (node.assertsValue) asserting.add(node.file);
+  const graded = [...files]
+    .sort(compareStrings)
+    .map((file) => ({ file, asserts: asserting.has(file) }));
 
   // Two kinds of row earn a path, and everything else earns a count. This block printed one line
   // per file, which on a thirteen-file pull request in a real repository was some five hundred of
