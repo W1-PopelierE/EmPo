@@ -3392,6 +3392,127 @@ describe("round awareness", () => {
     expect(changedRows(printed)).toContain(CALCULATOR_FILE);
   });
 
+  /**
+   * The loop an author actually reported: every round found something new on code that had not
+   * moved since the round before. Narrowing the brief did not stop it, because the gate still held
+   * findings to the whole diff, so anything round one read and passed was fair game for round five.
+   */
+  test("a later round drops a finding on a line the last round already read", () => {
+    changeCalculator();
+    gate([realFinding()]);
+
+    // Nothing written in between: the same tree, read a second time.
+    const printed = gate([{ ...realFinding(), id: "F9" }]);
+
+    expect(printed).toContain("F9  already-reviewed");
+    expect(printed).toContain("is outside every hunk written since round 1 read it");
+    expect(roundsOf(repo, "main")[1]?.findings).toEqual([]);
+    // Round one's major is untouched, so a clean round two is not the branch being done.
+    expect(printed).toContain("Earlier rounds reported 1 blocker or major");
+    expect(printed).not.toContain("verdict is approve");
+  });
+
+  test("a later round keeps a finding on what was written since the last one", () => {
+    gatedRound();
+    changeCalculator();
+
+    gate([realFinding()]);
+
+    expect(roundsOf(repo, "feat/rounds")[1]?.findings).toMatchObject([{ id: "F1" }]);
+  });
+
+  test("--whole holds the gate to the whole diff again, so an earlier line can be reopened", () => {
+    changeCalculator();
+    gate([realFinding()]);
+
+    capture(() => reviewCommand(repo, undefined, { whole: true, workflow: false }));
+    const path = findingsPathOf(repo);
+    writeFileSync(path, `${JSON.stringify({ findings: [realFinding()] })}\n`);
+    const printed = capture(() => reviewCommand(repo, undefined, { findings: path }));
+
+    expect(printed).not.toContain("already-reviewed");
+    expect(roundsOf(repo, "main")[1]?.findings).toMatchObject([{ id: "F1" }]);
+  });
+
+  /**
+   * Without this a later round cannot tell a fix that closed a finding from one that did not, and
+   * rediscovers the open ones in new words under new ids.
+   */
+  test("the brief reads back what the earlier rounds found", () => {
+    changeCalculator();
+    gate([realFinding()]);
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    const earlier = printed.slice(printed.indexOf("earlier rounds said"));
+    expect(earlier).toContain("round 1  F1  [major] Discount is applied after tax");
+    expect(earlier).toContain("still open");
+  });
+
+  /**
+   * The other half of the loop, and the larger one: a fix is new code, a full-depth read of it
+   * finds a minor, the minor's fix is new code. Eight rounds on one branch ended that way.
+   */
+  test("a later round whose survivors are all minor says it does not ask for another", () => {
+    gatedRound();
+    changeCalculator();
+
+    const printed = gate([{ ...realFinding(), severity: "minor" }]);
+
+    expect(printed).toContain("round 2: nothing above minor survived");
+  });
+
+  test("a later round with a major survivor says the branch is not done, and round one says neither", () => {
+    changeCalculator();
+    expect(gate([{ ...realFinding(), severity: "minor" }])).not.toContain("nothing above minor");
+
+    writeFileSync(
+      join(repo, ORDER_TEST_FILE),
+      `${readFileSync(join(repo, ORDER_TEST_FILE), "utf8")}\n// round two\n`,
+    );
+    const anchor = { file: ORDER_TEST_FILE, anchor: "// round two" };
+    const line =
+      readFileSync(join(repo, ORDER_TEST_FILE), "utf8").split("\n").indexOf("// round two") + 1;
+    const printed = gate([
+      { ...realFinding(), citation: { ...anchor, line }, introducedBy: { ...anchor, line } },
+    ]);
+
+    expect(printed).toContain("round 2: 1 blocker or major finding survived");
+  });
+
+  // A blocker that died on a mistyped anchor is not a clean round, and the count has to say so.
+  test("a later round counts a blocker it dropped, so a clean line is not read as done", () => {
+    gatedRound();
+    changeCalculator();
+
+    const printed = gate([
+      { ...realFinding(), citation: citation("$total = round($gross, 2);", 1) },
+    ]);
+
+    expect(printed).toContain("round 2: nothing above minor survived");
+    expect(printed).toContain("1 blocker or major was dropped above");
+  });
+
+  // `lastRound` skips a file that will not parse and the log's numbering does not.
+  test("a later round's gate names the number the log records", () => {
+    gatedRound();
+    writeFileSync(join(roundsDirOf(repo, "feat/rounds"), "002.json"), "not json");
+    changeCalculator();
+
+    expect(gate([realFinding()])).toContain("round 3: 1 blocker or major finding survived");
+  });
+
+  test("a round file whose findings are not findings does not stop the next brief", () => {
+    gatedRound();
+    const file = join(roundsDirOf(repo, "feat/rounds"), "001.json");
+    writeFileSync(
+      file,
+      JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), findings: [null] }),
+    );
+
+    expect(() => capture(() => reviewCommand(repo, undefined, { workflow: false }))).not.toThrow();
+  });
+
   test("--whole and --reset are flags the real CLI accepts", () => {
     expect(() => parseArgv(argvOf("empo review --whole"))).not.toThrow();
     expect(() => parseArgv(argvOf("empo review --reset"))).not.toThrow();

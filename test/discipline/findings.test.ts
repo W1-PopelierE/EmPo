@@ -649,3 +649,105 @@ describe("gateFindings against a line the diff deleted", () => {
     expect(gateFindings(root, [cited], CHANGED).kept[0]?.introducedByDeleted).toBe(false);
   });
 });
+
+/**
+ * A later round is held to what was written since the last one. The pull request's diff still
+ * bounds every finding; this is the narrower bound inside it, and it is what stops a branch from
+ * collecting new findings on lines an earlier round read and passed.
+ */
+describe("gateFindings on a later round", () => {
+  const hunk = (file: string, header: string, body: string[]): string =>
+    [`diff --git a/${file} b/${file}`, `--- a/${file}`, `+++ b/${file}`, header, ...body, ""].join(
+      "\n",
+    );
+  const CALCULATOR_HUNK = hunk("app/PriceCalculator.php", "@@ -6,3 +6,3 @@", [
+    "    {",
+    "-        $total = $gross;",
+    "+        $total = $gross - $discount;",
+    "        return $total;",
+  ]);
+  const ORDER_HUNK = hunk("app/Order.php", "@@ -5,1 +5,1 @@", [
+    "-    public function sum(): int",
+    "+    public function total(): int",
+  ]);
+  /** The pull request touches both files. */
+  const WHOLE = parseDiff(CALCULATOR_HUNK + ORDER_HUNK);
+  const round = (diff: string) => ({ round: 1, changed: parseDiff(diff) });
+  const orderLine = { file: "app/Order.php", line: 5, anchor: "public function total(): int" };
+
+  test("drops a finding on a line round one read and nothing has changed", () => {
+    const { kept, dropped } = gateFindings(root, [finding()], WHOLE, round(ORDER_HUNK));
+
+    expect(kept).toEqual([]);
+    expect(dropped[0]?.reason).toBe("already-reviewed");
+    expect(dropped[0]?.detail[0]).toBe(
+      "app/PriceCalculator.php:7 is outside every hunk written since round 1 read it.",
+    );
+  });
+
+  test("keeps a finding on a line written since", () => {
+    const { kept } = gateFindings(root, [finding()], WHOLE, round(CALCULATOR_HUNK));
+
+    expect(kept.map((entry) => entry.finding.id)).toEqual(["F1"]);
+  });
+
+  // The same laundering the whole-diff check refuses: an old line, attributed to a new hunk.
+  test("drops a diff finding on an old line though it names a new hunk as its cause", () => {
+    const laundered = finding({ introducedBy: orderLine });
+
+    expect(gateFindings(root, [laundered], WHOLE, round(ORDER_HUNK)).dropped[0]?.reason).toBe(
+      "already-reviewed",
+    );
+  });
+
+  // What the radius is for: a fix written since breaks a line nobody touched.
+  test("keeps an impact finding on untouched code that a hunk written since reaches", () => {
+    const reached = finding({
+      kind: "impact",
+      citation: { file: "app/PriceCalculator.php", line: 3, anchor: "class PriceCalculator" },
+      introducedBy: orderLine,
+    });
+
+    expect(gateFindings(root, [reached], WHOLE, round(ORDER_HUNK)).dropped).toEqual([]);
+  });
+
+  test("holds a deletion to the lines removed since, not to every line the branch removed", () => {
+    const deleted = finding({
+      kind: "impact",
+      citation: { file: "app/PriceCalculator.php", line: 3, anchor: "class PriceCalculator" },
+      introducedBy: { file: "app/Order.php", line: 5, anchor: "public function sum(): int" },
+    });
+
+    expect(gateFindings(root, [deleted], WHOLE, round(ORDER_HUNK)).dropped).toEqual([]);
+    expect(gateFindings(root, [deleted], WHOLE, round(CALCULATOR_HUNK)).dropped[0]?.reason).toBe(
+      "already-reviewed",
+    );
+  });
+
+  // The deleted text recurs on a surviving line of the whole diff, so the anchor resolves there
+  // and the removed side of the whole diff is never consulted. The lines removed since still are.
+  test("keeps a deletion made since though its text survives elsewhere in the diff", () => {
+    const whole = hunk("app/Order.php", "@@ -2,5 +2,5 @@", [
+      " ",
+      " class Order",
+      " {",
+      "-    public function sum(): int",
+      "+    public function total(): int",
+      " }",
+    ]);
+    const sinceThen = hunk("app/Order.php", "@@ -2,3 +2,2 @@", [
+      "-    public function total(): int",
+      " ",
+      " class Order",
+    ]);
+    const recurring = finding({
+      citation: { file: "app/Order.php", line: 3, anchor: "class Order" },
+      introducedBy: { file: "app/Order.php", line: 2, anchor: "public function total(): int" },
+    });
+
+    const { kept, dropped } = gateFindings(root, [recurring], parseDiff(whole), round(sinceThen));
+
+    expect(dropped).toEqual([]);
+    expect(kept).toHaveLength(1);
+  });
+});

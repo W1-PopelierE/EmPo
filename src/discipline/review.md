@@ -29,6 +29,11 @@ What to do with a real defect that predates the branch: one maintenance line at 
 report, no severity, no citation ceremony, and never mixed in with the findings. It is a fact about
 the repository, offered, and not a change asked of this author.
 
+A third rule bounds how often: **round one says everything, and a later round is about what was
+written since.** A branch is reviewed more than once, and a review that finds something new each
+time it is run, in code nobody touched in between, is one no author can finish. "A later round",
+below, is the procedure, and the gate enforces the part of it a gate can.
+
 ## Two invariants
 
 **A review executes nothing.** No test run, no static analysis, no build, no running app, no
@@ -362,6 +367,68 @@ Every path in the report is repo-relative: the author reads it in their own chec
 into the review's scratch worktree means nothing. Then tear down, as the last action of the review
 and also when it ends early or fails: remove the worktree. The author's checkout was never touched.
 
+## A later round
+
+Where the brief carries a `review scope` block, an earlier round on this branch has been gated and
+this one narrowed itself to what was written since: those hunks, and the files the graph says they
+reach. Everything above still applies to that subject. What changes is what counts as a finding,
+and when the review is over. A round run with `--whole` carries no such block and is a first read
+again: none of this section binds it, which is the reason to ask for one.
+
+**Start from what the earlier rounds said.** The brief lists what each earlier round got through
+the gate: id, severity, title and the `file:line` it stood on then. Open each one and say whether
+what was written since closed it, with the `file:line` you read to decide, or whether it is still
+open. A still open one goes in the report under its original round and id. It is not submitted
+again: the gate would drop it where its line has not moved, and where it has, a second finding in
+new words reads to the author as a second defect.
+
+**Then ask one question of the new hunks: did this break something that held before?** That is the
+whole of a later round. It is not a second first read of the branch, and it is not the place to
+notice what round one could have noticed.
+
+**A line an earlier round read is not reopened.** The gate holds a narrowed round to the hunks
+written since the last one, by the same two questions it asks of the whole diff. A `diff` or
+`coverage` finding has to stand inside one of those hunks, and every finding, `impact` included,
+has to name one as its `introducedBy`. What fails either is dropped as `already-reviewed`: the
+earlier round read that line and let it through, and an author who is handed a new defect in code
+they did not touch cannot tell a review that is converging from one that is rolling again.
+
+That leaves one case with a shape worth knowing. A fix written since breaks code this same pull
+request added earlier: the signature changed here, the caller added in round one is now wrong. The
+caller cannot be cited, being neither a line written since nor a line outside the diff. Cite the
+fix: the changed line is both the `citation` and the `introducedBy`, the claim says what it breaks,
+and the caller goes in `supporting`.
+
+Where you are certain a line nobody has touched carries a defect that cannot ship, do not relabel
+it to get it past the gate. Say so to whoever is running the review, in one line, outside the
+findings. Rereading the whole branch is their decision, and `empo review --whole` is how they make
+it.
+
+**The same tree is not reviewed twice.** Where the scope block lists nothing new, there is nothing
+to read. Say where each earlier finding stands, submit an empty findings file so the gate still
+tears the review down, and stop.
+
+**On a narrowed round, a minor does not ask for another round.** A fix is new code, and new code
+read at full depth always yields something: a comment that went stale, a test that could pin one
+value more, an edge the fix did not cover. Reported at the weight of a defect, each of those costs
+the author a round, and the fix for it is new code again. So a `minor` here is a note: report it,
+say that it is not blocking, and do not hold the verdict on it. Grade it exactly as you would have
+on round one. Raising a finding to keep the loop open and lowering one to close it are the same
+mistake, and a missing assertion on a spine or a loosened test is no smaller for arriving late.
+
+The gate prints whether anything above `minor` survived this round. That is a fact about this
+round's findings and not yet the verdict. The verdict is approve when all of these hold, and the
+review of this branch is then over until the author asks for another:
+
+- nothing above `minor` survived this round, and nothing above `minor` was dropped for a citation
+  you can repair;
+- every `blocker` and `major` an earlier round reported is closed;
+- no `question` is still waiting on the author, which makes it needs discussion and not a new round;
+- step 6 still allows it: a criterion that is partial or missing holds the verdict as it always did.
+
+Otherwise the verdict is what step 7 would have given, and the report says which of the four is
+holding it.
+
 ## Submitting the findings
 
 Write the findings you intend to report to a JSON file, then hand it to the gate with
@@ -394,7 +461,8 @@ The fields:
   one. A defect the branch inherited fails the first check, and relabelling it `impact` does not
   save it unless it really is on untouched code that the diff reaches.
 - `severity` is `blocker`, `major`, `minor` or `question`, the last being where a downgraded
-  UNCLEAR goes. `title` is the one-line summary the author reads first, `claim` the verified
+  UNCLEAR goes. On a narrowed round a `minor` is a note; see "A later round". `title` is the
+  one-line summary the author reads first, `claim` the verified
   statement, in the declarative, with no hedging.
 - `citation` is the single line the finding rests on. `anchor` is the exact source text at that
   line, copied from the file, not retyped from memory and not reformatted: the gate drops any

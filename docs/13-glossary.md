@@ -97,7 +97,9 @@ branch inherited is dropped as `not-introduced`, because a review that reports i
 reviewing the repository and not the diff. The finding's own citation is scoped the same way, by
 kind: a `diff` or `coverage` finding standing outside every hunk is dropped as `cited-outside-diff`
 and an `impact` finding standing inside one as `cited-inside-diff`, so naming a neighbouring hunk as
-the cause does not carry an inherited defect through. An anchor that fails is checked against the lines the
+the cause does not carry an inherited defect through. On a round that narrowed itself, the same
+two checks run again against the hunks written since the last gated round, `impact` still standing
+outside them, and a finding that fails either is dropped as `already-reviewed`. An anchor that fails is checked against the lines the
 diff removed before it is dropped, since deleting a file or a method breaks its consumers without
 leaving anything in the new source to cite; the file and line are then coordinates in the base, and
 every report of them says so. See [07-review-discipline](07-review-discipline.md).

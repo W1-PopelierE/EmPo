@@ -64,6 +64,7 @@ export type DropReason =
   | "cited-outside-diff"
   | "cited-inside-diff"
   | "not-introduced"
+  | "already-reviewed"
   | "forbidden-phrasing"
   | "duplicate";
 
@@ -84,11 +85,14 @@ const SEVERITY_RANK: Record<Severity, number> = { blocker: 0, major: 1, minor: 2
  * @param changed The pull request's diff, or null when it could not be read. Null skips the
  * containment check alone: `introducedBy` is still resolved against source, because a citation
  * nobody checked is the failure this gate exists to prevent whether or not a diff is at hand.
+ * @param since Set on a round that narrowed itself: the earlier round's number and the diff
+ * written since the tree it read. Null on round one and under `--whole`.
  */
 export function gateFindings(
   readRoot: string,
   findings: ReviewFinding[],
   changed: ChangedFile[] | null = null,
+  since: { round: number; changed: ChangedFile[] } | null = null,
 ): GateResult {
   const kept: VerifiedFinding[] = [];
   const dropped: DroppedFinding[] = [];
@@ -221,6 +225,42 @@ export function gateFindings(
             ],
       });
       continue;
+    }
+
+    // A later round is held to what was written since the last one, by the same two questions the
+    // whole diff was just asked: where does the finding stand, and what caused it. A line an
+    // earlier round read and passed is not reopened by the next one, because a review that finds
+    // something new in unchanged code every time it is run is one no author can finish.
+    //
+    // The removed side is asked whether or not the anchor also resolved in the branch, because a
+    // line deleted since whose text recurs elsewhere resolves to that other occurrence. It only
+    // answers for a line the base had: one this branch added and then removed is in neither diff
+    // the gate holds, and is turned away above as not-introduced.
+    if (since !== null) {
+      const standsSince =
+        finding.kind === "impact" || isChangedLine(since.changed, finding.citation.file, citedLine);
+      const causedSince =
+        (deletedAt === null &&
+          isChangedLine(since.changed, finding.introducedBy.file, originLine)) ||
+        removedLine(since.changed, finding.introducedBy) !== null;
+      if (!standsSince || !causedSince) {
+        const where = !standsSince
+          ? `${finding.citation.file}:${citedLine}`
+          : `introducedBy ${finding.introducedBy.file}:${originLine}`;
+        dropped.push({
+          finding,
+          reason: "already-reviewed",
+          detail: [
+            `${where} is outside every hunk written since round ${since.round} read it.`,
+            "A later round reports what was written since the last one. Where a hunk written " +
+              "since broke this line, cite that hunk and name this line as supporting. Where an " +
+              "earlier round already reported it and it is still open, say so in the report " +
+              "under that round and id. Where it is new and cannot wait, empo review --whole " +
+              "reads the entire diff again.",
+          ],
+        });
+        continue;
+      }
     }
 
     const hits = forbiddenPhrasings(`${finding.title} ${finding.claim}`);

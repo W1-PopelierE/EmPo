@@ -38,6 +38,13 @@ export interface ReviewSession {
    */
   tree: string | null;
   diffPath: string;
+  /**
+   * Set where phase 1 narrowed itself to what was written since an earlier gated round: that
+   * round's number, and the diff since the tree it read. The gate holds findings to it, because a
+   * brief that narrowed while the gate still accepted the whole diff let every later round reopen
+   * lines an earlier one had read and passed. Absent on round one and under `--whole`.
+   */
+  since?: { round: number; diffPath: string };
 }
 
 /**
