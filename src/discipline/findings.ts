@@ -232,17 +232,22 @@ export function gateFindings(
     // earlier round read and passed is not reopened by the next one, because a review that finds
     // something new in unchanged code every time it is run is one no author can finish.
     //
-    // The removed side is asked whether or not the anchor also resolved in the branch, because a
-    // line deleted since whose text recurs elsewhere resolves to that other occurrence. It only
-    // answers for a line the base had: one this branch added and then removed is in neither diff
-    // the gate holds, and is turned away above as not-introduced.
+    // The removed side is asked where the anchor resolved in the branch too, because a line deleted
+    // since whose text recurs elsewhere resolves to that other occurrence. But only where it did
+    // not resolve on the line it was cited at: a cause that is still standing where the reviewer
+    // read it is a live line, and asking `removedLine` of it would let a generic one ("return
+    // null;") that happens to have been deleted since elsewhere in the file carry a line the last
+    // round read back into scope. It only answers for a line the base had: one this branch added
+    // and then removed is in neither diff the gate holds, and is turned away above as
+    // not-introduced.
     if (since !== null) {
       const standsSince =
         finding.kind === "impact" || isChangedLine(since.changed, finding.citation.file, citedLine);
       const causedSince =
         (deletedAt === null &&
           isChangedLine(since.changed, finding.introducedBy.file, originLine)) ||
-        removedLine(since.changed, finding.introducedBy) !== null;
+        ((deletedAt !== null || origin.status === "moved") &&
+          removedLine(since.changed, finding.introducedBy) !== null);
       if (!standsSince || !causedSince) {
         const where = !standsSince
           ? `${finding.citation.file}:${citedLine}`

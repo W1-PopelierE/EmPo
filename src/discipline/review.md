@@ -405,8 +405,9 @@ findings. Rereading the whole branch is their decision, and `empo review --whole
 it.
 
 **The same tree is not reviewed twice.** Where the scope block lists nothing new, there is nothing
-to read. Say where each earlier finding stands, submit an empty findings file so the gate still
-tears the review down, and stop.
+to read. Say where each earlier finding stands, submit a findings file holding `{"findings": []}`
+so the gate still tears the review down, and stop. A file with nothing in it is not that: it is
+refused as invalid JSON before the gate runs, and the worktree stays.
 
 **On a narrowed round, a minor does not ask for another round.** A fix is new code, and new code
 read at full depth always yields something: a comment that went stale, a test that could pin one

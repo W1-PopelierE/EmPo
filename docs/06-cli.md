@@ -605,7 +605,9 @@ reported, and stops short of a verdict: a round with nothing new above `minor` i
 where the earlier ones are closed, which is a reading and so the reviewer's. And the brief prints back what every earlier round found, under `earlier rounds said`,
 so a later round can say of each finding that it is closed or still open rather than meeting it
 again as a discovery. `--post` opens a `minor` comment on such a round with `Not blocking.`. None of
-it applies under `--whole`. The counts behind this paragraph come from round logs, which are
+it applies under `--whole`, with one exception: the brief still prints the `earlier rounds said`
+list there and leaves out only the instruction to say of each whether it is closed or still open,
+because resubmitting is the point of a whole read. The counts behind this paragraph come from round logs, which are
 never committed, so they are a record of why and nothing here can re-derive them.
 
 `empo review --whole` is the way out, and reads the entire diff against the base as every round

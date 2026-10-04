@@ -750,4 +750,25 @@ describe("gateFindings on a later round", () => {
     expect(dropped).toEqual([]);
     expect(kept).toHaveLength(1);
   });
+
+  // The reverse, and the laundering it would otherwise allow: the cause is still standing where it
+  // was cited, on a line round one read, and the same text was removed since somewhere else.
+  test("drops a cause on a line round one read though the same text was removed since", () => {
+    const sinceThen = hunk("app/PriceCalculator.php", "@@ -20,1 +20,0 @@", [
+      "-        $total = $gross - $discount;",
+    ]);
+    const laundered = finding({
+      kind: "impact",
+      citation: { file: "app/Order.php", line: 3, anchor: "class Order" },
+    });
+    const whole = parseDiff(CALCULATOR_HUNK);
+
+    const { kept, dropped } = gateFindings(root, [laundered], whole, round(sinceThen));
+
+    expect(kept).toEqual([]);
+    expect(dropped[0]?.reason).toBe("already-reviewed");
+    expect(dropped[0]?.detail[0]).toBe(
+      "introducedBy app/PriceCalculator.php:7 is outside every hunk written since round 1 read it.",
+    );
+  });
 });

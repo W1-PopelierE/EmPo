@@ -3409,7 +3409,7 @@ describe("round awareness", () => {
     expect(roundsOf(repo, "main")[1]?.findings).toEqual([]);
     // Round one's major is untouched, so a clean round two is not the branch being done.
     expect(printed).toContain("Earlier rounds reported 1 blocker or major");
-    expect(printed).not.toContain("verdict is approve");
+    expect(printed).toContain("This round is an approve only where each of those is closed.");
   });
 
   test("a later round keeps a finding on what was written since the last one", () => {
@@ -3460,6 +3460,62 @@ describe("round awareness", () => {
     const printed = gate([{ ...realFinding(), severity: "minor" }]);
 
     expect(printed).toContain("round 2: nothing above minor survived");
+  });
+
+  /**
+   * The same promise where the author actually counts it. The gate's own output is read by whoever
+   * ran the review; a posted comment is read by the author, and an unmarked minor there is one more
+   * thing asking to be fixed. The only adapter that posts is github, so `gh` is a script that
+   * answers for the pull request and keeps every body it was asked to post.
+   */
+  test("--post on a later round opens a minor's comment with Not blocking, and a major's without", () => {
+    gatedRound();
+    changeCalculator();
+    git(repo, ["add", "-f", CALCULATOR_FILE]);
+    commit(repo, "round two");
+    configureAdapters(repo, { forge: { kind: "github", repo: "acme/platform" } });
+    const minor: ReviewFinding = { ...realFinding(), severity: "minor" };
+    const major: ReviewFinding = {
+      ...realFinding(),
+      id: "F2",
+      title: "Discount is a flat tenth of the subtotal",
+      claim: "PriceCalculator::discount() returns a tenth of the subtotal for every order.",
+      citation: citation("return intdiv($order->subtotal, 10);"),
+      introducedBy: citation("return intdiv($order->subtotal, 10);"),
+    };
+
+    const posted = join(repo, "fake-bin", "posted");
+    withFakeGh(repo, () => {
+      // Over the script withFakeGh wrote, which fails everything: this review has to reach the
+      // pull request and post to it.
+      writeFileSync(
+        join(repo, "fake-bin", "gh"),
+        [
+          "#!/bin/sh",
+          'case "$1 $2" in',
+          '  "--version "*) echo "gh version 2.0.0" ;;',
+          `  "pr view") echo '{"number":${PR_ID},"headRefName":"feat/rounds","baseRefName":"main"}' ;;`,
+          '  "pr diff") git diff main...feat/rounds ;;',
+          `  "pr comment") printf '%s\n=====\n' "$5" >> "${posted}" ;;`,
+          "  *) exit 1 ;;",
+          "esac",
+          "",
+        ].join("\n"),
+      );
+      capture(() => reviewCommand(repo, PR_ID, { workflow: false }));
+      const path = join(sessionDirOf(repo, PR_ID), "findings.json");
+      writeFileSync(path, `${JSON.stringify({ findings: [minor, major] }, null, 2)}\n`);
+      capture(() => reviewCommand(repo, PR_ID, { findings: path, post: true }));
+    });
+
+    const comments = readFileSync(posted, "utf8").split("\n=====\n").filter(Boolean);
+    expect(comments).toHaveLength(2);
+    // After the anchor line gh's adapter heads every body with, the note is the first thing read.
+    expect(comments.find((body) => body.includes(minor.title))).toContain(
+      `\n\nNot blocking. ${minor.title}\n`,
+    );
+    expect(comments.find((body) => body.includes(major.title))).toContain(`\n\n${major.title}\n`);
+    expect(comments.join("\n")).not.toContain(`Not blocking. ${major.title}`);
   });
 
   test("a later round with a major survivor says the branch is not done, and round one says neither", () => {
