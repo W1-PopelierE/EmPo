@@ -770,5 +770,15 @@ describe("gateFindings on a later round", () => {
     expect(dropped[0]?.detail[0]).toBe(
       "introducedBy app/PriceCalculator.php:7 is outside every hunk written since round 1 read it.",
     );
+
+    // A line number one off resolves as moved, which is also how a deleted line whose text recurs
+    // resolves. The live line is the nearer of the two, so it is still the cause that was cited.
+    const drifted = {
+      ...laundered,
+      introducedBy: { ...laundered.introducedBy, line: laundered.introducedBy.line + 1 },
+    };
+    expect(gateFindings(root, [drifted], whole, round(sinceThen)).dropped[0]?.reason).toBe(
+      "already-reviewed",
+    );
   });
 });

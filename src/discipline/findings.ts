@@ -237,17 +237,23 @@ export function gateFindings(
     // not resolve on the line it was cited at: a cause that is still standing where the reviewer
     // read it is a live line, and asking `removedLine` of it would let a generic one ("return
     // null;") that happens to have been deleted since elsewhere in the file carry a line the last
-    // round read back into scope. It only answers for a line the base had: one this branch added
-    // and then removed is in neither diff the gate holds, and is turned away above as
-    // not-introduced.
+    // round read back into scope. A wrong line number resolves as moved exactly as a deleted line
+    // whose text recurs does, so a moved cause is only taken for the removed one where the removed
+    // line is nearer the cited line than the live occurrence is: a citation one line off a live
+    // line is that live line. It only answers for a line the base had: one this branch added and
+    // then removed is in neither diff the gate holds, and is turned away above as not-introduced.
     if (since !== null) {
       const standsSince =
         finding.kind === "impact" || isChangedLine(since.changed, finding.citation.file, citedLine);
+      const removedSince = removedLine(since.changed, finding.introducedBy);
+      const cited = finding.introducedBy.line;
       const causedSince =
         (deletedAt === null &&
           isChangedLine(since.changed, finding.introducedBy.file, originLine)) ||
-        ((deletedAt !== null || origin.status === "moved") &&
-          removedLine(since.changed, finding.introducedBy) !== null);
+        (removedSince !== null &&
+          (deletedAt !== null ||
+            (origin.status === "moved" &&
+              Math.abs(removedSince.line - cited) < Math.abs(originLine - cited))));
       if (!standsSince || !causedSince) {
         const where = !standsSince
           ? `${finding.citation.file}:${citedLine}`
