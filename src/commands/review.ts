@@ -279,13 +279,21 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
   // is explicit everywhere downstream rather than assumed to be the default branch.
   const base = options.base ?? prMeta?.baseBranch ?? provisionalBase;
   const session = isolate(repoRoot, id, base, prMeta, forge.adapter, options, notes);
-  // The diff on disk stays the whole one: it is what phase 2 holds every finding to, and the pull
-  // request is still the subject of the review whatever this round chose to read. Narrowing changes
-  // what the brief is about, and nothing else.
+  // The diff on disk stays the whole one: phase 2 holds every finding to it first, and the pull
+  // request is still the subject of the review whatever this round chose to read.
   const round = roundScope(repoRoot, session, base, notes, options.whole === true);
   const since =
     options.whole !== true && round?.diff != null ? { ...round, diff: round.diff } : null;
   const changed = reviewableFiles(parseDiff(since?.diff ?? readFileSync(session.diffPath, "utf8")));
+  // The narrowing is handed to the gate, or it is only advice: the brief would be about what was
+  // written since the last round while phase 2 went on accepting a finding against any line of the
+  // pull request, which is how a branch collects new findings on code nobody has touched.
+  if (since !== null) {
+    const dir = sessionDir(repoRoot, id);
+    session.since = { round: since.last.round, diffPath: join(dir, "since.diff") };
+    writeFileSync(session.since.diffPath, since.diff, "utf8");
+    writeFileSync(join(dir, "session.json"), `${JSON.stringify(session, null, 2)}\n`, "utf8");
+  }
   if (changed.skipped.length > 0) {
     notes.push(
       `${changed.skipped.length} machine-owned file(s) left out of the review: ` +
@@ -387,6 +395,10 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
                   // `--whole` or a vanished commit would read "the branch has not moved", which is
                   // the one thing it does not mean.
                   linesChanged: round.diff === null ? null : linesChanged(round.diff),
+                  earlier: readRounds(repoRoot, session.sourceBranch).map((entry) => ({
+                    round: entry.round,
+                    findings: entry.findings,
+                  })),
                 },
           since:
             since === null
@@ -1143,6 +1155,7 @@ function printBrief(repoRoot: string, graph: Graph, view: BriefView): void {
   printTicket(view);
   printCi(view);
   printScope(graph, view);
+  printEarlier(repoRoot, view);
   printChangedFiles(facts);
   printBlastRadius(facts);
   printFanout(graph, facts);
@@ -1382,6 +1395,30 @@ function printScope(graph: Graph, view: BriefView): void {
   console.log(
     `  Everything else on this branch was reviewed at ${shortSha(last.sha)} and is not below.`,
   );
+}
+
+/**
+ * What every earlier round got through the gate. The log kept it from the start and nothing read it
+ * back, so a later round could not tell a fix that closed a finding from one that had not, and met
+ * the open ones again as discoveries, in new words and under new ids.
+ */
+function printEarlier(repoRoot: string, view: BriefView): void {
+  if (view.round === null) return;
+  console.log("");
+  console.log("earlier rounds said");
+  for (const round of readRounds(repoRoot, view.session.sourceBranch)) {
+    if (round.findings.length === 0)
+      console.log(`  round ${round.round}  nothing survived the gate`);
+    for (const found of round.findings) {
+      console.log(
+        `  round ${round.round}  ${found.id}  [${found.severity}] ${found.title}  ${found.file}:${found.line}`,
+      );
+    }
+  }
+  // Under --whole the branch is being read from the top again, and resubmitting is the point.
+  if (view.since === null) return;
+  console.log("  Say of each whether what was written since closed it or it is still open. A");
+  console.log("  still open one is reported under its round and id, never submitted again as new.");
 }
 
 function printChangedFiles(facts: FileFacts[]): void {
@@ -1996,12 +2033,41 @@ function gatePhase(repoRoot: string, pr: string | undefined, options: ReviewOpti
     );
   }
 
+  // The diff since the round this one narrowed to, where phase 1 narrowed. Gone or unreadable, the
+  // gate falls back to the whole diff and says so, for the reason given above.
+  let since: { round: number; changed: ChangedFile[]; earlier: RoundRecord[] } | null = null;
+  if (session?.since !== undefined) {
+    if (existsSync(session.since.diffPath)) {
+      since = {
+        round: session.since.round,
+        changed: parseDiff(readFileSync(session.since.diffPath, "utf8")),
+        earlier: readRounds(repoRoot, session.sourceBranch),
+      };
+    } else {
+      notes.push(
+        `The diff since round ${session.since.round} is gone, so findings were held to the whole ` +
+          "diff and one on a line that round already read would have survived.",
+      );
+    }
+  }
+
   // Teardown is the last action of a review including when it ends early or fails, which is what
   // src/discipline/review.md tells the agent and therefore what this command has to do itself. A
   // worktree left behind because posting failed would be the review disturbing the checkout it
   // promised not to touch (docs/07-review-discipline.md invariant 2 and step 8).
   try {
-    const result = reportAndPost(repoRoot, pr, id, readRoot, notes, findings, changed, options);
+    const result = reportAndPost(
+      repoRoot,
+      pr,
+      id,
+      readRoot,
+      notes,
+      findings,
+      changed,
+      since,
+      session,
+      options,
+    );
     // The round is over and a report has been printed, so what this review read is now behind the
     // author. Written here rather than in the brief because a brief nobody gated read nothing: it
     // is the facts, and the round that skipped the gate produced no findings for anyone to trust.
@@ -2039,20 +2105,44 @@ function reportAndPost(
   notes: string[],
   findings: ReviewFinding[],
   changed: ChangedFile[] | null,
+  since: { round: number; changed: ChangedFile[]; earlier: RoundRecord[] } | null,
+  session: ReviewSession | null,
   options: ReviewOptions,
 ): GateResult {
-  const result = gateFindings(existsSync(readRoot) ? readRoot : repoRoot, findings, changed);
+  const result = gateFindings(existsSync(readRoot) ? readRoot : repoRoot, findings, changed, since);
+  // Only a narrowed round has a bar to clear: round one reports everything it verified, and from
+  // then on a minor asks for nothing. Without that a fix is new code, its review finds a minor,
+  // and the minor's fix is new code again, which ran to eight rounds on one branch.
+  //
+  // Three counts and no verdict. What survived is this round's alone, so on its own it would call
+  // a branch done while a blocker from round one sat unfixed, or while this round's own blocker
+  // lay among the dropped for a mistyped anchor.
+  const above = (severity: string): boolean => severity === "blocker" || severity === "major";
+  const round =
+    since === null
+      ? null
+      : {
+          // The number the log is about to take, which is not always the last readable round + 1.
+          number: nextRound(repoRoot, session?.sourceBranch ?? null),
+          blocking: result.kept.filter((row) => above(row.finding.severity)).length,
+          droppedBlocking: result.dropped.filter(
+            (row) => row.reason !== "already-reviewed" && above(row.finding.severity),
+          ).length,
+          earlierBlocking: since.earlier
+            .flatMap((entry) => entry.findings)
+            .filter((found) => above(found.severity)).length,
+        };
 
   if (options.json === true) {
     console.log(
-      JSON.stringify({ id, readRoot, notes, ...result, caveat: FLOOR_NOT_CEILING }, null, 2),
+      JSON.stringify({ id, readRoot, notes, round, ...result, caveat: FLOOR_NOT_CEILING }, null, 2),
     );
   } else {
-    printGate(id, readRoot, notes, result, findings.length);
+    printGate(id, readRoot, notes, result, findings.length, round);
   }
 
   if (options.post === true) {
-    postFindings(repoRoot, pr, result);
+    postFindings(repoRoot, pr, result, round !== null);
   }
   return result;
 }
@@ -2157,12 +2247,21 @@ function roundsPhase(repoRoot: string, pr: string | undefined): void {
   }
 }
 
+/** What a narrowed round's gate can count toward a verdict. The verdict itself is the reviewer's. */
+interface RoundVerdict {
+  number: number;
+  blocking: number;
+  droppedBlocking: number;
+  earlierBlocking: number;
+}
+
 function printGate(
   id: string,
   readRoot: string,
   notes: string[],
   result: GateResult,
   submitted: number,
+  round: RoundVerdict | null,
 ): void {
   console.log("");
   console.log(`verified findings for ${id}`);
@@ -2207,6 +2306,29 @@ function printGate(
     console.log("reporting it would have cost the author time and burned trust.");
   }
 
+  if (round !== null) {
+    console.log("");
+    console.log(
+      round.blocking === 0
+        ? `round ${round.number}: nothing above minor survived, so nothing written since the ` +
+            "last round asks for another. A minor above is a note the author may take or leave."
+        : `round ${round.number}: ${round.blocking} blocker or major finding${round.blocking === 1 ? "" : "s"} ` +
+            "survived, so the branch is not done.",
+    );
+    if (round.droppedBlocking > 0) {
+      console.log(
+        `  ${round.droppedBlocking} blocker or major was dropped above. Where that was a citation ` +
+          "to repair, this round is not clean until it has been.",
+      );
+    }
+    if (round.earlierBlocking > 0) {
+      console.log(
+        `  Earlier rounds reported ${round.earlierBlocking} blocker or major. This round is an ` +
+          "approve only where each of those is closed.",
+      );
+    }
+  }
+
   console.log("");
   console.log("Findings never gate: this command exits 0 whatever it found (docs/06-cli.md).");
 }
@@ -2215,7 +2337,13 @@ function printGate(
  * Posting is outward-facing, so it is opt-in per call and never a default (docs/09-adapters.md).
  * The body reads as a normal human review: it names no tooling, and the stylistic scrub runs last.
  */
-function postFindings(repoRoot: string, pr: string | undefined, result: GateResult): void {
+function postFindings(
+  repoRoot: string,
+  pr: string | undefined,
+  result: GateResult,
+  /** A narrowed round, where a minor is a note and its comment says so: comments are what the author counts. */
+  later: boolean,
+): void {
   const { config } = loadConfig(repoRoot);
   // `pr` and not the session id: the id is "local" for a local review, and handing a forge a
   // pull-request-shaped "local" is the mistake this command was fixed for elsewhere. Undefined
@@ -2235,7 +2363,8 @@ function postFindings(repoRoot: string, pr: string | undefined, result: GateResu
   requirePostCapability(config, forge.adapter, null);
   const id = pr ?? "local";
   for (const row of result.kept) {
-    const lines = [row.finding.title, "", row.finding.claim];
+    const note = later && row.finding.severity === "minor";
+    const lines = [`${note ? "Not blocking. " : ""}${row.finding.title}`, "", row.finding.claim];
     // Only where the finding is not on the line that caused it: an impact comment lands on code
     // this pull request never wrote and a coverage one on the gap beside it, and the first question
     // either author asks is what in the diff made it theirs to answer.

@@ -322,7 +322,10 @@ function parseRound(path: string): RoundRecord | null {
       at: typeof parsed.at === "string" ? parsed.at : "",
       id: typeof parsed.id === "string" ? parsed.id : "local",
       branch: typeof parsed.branch === "string" ? parsed.branch : "",
-      findings: Array.isArray(parsed.findings) ? parsed.findings : [],
+      // Entries are read back by the next brief, so one that is not an object drops out here.
+      findings: Array.isArray(parsed.findings)
+        ? parsed.findings.filter((found) => found !== null && typeof found === "object")
+        : [],
     };
   } catch {
     return null;

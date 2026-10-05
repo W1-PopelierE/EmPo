@@ -3392,6 +3392,183 @@ describe("round awareness", () => {
     expect(changedRows(printed)).toContain(CALCULATOR_FILE);
   });
 
+  /**
+   * The loop an author actually reported: every round found something new on code that had not
+   * moved since the round before. Narrowing the brief did not stop it, because the gate still held
+   * findings to the whole diff, so anything round one read and passed was fair game for round five.
+   */
+  test("a later round drops a finding on a line the last round already read", () => {
+    changeCalculator();
+    gate([realFinding()]);
+
+    // Nothing written in between: the same tree, read a second time.
+    const printed = gate([{ ...realFinding(), id: "F9" }]);
+
+    expect(printed).toContain("F9  already-reviewed");
+    expect(printed).toContain("is outside every hunk written since round 1 read it");
+    expect(roundsOf(repo, "main")[1]?.findings).toEqual([]);
+    // Round one's major is untouched, so a clean round two is not the branch being done.
+    expect(printed).toContain("Earlier rounds reported 1 blocker or major");
+    expect(printed).toContain("This round is an approve only where each of those is closed.");
+  });
+
+  test("a later round keeps a finding on what was written since the last one", () => {
+    gatedRound();
+    changeCalculator();
+
+    gate([realFinding()]);
+
+    expect(roundsOf(repo, "feat/rounds")[1]?.findings).toMatchObject([{ id: "F1" }]);
+  });
+
+  test("--whole holds the gate to the whole diff again, so an earlier line can be reopened", () => {
+    changeCalculator();
+    gate([realFinding()]);
+
+    capture(() => reviewCommand(repo, undefined, { whole: true, workflow: false }));
+    const path = findingsPathOf(repo);
+    writeFileSync(path, `${JSON.stringify({ findings: [realFinding()] })}\n`);
+    const printed = capture(() => reviewCommand(repo, undefined, { findings: path }));
+
+    expect(printed).not.toContain("already-reviewed");
+    expect(roundsOf(repo, "main")[1]?.findings).toMatchObject([{ id: "F1" }]);
+  });
+
+  /**
+   * Without this a later round cannot tell a fix that closed a finding from one that did not, and
+   * rediscovers the open ones in new words under new ids.
+   */
+  test("the brief reads back what the earlier rounds found", () => {
+    changeCalculator();
+    gate([realFinding()]);
+
+    const printed = capture(() => reviewCommand(repo, undefined, { workflow: false }));
+
+    const earlier = printed.slice(printed.indexOf("earlier rounds said"));
+    expect(earlier).toContain("round 1  F1  [major] Discount is applied after tax");
+    expect(earlier).toContain("still open");
+  });
+
+  /**
+   * The other half of the loop, and the larger one: a fix is new code, a full-depth read of it
+   * finds a minor, the minor's fix is new code. Eight rounds on one branch ended that way.
+   */
+  test("a later round whose survivors are all minor says it does not ask for another", () => {
+    gatedRound();
+    changeCalculator();
+
+    const printed = gate([{ ...realFinding(), severity: "minor" }]);
+
+    expect(printed).toContain("round 2: nothing above minor survived");
+  });
+
+  /**
+   * The same promise where the author actually counts it. The gate's own output is read by whoever
+   * ran the review; a posted comment is read by the author, and an unmarked minor there is one more
+   * thing asking to be fixed. The only adapter that posts is github, so `gh` is a script that
+   * answers for the pull request and keeps every body it was asked to post.
+   */
+  test("--post on a later round opens a minor's comment with Not blocking, and a major's without", () => {
+    gatedRound();
+    changeCalculator();
+    git(repo, ["add", "-f", CALCULATOR_FILE]);
+    commit(repo, "round two");
+    configureAdapters(repo, { forge: { kind: "github", repo: "acme/platform" } });
+    const minor: ReviewFinding = { ...realFinding(), severity: "minor" };
+    const major: ReviewFinding = {
+      ...realFinding(),
+      id: "F2",
+      title: "Discount is a flat tenth of the subtotal",
+      claim: "PriceCalculator::discount() returns a tenth of the subtotal for every order.",
+      citation: citation("return intdiv($order->subtotal, 10);"),
+      introducedBy: citation("return intdiv($order->subtotal, 10);"),
+    };
+
+    const posted = join(repo, "fake-bin", "posted");
+    withFakeGh(repo, () => {
+      // Over the script withFakeGh wrote, which fails everything: this review has to reach the
+      // pull request and post to it.
+      writeFileSync(
+        join(repo, "fake-bin", "gh"),
+        [
+          "#!/bin/sh",
+          'case "$1 $2" in',
+          '  "--version "*) echo "gh version 2.0.0" ;;',
+          `  "pr view") echo '{"number":${PR_ID},"headRefName":"feat/rounds","baseRefName":"main"}' ;;`,
+          '  "pr diff") git diff main...feat/rounds ;;',
+          `  "pr comment") printf '%s\n=====\n' "$5" >> "${posted}" ;;`,
+          "  *) exit 1 ;;",
+          "esac",
+          "",
+        ].join("\n"),
+      );
+      capture(() => reviewCommand(repo, PR_ID, { workflow: false }));
+      const path = join(sessionDirOf(repo, PR_ID), "findings.json");
+      writeFileSync(path, `${JSON.stringify({ findings: [minor, major] }, null, 2)}\n`);
+      capture(() => reviewCommand(repo, PR_ID, { findings: path, post: true }));
+    });
+
+    const comments = readFileSync(posted, "utf8").split("\n=====\n").filter(Boolean);
+    expect(comments).toHaveLength(2);
+    // After the anchor line gh's adapter heads every body with, the note is the first thing read.
+    expect(comments.find((body) => body.includes(minor.title))).toContain(
+      `\n\nNot blocking. ${minor.title}\n`,
+    );
+    expect(comments.find((body) => body.includes(major.title))).toContain(`\n\n${major.title}\n`);
+    expect(comments.join("\n")).not.toContain(`Not blocking. ${major.title}`);
+  });
+
+  test("a later round with a major survivor says the branch is not done, and round one says neither", () => {
+    changeCalculator();
+    expect(gate([{ ...realFinding(), severity: "minor" }])).not.toContain("nothing above minor");
+
+    writeFileSync(
+      join(repo, ORDER_TEST_FILE),
+      `${readFileSync(join(repo, ORDER_TEST_FILE), "utf8")}\n// round two\n`,
+    );
+    const anchor = { file: ORDER_TEST_FILE, anchor: "// round two" };
+    const line =
+      readFileSync(join(repo, ORDER_TEST_FILE), "utf8").split("\n").indexOf("// round two") + 1;
+    const printed = gate([
+      { ...realFinding(), citation: { ...anchor, line }, introducedBy: { ...anchor, line } },
+    ]);
+
+    expect(printed).toContain("round 2: 1 blocker or major finding survived");
+  });
+
+  // A blocker that died on a mistyped anchor is not a clean round, and the count has to say so.
+  test("a later round counts a blocker it dropped, so a clean line is not read as done", () => {
+    gatedRound();
+    changeCalculator();
+
+    const printed = gate([
+      { ...realFinding(), citation: citation("$total = round($gross, 2);", 1) },
+    ]);
+
+    expect(printed).toContain("round 2: nothing above minor survived");
+    expect(printed).toContain("1 blocker or major was dropped above");
+  });
+
+  // `lastRound` skips a file that will not parse and the log's numbering does not.
+  test("a later round's gate names the number the log records", () => {
+    gatedRound();
+    writeFileSync(join(roundsDirOf(repo, "feat/rounds"), "002.json"), "not json");
+    changeCalculator();
+
+    expect(gate([realFinding()])).toContain("round 3: 1 blocker or major finding survived");
+  });
+
+  test("a round file whose findings are not findings does not stop the next brief", () => {
+    gatedRound();
+    const file = join(roundsDirOf(repo, "feat/rounds"), "001.json");
+    writeFileSync(
+      file,
+      JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), findings: [null] }),
+    );
+
+    expect(() => capture(() => reviewCommand(repo, undefined, { workflow: false }))).not.toThrow();
+  });
+
   test("--whole and --reset are flags the real CLI accepts", () => {
     expect(() => parseArgv(argvOf("empo review --whole"))).not.toThrow();
     expect(() => parseArgv(argvOf("empo review --reset"))).not.toThrow();

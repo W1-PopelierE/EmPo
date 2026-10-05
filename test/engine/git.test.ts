@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { isAncestor, reviewedTree, runShell } from "../../src/engine/git";
+import { parseDiff } from "../../src/engine/diff";
+import { diffAgainstBase, isAncestor, reviewedTree, runShell } from "../../src/engine/git";
 
 /**
  * These run a real shell rather than a stub, because the whole contract is about what a shell does
@@ -176,6 +177,34 @@ describe("reviewedTree", () => {
       expect(reviewedTree(bare)).toBeNull();
     } finally {
       rmSync(bare, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("diffAgainstBase", () => {
+  let repo: string;
+
+  beforeEach(() => {
+    repo = makeRepo();
+  });
+
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("writes a/ and b/ prefixes whatever the user's diff config says", () => {
+    runShell(repo, 'printf "two\\n" >> file.txt', {}, 10_000);
+    // A top-level `b` directory is what makes `diff.noprefix` bite: unprefixed, `b/inner.txt` reads
+    // as a prefixed `inner.txt`, where `file.txt` would parse the same with or without the pin.
+    runShell(repo, 'mkdir b && printf "in\\n" > b/inner.txt && git add -A', {}, 10_000);
+
+    for (const setting of ["diff.mnemonicPrefix", "diff.noprefix"]) {
+      runShell(repo, `git config ${setting} true`, {}, 10_000);
+
+      // Unpinned, the first writes `c/` and `w/` and the second writes nothing, and either way the
+      // parser hands back a path no citation matches.
+      const paths = parseDiff(diffAgainstBase(repo, "HEAD") ?? "").map((file) => file.path);
+      expect(paths).toEqual(["b/inner.txt", "file.txt"]);
     }
   });
 });

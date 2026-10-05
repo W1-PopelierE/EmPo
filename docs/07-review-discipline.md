@@ -196,7 +196,11 @@ finding's kind, and a `diff` or `coverage` finding standing outside every hunk i
 the `introducedBy` anchor is resolved the
 same way and the finding is dropped as `not-introduced` if the line it is really on lies outside
 every hunk of this pull request's diff, or if it is neither in the branch nor among the lines the
-diff removed; and the title and claim of every finding are linted against the phrasings above. The
+diff removed; on a round that narrowed itself, the same two checks then run against the hunks
+written since the last gated round, and a `diff` or `coverage` finding standing outside them, or
+any finding whose `introducedBy` is outside them, is dropped as `already-reviewed`
+(`src/discipline/review.md`, "A later round", is the procedure and is not repeated here); and the title and claim of every finding are
+linted against the phrasings above. The
 citation is checked first because it is the ground truth, and a fabricated finding is worth
 reporting as fabricated rather than as inherited. Only survivors are printed. The last phrasing rule
 is deliberately not in the lint,

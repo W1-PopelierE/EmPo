@@ -89,11 +89,17 @@ export function isAncestor(repoRoot: string, sha: string, of: string): boolean {
 }
 
 /**
+ * A diff `parseDiff` can read whatever the user's git config says. The prefixes are pinned because
+ * `diff.mnemonicPrefix` writes `c/` and `w/`, which parses to paths no citation matches.
+ */
+const PLAIN = ["--no-color", "--src-prefix=a/", "--dst-prefix=b/"];
+
+/**
  * The local working diff against a base ref: two dots, no second ref, so uncommitted work is in it.
  * This is what `empo review` with no PR argument reviews (docs/06-cli.md).
  */
 export function diffAgainstBase(repoRoot: string, base: string): string | null {
-  return git(repoRoot, ["diff", "--no-color", base]);
+  return git(repoRoot, ["diff", ...PLAIN, base]);
 }
 
 /**
@@ -102,12 +108,12 @@ export function diffAgainstBase(repoRoot: string, base: string): string | null {
  * and a change the author has not staged is not part of it.
  */
 export function stagedDiff(repoRoot: string): string | null {
-  return git(repoRoot, ["diff", "--no-color", "--cached"]);
+  return git(repoRoot, ["diff", ...PLAIN, "--cached"]);
 }
 
 /** The diff of one ref range, for a PR branch fetched into the review's worktree. */
 export function diffRange(repoRoot: string, base: string, head: string): string | null {
-  return git(repoRoot, ["diff", "--no-color", `${base}...${head}`]);
+  return git(repoRoot, ["diff", ...PLAIN, `${base}...${head}`]);
 }
 
 export function fetchRef(repoRoot: string, remote: string, ref: string): boolean {

@@ -59,10 +59,15 @@ the first gated round `empo review` narrows the next one by itself: the subject 
 has been written since the last gated round plus the files the graph says those hunks can
 reach, and the brief names which files are which. The radius is not an extra there: a fix
 written to close the last round's finding is exactly the kind of change that breaks something
-the new hunks do not mention. `--whole` reads the entire diff against the base again the way a
-first round does, for when the narrowing has the wrong subject, and `empo review --reset`
-forgets every gated round on this branch and starts clean. The gate is what records a round,
-so a round that skipped phase 2 is a round the next review will not skip over.
+the new hunks do not mention. The gate holds a later round to that subject too. A `diff` or
+`coverage` finding has to stand inside a hunk written since the last round, and every
+finding has to name one as its `introducedBy`, so an `impact` finding on code nobody touched
+still stands where a new hunk caused it. What fails either is dropped. A minor on a narrowed
+round is a note and not a request for another round. `--whole` reads the entire diff against
+the base again the way a first round does, with none of that applied, for when the narrowing
+has the wrong subject, and `empo review --reset` forgets every gated round on this branch and
+starts clean. The gate is what records a round, so a round that skipped phase 2 is a round
+the next review will not skip over.
 
 **Ask before you choose between them, and ask first of all.** Start with:
 
@@ -137,6 +142,12 @@ gets one line more, naming the `introducedBy` coordinate, because it lands on co
 request never wrote and the first question its author asks is what in the diff made it theirs.
 Write no em dashes: EmPo strips them from everything it posts, and a comment that keeps them
 reads as machine-written next to the ones that do not.
+
+On a narrowed round, which is one whose gate printed a `round` line, open the comment for a
+`minor` finding with `Not blocking.`. The author reads the comments and not the report, and a
+note that arrives looking like a defect costs them another round. Where the discipline's
+verdict came out as approve, say so in your report to the user. Posting an approval to the
+forge is theirs to ask for.
 
 Where the answer is every finding, `empo review <pr> --findings <path> --post` posts the whole
 verified set from inside the gate and is one command rather than a loop. It is all of them or

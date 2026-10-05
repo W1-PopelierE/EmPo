@@ -567,7 +567,7 @@ miss, because a fix written to close the last round's finding is exactly the kin
 breaks something the new hunks do not name. The brief says which files are which under `review
 scope`, so a reader can tell this round's work from code that has been sitting there since round
 one. The diff on disk is untouched by all of this: the gate still holds every finding to the whole
-pull request, which is still the subject.
+pull request first, and then, as below, to what was written since.
 
 Since the last gated round means since the tree that round read, and not since the commit it was
 standing on. A local `empo review` reads the working diff against the base, so most of what a round
@@ -590,6 +590,25 @@ reviewed and the tree in hand, so refusing to narrow would throw away a true ans
 true is calling all of it work written since, because the other side's commits read as deletions and
 a reader told only "new since round three" would take that for progress. Hence a note and not a
 refusal, in those words.
+
+Narrowing the brief alone did not end the loop it was built for. The gate still held every finding
+to the whole diff, so a later round could raise a finding on any line of the pull request, and
+measured over the round logs of three repositories, 11 of 89 later-round findings stood on a line
+unchanged since the round before, some from two gates over one identical tree. The other 78 stood on
+the fix itself, nearly all `minor`: a fix is new code, its review finds something small, and that
+fix is new code again, which ran to eight rounds on one branch. So phase 1 now leaves the diff
+since the last round in the session, and phase 2 does three things with it. It drops, as
+`already-reviewed`, a `diff` or `coverage` finding standing outside the hunks written since that
+round, and any finding whose `introducedBy` is outside them. It prints whether anything above
+`minor` survived, how many blockers and majors it dropped, and how many the earlier rounds
+reported, and stops short of a verdict: a round with nothing new above `minor` is an approve only
+where the earlier ones are closed, which is a reading and so the reviewer's. And the brief prints back what every earlier round found, under `earlier rounds said`,
+so a later round can say of each finding that it is closed or still open rather than meeting it
+again as a discovery. `--post` opens a `minor` comment on such a round with `Not blocking.`. None of
+it applies under `--whole`, with one exception: the brief still prints the `earlier rounds said`
+list there and leaves out only the instruction to say of each whether it is closed or still open,
+because resubmitting is the point of a whole read. The counts behind this paragraph come from round logs, which are
+never committed, so they are a record of why and nothing here can re-derive them.
 
 `empo review --whole` is the way out, and reads the entire diff against the base as every round
 before the log existed did. The brief states which of the two subjects it has in either case, in
