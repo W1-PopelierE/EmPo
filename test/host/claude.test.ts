@@ -441,6 +441,53 @@ describe("the generated skills", () => {
     expect(skill).toContain("--post");
   });
 
+  test("empo-review runs the narrowed next round without asking when review.rounds is auto", () => {
+    const skill = renderSkill("empo-review", {
+      ...FULL,
+      review: { rounds: "auto", findings: "ask" },
+    });
+
+    expect(skill).toContain("This repository runs the next round automatically");
+    expect(skill).not.toContain("Ask before you choose between them");
+    expect(skill).not.toContain("empo review $ARGUMENTS --rounds");
+    // The per-finding question is a separate choice and stays.
+    expect(skill).toContain("one question per finding");
+  });
+
+  test("empo-review posts every survivor inline without asking when review.findings is inline", () => {
+    const skill = renderSkill("empo-review", {
+      ...FULL,
+      review: { rounds: "ask", findings: "inline" },
+    });
+
+    expect(skill).toContain("posts every survivor as an inline comment");
+    expect(skill).toContain("empo review <pr> --findings <path> --post");
+    // A local diff has nothing to post to, so it still asks.
+    expect(skill).toContain("there, and only there, ask as follows");
+    // Rounds are still asked about.
+    expect(skill).toContain("Ask before you choose between them");
+  });
+
+  test("empo-review takes --auto and --inline per run, and keeps them away from the CLI", () => {
+    const skill = renderSkill("empo-review", FULL);
+
+    expect(skill).toContain("Take both out of `$ARGUMENTS` before you run any");
+    expect(skill).toContain("**With `--auto` among the arguments, skip the question below.**");
+    expect(skill).toContain(
+      "**With `--inline` among the arguments and a pull request under review",
+    );
+    expect(skill).toContain("empo review <pr> --findings <path> --post");
+  });
+
+  test("empo-review asks both questions when no review options are set", () => {
+    const skill = renderSkill("empo-review", FULL);
+
+    expect(skill).not.toContain("runs the next round automatically");
+    expect(skill).not.toContain("this repository posts every survivor");
+    expect(skill).toContain("Ask before you choose between them");
+    expect(skill).toContain("one question per finding");
+  });
+
   test("point at the discipline each command prints instead of copying it", () => {
     // The copy `empo review` and `empo init` hand over is the one the verification gate is built
     // around. A second copy in a generated file drifts from it and teaches a workflow the gate does

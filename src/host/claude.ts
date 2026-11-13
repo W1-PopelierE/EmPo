@@ -642,6 +642,15 @@ function reviewSkill(config: EmpoConfig): string[] {
     "`$ARGUMENTS` is a pull request id, or nothing at all to review the local diff against the base",
     "ref. `--base <ref>` pins the comparison, which matters on a stacked pull request.",
     "",
+    // Skill-only switches: the per-run spelling of `review.rounds` and `review.findings`, for a
+    // run where the config says ask. The CLI refuses an option it does not know, so one left in
+    // fails loudly rather than being dropped.
+    "Two more words are for you and not for the CLI. **`--auto`** runs the narrowed next round",
+    "without asking, and **`--inline`** posts every survivor on a pull request as an inline comment",
+    "without asking, each as described below. Take both out of `$ARGUMENTS` before you run any",
+    "`empo` command: everywhere below, `$ARGUMENTS` means what is left. `empo review` refuses an",
+    "option it does not know, so one you forgot to take out stops the run with `unknown option`.",
+    "",
     // A review against an `mcp` forge starts with a run that reviews nothing, and an agent that
     // does not expect that reads it as a failure and starts working around it: rerunning, dropping
     // the id, reviewing the local diff and reporting on the wrong code. Cheaper to say so here.
@@ -710,38 +719,7 @@ function reviewSkill(config: EmpoConfig): string[] {
     "starts clean. The gate is what records a round, so a round that skipped phase 2 is a round",
     "the next review will not skip over.",
     "",
-    // Which of the three the user wants is not derivable from anything the agent can read: the
-    // narrowing is right or wrong depending on what the author did since the last round, and only
-    // they know that. Asking costs one round trip; guessing costs a whole review of the wrong
-    // subject, which is the failure this section already exists to prevent.
-    "**Ask before you choose between them, and ask first of all.** Start with:",
-    "",
-    "```sh",
-    "empo review $ARGUMENTS --rounds",
-    "```",
-    "",
-    "It reads the gated-round log for the branch under review and prints it. It starts no review,",
-    "builds no worktree and changes nothing, so it is cheap to run before you have decided anything.",
-    "",
-    "**Keep `$ARGUMENTS` on it**, exactly as on the review itself. A pull request is reviewed from a",
-    "detached worktree and never from its own branch, so without the id this reads the rounds of",
-    "whatever happens to be checked out: it would answer for `main` while the pull request's own",
-    "branch carried three rounds, and you would report a first round to the user while the command",
-    "narrowed to the fourth. Empty on a local review, which is the case it already handled.",
-    "",
-    "- It says there are **no gated rounds**: this is round one, there is nothing to choose between,",
-    "  so ask nothing and run `empo review $ARGUMENTS` straight away.",
-    "- It says there are **rounds**: put one multiple-choice question to the user before running",
-    "  anything, using your host's prompt for it (`AskUserQuestion` in Claude Code,",
-    "  `ask_user_question` in Codex). Offer exactly the options that apply, named with the round",
-    "  numbers and dates the command just printed: continue with the narrowed next round, which is",
-    "  the plain command and the default; `--whole`, for when the narrowing has the wrong subject;",
-    "  or `--reset`, which forgets the history. Then run `empo review $ARGUMENTS` once, with the",
-    "  flag they chose, if any.",
-    "",
-    "Do not offer `--reset` as though it were equivalent to the other two. It throws away every",
-    "round on the branch, and a user who picks it by accident has lost the log that makes the next",
-    "review narrow at all.",
+    ...roundChoice(config),
     "",
     "## The second phase is not optional",
     "",
@@ -776,6 +754,7 @@ function reviewSkill(config: EmpoConfig): string[] {
     "check you dispatched has come back, and the report is written. A question asked while a check",
     "is still out is a question asked about a finding list that is about to change.",
     "",
+    ...inlineFindings(config),
     "Then ask **one question per finding**, using your host's multiple-choice prompt",
     "(`AskUserQuestion` in Claude Code, `ask_user_question` in Codex). Address each finding by the",
     "id the gate printed beside it, and give the question the finding's severity, title and",
@@ -824,6 +803,90 @@ function reviewSkill(config: EmpoConfig): string[] {
     "the review to agree with the decision.",
     "",
     ...repositoryFacts(config, "full"),
+  ];
+}
+
+/**
+ * With `review.findings: "inline"` the team has answered the per-finding question once for every
+ * pull request: post them all. `--post` already posts the whole verified set from inside the gate,
+ * with the `Not blocking.` prefix and the `introducedBy` line, so the skill points at it rather than
+ * at a loop. A local diff has no pull request to comment on, so it keeps the question.
+ */
+function inlineFindings(config: EmpoConfig): string[] {
+  const head =
+    config.review?.findings === "inline"
+      ? [
+          "**On a pull request, this repository posts every survivor as an inline comment**",
+          "(`review.findings` is `inline` in `.empo/config.json`, so `--inline` changes nothing here).",
+        ]
+      : ["**With `--inline` among the arguments and a pull request under review, post them all.**"];
+  return [
+    ...head,
+    "Ask nothing about the findings there: once the review is finished, run",
+    "`empo review <pr> --findings <path> --post` with the findings file phase 2 read,",
+    "which posts the whole verified set as inline comments from inside the gate, then report what",
+    "was posted. Change no line of their branch. A local diff has no pull request to comment on, so",
+    "there, and only there, ask as follows.",
+    "",
+  ];
+}
+
+/**
+ * How the skill picks between the narrowed next round, `--whole` and `--reset`. By default it asks,
+ * because which one is right depends on what the author did since the last round. With
+ * `review.rounds: "auto"` the team has said the answer is always the narrowed next round, which is
+ * what the plain command already does by itself, so the skill runs it and asks nothing.
+ */
+function roundChoice(config: EmpoConfig): string[] {
+  const auto = [
+    "Ask nothing about rounds: run `empo review $ARGUMENTS` straight away, which narrows to the",
+    "next round by itself where there are gated rounds and is round one where there are none.",
+    "Never add `--whole` or `--reset` on your own initiative; they are for when the user asks for",
+    "them by name.",
+  ];
+  if (config.review?.rounds === "auto") {
+    return [
+      "**This repository runs the next round automatically** (`review.rounds` is `auto` in",
+      "`.empo/config.json`, so `--auto` changes nothing here).",
+      ...auto,
+    ];
+  }
+  return [
+    "**With `--auto` among the arguments, skip the question below.**",
+    ...auto,
+    "",
+    // Which of the three the user wants is not derivable from anything the agent can read: the
+    // narrowing is right or wrong depending on what the author did since the last round, and only
+    // they know that. Asking costs one round trip; guessing costs a whole review of the wrong
+    // subject, which is the failure this section already exists to prevent.
+    "**Ask before you choose between them, and ask first of all.** Start with:",
+    "",
+    "```sh",
+    "empo review $ARGUMENTS --rounds",
+    "```",
+    "",
+    "It reads the gated-round log for the branch under review and prints it. It starts no review,",
+    "builds no worktree and changes nothing, so it is cheap to run before you have decided anything.",
+    "",
+    "**Keep `$ARGUMENTS` on it**, exactly as on the review itself. A pull request is reviewed from a",
+    "detached worktree and never from its own branch, so without the id this reads the rounds of",
+    "whatever happens to be checked out: it would answer for `main` while the pull request's own",
+    "branch carried three rounds, and you would report a first round to the user while the command",
+    "narrowed to the fourth. Empty on a local review, which is the case it already handled.",
+    "",
+    "- It says there are **no gated rounds**: this is round one, there is nothing to choose between,",
+    "  so ask nothing and run `empo review $ARGUMENTS` straight away.",
+    "- It says there are **rounds**: put one multiple-choice question to the user before running",
+    "  anything, using your host's prompt for it (`AskUserQuestion` in Claude Code,",
+    "  `ask_user_question` in Codex). Offer exactly the options that apply, named with the round",
+    "  numbers and dates the command just printed: continue with the narrowed next round, which is",
+    "  the plain command and the default; `--whole`, for when the narrowing has the wrong subject;",
+    "  or `--reset`, which forgets the history. Then run `empo review $ARGUMENTS` once, with the",
+    "  flag they chose, if any.",
+    "",
+    "Do not offer `--reset` as though it were equivalent to the other two. It throws away every",
+    "round on the branch, and a user who picks it by accident has lost the log that makes the next",
+    "review narrow at all.",
   ];
 }
 

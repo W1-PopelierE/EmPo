@@ -411,6 +411,26 @@ matches reads like what it is.
 So an Asana tracker needs `keyPattern` written for a gid or a permalink, and writing nothing is not a
 safe default there. See [09-adapters](09-adapters.md) for the adapter contract.
 
+### `review` (optional)
+
+What the `empo-review` skill decides by itself instead of asking. Both keys default to `ask`, and
+the change reaches the skill on the next `empo update`.
+
+```json
+"review": { "rounds": "auto", "findings": "inline" }
+```
+
+- `rounds`: `ask` puts the narrowed-next-round / `--whole` / `--reset` question to the user when
+  the branch has gated rounds. `auto` asks nothing and runs the plain `empo review`, which narrows
+  to the next round by itself; `--whole` and `--reset` are then used only when asked for by name.
+- `findings`: `ask` puts one question per verified finding. `inline` posts every survivor on a
+  pull request as an inline comment through `empo review <pr> --findings <path> --post`, asking
+  nothing. A local diff has no pull request, so it keeps the question.
+
+For a single run without touching the config, pass the same choice to the skill instead:
+`/empo-review <pr> --auto --inline`. The skill takes both words out before it calls `empo review`,
+which refuses them as unknown options.
+
 ### `ignore` (optional)
 
 Glob patterns excluded from indexing. Vendored code, build output, and test doubles usually go

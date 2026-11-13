@@ -231,6 +231,18 @@ export const trackerSchema = z
     path: ["keyPattern"],
   });
 
+/**
+ * What `empo-review` decides by itself instead of asking. Both default to asking, because each
+ * question exists for a reason the skill states; a team that has answered it the same way every
+ * time says so here once. `rounds: "auto"` always continues with the narrowed next round (never
+ * `--whole` or `--reset`), and `findings: "inline"` posts every verified finding on a pull request
+ * as an inline comment through `--post` rather than asking about each one.
+ */
+export const reviewSchema = z.strictObject({
+  rounds: z.enum(["ask", "auto"]).default("ask"),
+  findings: z.enum(["ask", "inline"]).default("ask"),
+});
+
 export const adaptersSchema = z.strictObject({
   forge: forgeSchema.optional(),
   tracker: trackerSchema.optional(),
@@ -278,6 +290,7 @@ export const configSchema = z.strictObject({
   flows: z.string().default(".empo/flows.json"),
   spines: z.string().default(".empo/spines"),
   adapters: adaptersSchema.optional(),
+  review: reviewSchema.optional(),
   ignore: z.array(z.string()).default([]),
   commit: z.array(z.string()).default([]),
 });

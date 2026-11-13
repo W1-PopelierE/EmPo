@@ -20,6 +20,12 @@ empo review $ARGUMENTS
 `$ARGUMENTS` is a pull request id, or nothing at all to review the local diff against the base
 ref. `--base <ref>` pins the comparison, which matters on a stacked pull request.
 
+Two more words are for you and not for the CLI. **`--auto`** runs the narrowed next round
+without asking, and **`--inline`** posts every survivor on a pull request as an inline comment
+without asking, each as described below. Take both out of `$ARGUMENTS` before you run any
+`empo` command: everywhere below, `$ARGUMENTS` means what is left. `empo review` refuses an
+option it does not know, so one you forgot to take out stops the run with `unknown option`.
+
 Redirect the output to a file and read that file in sections. Never pipe it through `head`,
 `more` or anything else that exits early: the reader exits, the write upstream of it takes
 SIGPIPE and dies, and the file keeps only the lines that got through, with nothing said. The
@@ -68,6 +74,12 @@ the base again the way a first round does, with none of that applied, for when t
 has the wrong subject, and `empo review --reset` forgets every gated round on this branch and
 starts clean. The gate is what records a round, so a round that skipped phase 2 is a round
 the next review will not skip over.
+
+**With `--auto` among the arguments, skip the question below.**
+Ask nothing about rounds: run `empo review $ARGUMENTS` straight away, which narrows to the
+next round by itself where there are gated rounds and is round one where there are none.
+Never add `--whole` or `--reset` on your own initiative; they are for when the user asks for
+them by name.
 
 **Ask before you choose between them, and ask first of all.** Start with:
 
@@ -121,6 +133,13 @@ end when the gate prints: it ends when they have told you what to do with each s
 Wait until the whole review is actually finished before you ask. Phase 2 has printed, every
 check you dispatched has come back, and the report is written. A question asked while a check
 is still out is a question asked about a finding list that is about to change.
+
+**With `--inline` among the arguments and a pull request under review, post them all.**
+Ask nothing about the findings there: once the review is finished, run
+`empo review <pr> --findings <path> --post` with the findings file phase 2 read,
+which posts the whole verified set as inline comments from inside the gate, then report what
+was posted. Change no line of their branch. A local diff has no pull request to comment on, so
+there, and only there, ask as follows.
 
 Then ask **one question per finding**, using your host's multiple-choice prompt
 (`AskUserQuestion` in Claude Code, `ask_user_question` in Codex). Address each finding by the
