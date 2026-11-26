@@ -230,7 +230,8 @@ which every report of it says in as many words.
 Codebases have conventions that make correct code look buggy from a diff (a framework that writes
 through property setters so a narrow allow-list is irrelevant; a base class that supplies a scope
 the model does not show). Each confirmed false positive is appended to `.empo/conventions.md` with
-the rule that makes it a non-issue. The register starts empty and grows per review, which is what
+the rule that makes it a non-issue, or, where the config's `conventions` names a directory of
+Boost rules such as `.ai/rules`, to the rule file for the code it is about (docs/03-config-schema.md). The register starts empty and grows per review, which is what
 makes EmPo better the longer a team uses it. Before flagging, check the register.
 
 ### 6. Ticket-fit grading

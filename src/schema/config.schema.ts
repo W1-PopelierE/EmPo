@@ -289,6 +289,13 @@ export const configSchema = z.strictObject({
   bridges: z.array(bridgeSchema).default([]),
   flows: z.string().default(".empo/flows.json"),
   spines: z.string().default(".empo/spines"),
+  /**
+   * The false-positive register a review reads before it flags anything and appends to. A file is
+   * one register; a directory, such as `.ai/rules`, holds it as Laravel Boost project rules: one
+   * Markdown file per area with the globs it applies to as `paths`, listed in its `index.md`, which
+   * every agent tool reads too.
+   */
+  conventions: z.string().default(".empo/conventions.md"),
   adapters: adaptersSchema.optional(),
   review: reviewSchema.optional(),
   ignore: z.array(z.string()).default([]),

@@ -622,6 +622,25 @@ function querySkill(config: EmpoConfig): string[] {
  * User-invoked only: a review is a deliberate act with a cost, and one that starts itself because
  * a diff was mentioned is one nobody asked for.
  */
+/**
+ * How the review skill names the false-positive register the config points at: one file, or a
+ * directory of Laravel Boost project rules (`conventions` set to such as `.ai/rules`), where a
+ * settled false positive goes in the rule file for the code it is about.
+ */
+function register(config: EmpoConfig): { read: string; append: string } {
+  const path = config.conventions;
+  if (path.endsWith(".md")) {
+    return { read: `\`${path}\``, append: `append it to \`${path}\` as the register describes` };
+  }
+  return {
+    read: `the rule files \`${path}/index.md\` lists for the files this change touches`,
+    append:
+      `add it to the rule file in \`${path}\` whose \`paths\` cover that code, or a new one with ` +
+      `\`paths\` in its front matter where none does, and list it in \`${path}/index.md\` ` +
+      "(in a Laravel app with Boost, `php artisan boost:index-rules` writes the index)",
+  };
+}
+
 function reviewSkill(config: EmpoConfig): string[] {
   return [
     ...frontmatter(
@@ -683,7 +702,7 @@ function reviewSkill(config: EmpoConfig): string[] {
     "because the variable does not outlive the command, and the path is what you page through.",
     "",
     "If you dispatch sub-agents, start the ticket fetch, the CI read and the read of",
-    "`.empo/conventions.md` in the same message that runs the command. None of the three needs",
+    `${register(config).read} in the same message that runs the command. None of the three needs`,
     "anything the command prints, so holding them until the brief arrives buys nothing. What",
     "overlaps is the waiting and never the reading order: the discipline still has you read the",
     "ticket before the diff, and a fetch in flight is not permission to open the diff.",
@@ -736,7 +755,7 @@ function reviewSkill(config: EmpoConfig): string[] {
     "to the path it names and run the line it gives you.",
     "A finding that has not been through phase 2 has not been verified, whatever it claims.",
     "",
-    "Read `.empo/conventions.md` before flagging anything. It is the register of what this team has",
+    `Read ${register(config).read} before flagging anything. It is the register of what this team has`,
     "already judged correct as it stands, and a review that raises a settled question twice is how",
     "a review stops being read.",
     "",
@@ -794,7 +813,7 @@ function reviewSkill(config: EmpoConfig): string[] {
     "",
     "Your host's prompt always leaves room for an answer you did not offer, and that is the answer",
     'worth having: it is where "this is a false positive, and here is why" arrives. When one does,',
-    "append it to `.empo/conventions.md` as the register describes, so the next review does not",
+    `${register(config).append}, so the next review does not`,
     "raise it again.",
     "",
     "Collect every answer before you change a line. Then do only what was chosen, and leave the",

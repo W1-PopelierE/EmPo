@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { createForge, type HostPullRequestInput } from "../adapters/forge/create";
 import { type ForgeAdapter, hasCapability, type PullRequest } from "../adapters/forge/types";
@@ -409,7 +417,7 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
                   round: since.last.round,
                   radiusFiles: radiusFiles(graph, facts, changed.files),
                 },
-          conventions: conventionsFacts(repoRoot),
+          conventions: conventionsFacts(repoRoot, config),
           findingsPath: join(sessionDir(repoRoot, id), "findings.json"),
           workflow: options.workflow === false ? null : reviewWorkflow(),
           caveat: FLOOR_NOT_CEILING,
@@ -436,6 +444,7 @@ function briefPhase(repoRoot: string, pr: string | undefined, options: ReviewOpt
     curated: curated.length,
     ticketDeclined: options.ticket === false,
     notes,
+    conventions: conventionsFacts(repoRoot, config),
   });
 
   if (options.workflow !== false) {
@@ -1117,6 +1126,8 @@ interface BriefView {
   /** `--no-ticket`: the agent was asked for a named ticket and answered that it cannot get it. */
   ticketDeclined: boolean;
   notes: string[];
+  /** The false-positive register the config names, and how many entries it holds. */
+  conventions: { path: string; entries: number };
 }
 
 function printBrief(repoRoot: string, graph: Graph, view: BriefView): void {
@@ -1162,7 +1173,7 @@ function printBrief(repoRoot: string, graph: Graph, view: BriefView): void {
   printFlows(facts);
   printSpines(view.spines, view.curated);
   printTests(graph, facts);
-  printConventions(repoRoot);
+  printConventions(view.conventions);
 
   console.log("");
   // The same block `empo query` prints, and for the same reason: every fact above this line came out
@@ -1971,17 +1982,26 @@ function printTests(graph: Graph, facts: FileFacts[]): void {
   }
 }
 
-function conventionsFacts(repoRoot: string): { path: string; entries: number } {
-  const path = join(repoRoot, ".empo/conventions.md");
-  if (!existsSync(path)) return { path: ".empo/conventions.md", entries: 0 };
-  const entries = readFileSync(path, "utf8")
-    .split("\n")
+export function conventionsFacts(
+  repoRoot: string,
+  config: EmpoConfig,
+): { path: string; entries: number } {
+  const register = config.conventions;
+  const path = join(repoRoot, register);
+  if (!existsSync(path)) return { path: register, entries: 0 };
+  // A directory of rules, as Laravel Boost keeps them: every rule file but the index counts.
+  const files = statSync(path).isDirectory()
+    ? readdirSync(path)
+        .filter((name) => name.endsWith(".md") && name !== "index.md")
+        .map((name) => join(path, name))
+    : [path];
+  const entries = files
+    .flatMap((file) => readFileSync(file, "utf8").split("\n"))
     .filter((line) => line.startsWith("- ") || line.startsWith("## ")).length;
-  return { path: ".empo/conventions.md", entries };
+  return { path: register, entries };
 }
 
-function printConventions(repoRoot: string): void {
-  const facts = conventionsFacts(repoRoot);
+function printConventions(facts: { path: string; entries: number }): void {
   console.log("");
   console.log("false-positive register");
   if (facts.entries === 0) {

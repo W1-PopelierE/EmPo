@@ -264,6 +264,16 @@ crosses a language ([05-graph-model](05-graph-model.md)), which is why every com
 left to config, the edge would exist only where somebody already knew to ask for it, which is exactly
 where it teaches nothing.
 
+### `conventions` (optional)
+
+Where the false-positive register lives (docs/07-review-discipline.md), `.empo/conventions.md` by
+default. A path ending in `.md` is one register file. Any other path is a directory of Laravel Boost
+project rules, such as `.ai/rules`: one Markdown file per area with the globs it applies to as
+`paths` in its front matter, listed in the directory's `index.md`. A review then reads the rule
+files the index lists for the files a change touches, and puts a settled false positive in the rule
+file whose `paths` cover that code. Every coding agent that reads a repository's Boost rules reads
+the same register, so a team keeps it in one place.
+
 ### `adapters` (optional)
 
 Two adapters, each pluggable. Absent adapters degrade gracefully: no `forge` means `empo review`
