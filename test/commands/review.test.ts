@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { indexCommand } from "../../src/commands/index";
 import {
+  conventionsFacts,
   narrowToChangedLines,
   type ReviewOptions,
   reviewableFiles,
@@ -25,6 +26,7 @@ import {
 } from "../../src/commands/review";
 import type { ReviewFinding } from "../../src/discipline/findings";
 import { reviewWorkflow } from "../../src/discipline/load";
+import { parseConfig } from "../../src/engine/config";
 import type { ChangedFile } from "../../src/engine/diff";
 import { run } from "../../src/engine/git";
 import { GRAPH_PATH, GRAPH_SCHEMA, graphPath, serializeGraph } from "../../src/engine/graph";
@@ -3767,5 +3769,46 @@ describe("round awareness", () => {
     expectEmpoError(2, () =>
       reviewCommand(repo, undefined, { rounds: true, findings: findingsPathOf(repo) }),
     );
+  });
+});
+
+describe("the false-positive register", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "empo-register-test-"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const config = (conventions?: string) =>
+    parseConfig(
+      {
+        version: 1,
+        packs: { php: { version: "^1" } },
+        roots: [{ path: ".", lang: "php" }],
+        ...(conventions === undefined ? {} : { conventions }),
+      },
+      "a test config",
+    );
+
+  test("is .empo/conventions.md unless the config names another", () => {
+    mkdirSync(join(dir, ".empo"), { recursive: true });
+    writeFileSync(join(dir, ".empo/conventions.md"), "# Register\n\n## A pattern\n\n- another\n");
+
+    expect(conventionsFacts(dir, config())).toEqual({ path: ".empo/conventions.md", entries: 2 });
+  });
+
+  test("counts the entries of every rule in a directory of Boost rules, not its index", () => {
+    mkdirSync(join(dir, ".ai/rules"), { recursive: true });
+    writeFileSync(join(dir, ".ai/rules/index.md"), "| Applies to | Rule file |\n- not an entry\n");
+    writeFileSync(
+      join(dir, ".ai/rules/conventions-http.md"),
+      '---\npaths:\n  - "app/Http/**"\n---\n\n## A pattern\n\n- why\n',
+    );
+    writeFileSync(
+      join(dir, ".ai/rules/conventions-models.md"),
+      '---\npaths:\n  - "app/Models/**"\n---\n\n## Another\n',
+    );
+
+    expect(conventionsFacts(dir, config(".ai/rules"))).toEqual({ path: ".ai/rules", entries: 3 });
   });
 });

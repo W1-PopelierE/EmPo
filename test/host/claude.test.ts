@@ -426,6 +426,22 @@ describe("the generated skills", () => {
     expect(skill).toContain(".empo/conventions.md");
   });
 
+  test("empo-review reads and grows a register of Boost rules when the config names a directory", () => {
+    // `.ai/rules` is where every agent tool reads a team's rules, so one register serves them all.
+    const skill = renderSkill(
+      "empo-review",
+      make({ roots: [{ path: ".", lang: "php" }], conventions: ".ai/rules" }),
+    );
+
+    expect(skill).toContain(
+      "the rule files `.ai/rules/index.md` lists for the files this change touches",
+    );
+    // A settled false positive goes in the rule for the code it is about, and the index is kept.
+    expect(skill).toContain("whose `paths` cover that code");
+    expect(skill).toContain("php artisan boost:index-rules");
+    expect(skill).not.toContain(".empo/conventions.md");
+  });
+
   test("empo-review answers a teammate's pull request in comments, not by editing their branch", () => {
     // Most reviews are of somebody else's work, where the verb is not "fix" at all. A menu that
     // only offers fixing turns every review of a teammate into a rewrite of their branch.
